@@ -4,9 +4,10 @@
 // models. See docs/design.md for the full design.
 //
 // Modes:
-//   dsc                — launch the TUI (wave 3, not yet wired)
-//   dsc -p "prompt"    — one-shot prompt to stdout (works today)
-//   dsc -version       — print version and exit
+//
+//	dsc                — launch the TUI (wave 3, not yet wired)
+//	dsc -p "prompt"    — one-shot prompt to stdout (works today)
+//	dsc -version       — print version and exit
 package main
 
 import (
@@ -15,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
@@ -40,6 +43,16 @@ func main() {
 }
 
 func run() error {
+	// Subcommand: dsc doctor. Doctor prints its own report; exit(1) on
+	// failure so main doesn't print "dsc: doctor failed" on top.
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		cfg, loadErr := config.Load()
+		if err := runDoctor(cfg, loadErr); err != nil {
+			os.Exit(1)
+		}
+		return nil
+	}
+
 	var (
 		showVersion bool
 		yolo        bool
@@ -51,6 +64,7 @@ func run() error {
 		continueSes bool
 		resumeSes   string
 		prompt      string
+		debug       bool
 	)
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&yolo, "yolo", false, "auto-approve all tool calls (DANGEROUS)")
@@ -62,6 +76,7 @@ func run() error {
 	flag.BoolVar(&continueSes, "c", false, "continue last session in cwd")
 	flag.StringVar(&resumeSes, "r", "", "resume session by ID (empty opens picker)")
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
+	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
 	flag.Parse()
 
 	if showVersion {
@@ -94,17 +109,32 @@ func run() error {
 		}
 	}
 
-	if prompt != "" {
+	// Logging mode depends on whether we'll own the terminal. TUI mode
+	// must NOT write to stderr — that corrupts Bubble Tea's AltScreen.
+	tuiMode := prompt == ""
+	cwd, _ := os.Getwd()
+	logMode := logging.ModeCLI
+	if tuiMode {
+		logMode = logging.ModeTUI
+	}
+	logging.Setup(debug, logMode, cwd)
+	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
+
+	if !tuiMode {
 		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll})
 	}
 
-	return runTUI(cfg, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll})
+	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll}, newSession, continueSes, resumeSes)
 }
 
 // runTUI launches the Bubble Tea TUI. Persistence (session store +
 // snapshot manager) is best-effort: if the store can't open, the TUI
 // still runs in ephemeral mode so the user always gets *something*.
-func runTUI(cfg config.Config, mf modeFlags) error {
+//
+// All user-facing notices route through tui.Config.StartupNotices and
+// agent.Callbacks.OnInfo so nothing writes to stderr after this point —
+// stderr writes would corrupt Bubble Tea's AltScreen.
+func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, continueSes bool, resumeSes string) error {
 	client := llm.NewClient(cfg.API.Key, cfg.API.BaseURL)
 	if cfg.API.FirstTokenTimeoutMs > 0 {
 		client.FirstTokenTimeout = time.Duration(cfg.API.FirstTokenTimeoutMs) * time.Millisecond
@@ -125,13 +155,20 @@ func runTUI(cfg config.Config, mf modeFlags) error {
 	case mf.askAll:
 		mode = permissions.ModeAskAll
 	}
-	cwd, _ := os.Getwd()
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash)
 
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
 	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
+
+	// Route retry notices through OnInfo so they appear as chat items
+	// instead of stderr writes that would corrupt the TUI.
+	client.OnRetry = func(attempt int, err error) {
+		if a.Callbacks.OnInfo != nil {
+			a.Callbacks.OnInfo(fmt.Sprintf("retry %d/%d: %v", attempt, client.MaxRetries, err))
+		}
+	}
 
 	if cfg.Duet.Enabled {
 		validator := agent.NewProValidator(client, config.ModelPro)
@@ -143,26 +180,70 @@ func runTUI(cfg config.Config, mf modeFlags) error {
 		a.Validator = nil
 	}
 
-	// Persistence (best effort).
-	var sessionID string
-	var undoFn func(int) (int, error)
-	var listFn func() ([]session.Session, error)
-	var setModelFn func(string) error
+	// Persistence (best effort). Notices are collected and rendered at
+	// TUI startup, not written to stderr.
+	var (
+		sessionID  string
+		undoFn     func(int) (int, error)
+		listFn     func() ([]session.Session, error)
+		setModelFn func(string) error
+		notices    []string
+	)
 
 	store, err := session.Open("")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "warning: session store unavailable:", err)
+		notices = append(notices, "warning: session store unavailable: "+err.Error())
 	} else {
-		snapDir := ".deepseek/snapshots"
-		snaps := snapshots.New(snapDir)
+		snaps := snapshots.New(".deepseek/snapshots")
 		ctx := context.Background()
-		sess, err := store.NewSession(ctx, cwd, cfg.Defaults.Model, cfg.Duet.Enabled)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "warning: creating session:", err)
-		} else {
+
+		// Resolve session: --new skips resume; -r <id> > -c (last in cwd).
+		var sess session.Session
+		if !newSession {
+			switch {
+			case resumeSes != "":
+				sess, err = store.GetSession(ctx, resumeSes)
+				if err != nil {
+					notices = append(notices, fmt.Sprintf("warning: session %s not found, creating new", resumeSes))
+				}
+			case continueSes:
+				sess, err = store.MostRecentInProject(ctx, cwd)
+				if err != nil {
+					notices = append(notices, "warning: no previous session in cwd, creating new")
+				}
+			}
+		}
+
+		if sess.ID == "" {
+			sess, err = store.NewSession(ctx, cwd, cfg.Defaults.Model, cfg.Duet.Enabled)
+			if err != nil {
+				notices = append(notices, "warning: creating session: "+err.Error())
+			}
+		}
+
+		if sess.ID != "" {
 			persister := session.NewPersister(store, snaps, sess.ID)
 			a.Persister = persister
 			sessionID = sess.ID
+
+			if continueSes || resumeSes != "" {
+				msgs, loadErr := store.Replay(ctx, sess.ID)
+				if loadErr != nil {
+					notices = append(notices, "warning: loading messages: "+loadErr.Error())
+				} else {
+					for _, m := range msgs {
+						a.Messages = append(a.Messages, llm.Message{
+							Role:       m.Role,
+							Content:    m.Content,
+							ToolCalls:  m.ToolCalls,
+							ToolCallID: m.ToolCallID,
+						})
+					}
+					if len(msgs) > 0 {
+						notices = append(notices, fmt.Sprintf("resumed session %s (%d messages)", sess.ID[:8], len(msgs)))
+					}
+				}
+			}
 
 			// Drop a project pointer for `dsc -c`.
 			_ = os.MkdirAll(".deepseek", 0o755)
@@ -181,15 +262,16 @@ func runTUI(cfg config.Config, mf modeFlags) error {
 	}
 
 	app := tui.New(tui.Config{
-		Agent:        a,
-		Model:        cfg.Defaults.Model,
-		Thinking:     cfg.Defaults.Thinking,
-		Theme:        cfg.Defaults.Theme,
-		Cwd:          cwd,
-		SessionID:    sessionID,
-		UndoFn:       undoFn,
-		ListSessions: listFn,
-		SetModelFn:   setModelFn,
+		Agent:          a,
+		Model:          cfg.Defaults.Model,
+		Thinking:       cfg.Defaults.Thinking,
+		Theme:          cfg.Defaults.Theme,
+		Cwd:            cwd,
+		SessionID:      sessionID,
+		UndoFn:         undoFn,
+		ListSessions:   listFn,
+		SetModelFn:     setModelFn,
+		StartupNotices: notices,
 	})
 	return app.Run()
 }
@@ -211,6 +293,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	if cfg.API.ChunkStallTimeoutMs > 0 {
 		client.ChunkStallTimeout = time.Duration(cfg.API.ChunkStallTimeoutMs) * time.Millisecond
+	}
+	client.OnRetry = func(attempt int, err error) {
+		fmt.Fprintf(os.Stderr, "\n\033[33m[retry %d/%d: %v]\033[0m\n", attempt, client.MaxRetries, err)
 	}
 
 	reg := tools.New()

@@ -73,6 +73,9 @@ type App struct {
 
 	// Wiring back to the tea.Program for callbacks running off the UI loop
 	send func(tea.Msg)
+
+	// Notices shown once at startup (resume confirmation, warnings).
+	startupNotices []string
 }
 
 // Config bundles construction params for New.
@@ -88,6 +91,11 @@ type Config struct {
 	UndoFn       func(n int) (int, error)
 	ListSessions func() ([]session.Session, error)
 	SetModelFn   func(model string) error
+
+	// StartupNotices are shown as info chat items at TUI start. Used for
+	// resume confirmations, warnings about degraded persistence, etc. —
+	// anything the caller would have written to stderr in CLI mode.
+	StartupNotices []string
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
@@ -106,18 +114,19 @@ func New(cfg Config) *App {
 	vp.MouseWheelEnabled = true
 
 	app := &App{
-		agent:        cfg.Agent,
-		model:        cfg.Model,
-		thinking:     cfg.Thinking,
-		cwd:          cfg.Cwd,
-		theme:        PickTheme(cfg.Theme),
-		keymap:       defaultKeymap(),
-		vp:           vp,
-		input:        ta,
-		sessionID:    cfg.SessionID,
-		undoFn:       cfg.UndoFn,
-		listSessions: cfg.ListSessions,
-		setModelFn:   cfg.SetModelFn,
+		agent:          cfg.Agent,
+		model:          cfg.Model,
+		thinking:       cfg.Thinking,
+		cwd:            cfg.Cwd,
+		theme:          PickTheme(cfg.Theme),
+		keymap:         defaultKeymap(),
+		vp:             vp,
+		input:          ta,
+		sessionID:      cfg.SessionID,
+		undoFn:         cfg.UndoFn,
+		listSessions:   cfg.ListSessions,
+		setModelFn:     cfg.SetModelFn,
+		startupNotices: cfg.StartupNotices,
 		status: statusState{
 			model:    cfg.Model,
 			thinking: cfg.Thinking,
@@ -193,6 +202,9 @@ func (a *App) Init() tea.Cmd {
 		kind: itemInfo,
 		text: "deepseekcode — DeepSeek-native coding agent. Type a prompt and press Enter.",
 	})
+	for _, n := range a.startupNotices {
+		a.appendItem(chatItem{kind: itemInfo, text: n})
+	}
 	return textarea.Blink
 }
 

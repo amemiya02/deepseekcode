@@ -233,10 +233,11 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 				} else {
 					for _, m := range msgs {
 						a.Messages = append(a.Messages, llm.Message{
-							Role:       m.Role,
-							Content:    m.Content,
-							ToolCalls:  m.ToolCalls,
-							ToolCallID: m.ToolCallID,
+							Role:             m.Role,
+							Content:          m.Content,
+							ReasoningContent: m.ReasoningContent,
+							ToolCalls:        m.ToolCalls,
+							ToolCallID:       m.ToolCallID,
 						})
 					}
 					if len(msgs) > 0 {

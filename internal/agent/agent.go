@@ -253,12 +253,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Persist the assistant turn (text + tool_calls; reasoning_content is
-	// rendered via callbacks and stored separately by the session layer).
+	// Persist the assistant turn. ReasoningContent must round-trip back to
+	// the API on the next request — DeepSeek's thinking mode rejects the
+	// next turn with a 400 if the prior assistant message's reasoning is
+	// missing. Echoing the empty string when thinking is off is harmless
+	// (omitempty drops the field).
 	a.Messages = append(a.Messages, llm.Message{
-		Role:      "assistant",
-		Content:   text,
-		ToolCalls: assembledCall,
+		Role:             "assistant",
+		Content:          text,
+		ReasoningContent: reasoning,
+		ToolCalls:        assembledCall,
 	})
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendAssistant(context.Background(), text, reasoning, assembledCall, a.Model, usage)

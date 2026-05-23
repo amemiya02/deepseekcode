@@ -21,6 +21,44 @@ func TestThinkingSerializesAsStruct(t *testing.T) {
 	}
 }
 
+// TestReasoningContentRoundtrips pins the fix for DeepSeek's 400
+// "reasoning_content in the thinking mode must be passed back to the
+// API." The assistant message's reasoning_content must serialize when
+// non-empty so the model can continue the next turn coherently. When
+// empty (thinking off), omitempty drops it.
+func TestReasoningContentRoundtrips(t *testing.T) {
+	req := Request{
+		Model: "deepseek-v4-flash",
+		Messages: []Message{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "ok", ReasoningContent: "let me think"},
+		},
+	}
+	b, err := req.MarshalCacheStable()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !bytes.Contains(b, []byte(`"reasoning_content":"let me think"`)) {
+		t.Fatalf("reasoning_content missing from serialization: %s", b)
+	}
+}
+
+func TestReasoningContentOmittedWhenEmpty(t *testing.T) {
+	req := Request{
+		Model: "deepseek-v4-flash",
+		Messages: []Message{
+			{Role: "assistant", Content: "ok"},
+		},
+	}
+	b, err := req.MarshalCacheStable()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"reasoning_content"`) {
+		t.Fatalf("expected reasoning_content omitted when empty; got: %s", b)
+	}
+}
+
 func TestThinkingNilOmitted(t *testing.T) {
 	req := Request{
 		Model:    "deepseek-v4-flash",

@@ -29,6 +29,7 @@ func TestRenderTrailingNewline(t *testing.T) {
 		{"info", chatItem{kind: itemInfo, text: "hi"}},
 		{"step finish", chatItem{kind: itemStepFinish, model: "deepseek-v4-flash"}},
 		{"error", chatItem{kind: itemError, text: "boom"}},
+		{"welcome wide", chatItem{kind: itemWelcome}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -168,6 +169,31 @@ func TestRebindStopsAtStepFinish(t *testing.T) {
 	a.rebindStreamPointers()
 	if a.streamText != nil {
 		t.Errorf("streamText must be nil after stepFinish; got %+v", *a.streamText)
+	}
+}
+
+// TestWelcomeRenders sanity-checks that the startup banner contains
+// both the mascot signature and the wordmark when the terminal is
+// wide enough.
+func TestWelcomeRenders(t *testing.T) {
+	out := renderWelcome(DarkTheme(), 100)
+	if !strings.Contains(out, "~~~~") {
+		t.Errorf("expected whale waterline in welcome; got %q", out)
+	}
+	if !strings.Contains(out, "DeepSeek") {
+		t.Errorf("expected 'DeepSeek' tagline in welcome; got %q", out)
+	}
+}
+
+// TestWelcomeNarrowFallback ensures narrow terminals get a compact
+// greeting instead of a wrapped ASCII art.
+func TestWelcomeNarrowFallback(t *testing.T) {
+	out := renderWelcome(DarkTheme(), 40)
+	if strings.Count(out, "\n") > 2 {
+		t.Errorf("narrow fallback should be at most two lines; got %q", out)
+	}
+	if !strings.Contains(out, "deepseekcode") {
+		t.Errorf("narrow fallback missing name; got %q", out)
 	}
 }
 

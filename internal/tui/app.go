@@ -202,11 +202,11 @@ func (a *App) runAgent(prompt string) {
 	a.send(agentDoneMsg{Reason: reason, Err: err})
 }
 
-// Init satisfies tea.Model.
+// Init satisfies tea.Model. The first scrollback entry is an ASCII
+// welcome banner (whale mascot + DEEPSEEKCODE wordmark); startup
+// notices like resume confirmations follow.
 func (a *App) Init() tea.Cmd {
-	// No standing welcome line — the input placeholder is the call to
-	// action. Startup notices (resume confirmations, persistence
-	// warnings) still get surfaced because they carry real information.
+	a.appendItem(chatItem{kind: itemWelcome})
 	for _, n := range a.startupNotices {
 		a.appendItem(chatItem{kind: itemInfo, text: n})
 	}

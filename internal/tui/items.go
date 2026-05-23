@@ -25,6 +25,7 @@ const (
 	itemInfo
 	itemStepFinish
 	itemError
+	itemWelcome
 )
 
 // chatItem is one rendered entry in the scrollback. We keep raw fields
@@ -135,6 +136,8 @@ func (i chatItem) render(t Theme, width int) string {
 		return t.Status.Render(label) + "\n"
 	case itemError:
 		return t.Error.Render("error: "+i.text) + "\n"
+	case itemWelcome:
+		return renderWelcome(t, width)
 	}
 	return ""
 }

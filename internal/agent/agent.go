@@ -69,19 +69,29 @@ type Agent struct {
 	// DuetExtraDestructive is the user's extra destructive regex list.
 	DuetExtraDestructive []string
 
-	steps []StepRecord
+	// StepTimeout, if non-zero, caps the duration of a single step
+	// (one model turn + tool execution). 0 = no per-step limit.
+	StepTimeout time.Duration
+
+	// MaxToolCalls is the hard cap on total tool calls per session.
+	// Warns at 80% via OnInfo. 0 = unlimited.
+	MaxToolCalls int
+
+	toolCallCount int
+	steps         []StepRecord
 }
 
 // New returns an Agent with sensible defaults for v0.1.
 func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model string) *Agent {
 	return &Agent{
-		Client:      client,
-		Tools:       reg,
-		Permissions: pol,
-		Validator:   NopValidator{}, // wave-5 replaces
-		Model:       model,
-		Thinking:    true,
-		System:      DefaultSystemPrompt,
+		Client:       client,
+		Tools:        reg,
+		Permissions:  pol,
+		Validator:    NopValidator{}, // wave-5 replaces
+		Model:        model,
+		Thinking:     true,
+		System:       DefaultSystemPrompt,
+		MaxToolCalls: 200,
 		StopWhen: []StopCondition{
 			MaxSteps(50),
 			LoopDetection(5, 3),
@@ -130,8 +140,17 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) 
 		default:
 		}
 
-		step, err := a.runStep(ctx)
+		// Per-step deadline covers BOTH the model turn and tool execution.
+		// stepCancel is always non-nil so we can defer it unconditionally.
+		stepCtx, stepCancel := stepContext(ctx, a.StepTimeout)
+
+		step, err := a.runStep(stepCtx)
 		if err != nil {
+			stepCancel()
+			if a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded) {
+				a.fire(func() { a.Callbacks.OnInfo(fmt.Sprintf("step timed out after %s", a.StepTimeout)) })
+				return StopUnknown, nil
+			}
 			return StopUnknown, err
 		}
 		a.steps = append(a.steps, step)
@@ -144,23 +163,37 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) 
 		// check so loop-detection can fire on tool-emitting steps too.
 		for _, sc := range a.StopWhen {
 			if stop, reason := sc(a.steps); stop {
+				stepCancel()
 				a.fire(func() { a.Callbacks.OnStepFinish(reason, step.Usage) })
 				return reason, nil
 			}
 		}
 
 		if !hasTools {
+			stepCancel()
 			a.fire(func() { a.Callbacks.OnStepFinish(StopModelDone, step.Usage) })
 			return StopModelDone, nil
 		}
 
-		// Execute tool calls (in parallel where possible) with permission
-		// + duet gating. Results are appended to messages.
-		if err := a.runToolCalls(ctx, step.ToolCalls); err != nil {
-			return StopUnknown, err
+		// Tool execution shares the per-step deadline so a stuck tool
+		// can't run forever.
+		toolErr := a.runToolCalls(stepCtx, step.ToolCalls)
+		stepCancel()
+		if toolErr != nil {
+			return StopUnknown, toolErr
 		}
 		a.fire(func() { a.Callbacks.OnStepFinish(StopUnknown, step.Usage) })
 	}
+}
+
+// stepContext returns (ctx, cancel) for one step. When timeout is zero
+// the parent context is reused and cancel is a no-op so the caller can
+// invoke it unconditionally.
+func stepContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 // runStep streams one model turn and aggregates events into a StepRecord.
@@ -317,6 +350,21 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result, error) {
 	a.fire(func() { a.Callbacks.OnToolCallStart(call) })
 
+	// Tool-call rate limit. Warning fires exactly once when crossing 80%
+	// of the cap; the hard cap blocks any call beyond MaxToolCalls.
+	a.toolCallCount++
+	if a.MaxToolCalls > 0 {
+		threshold := int(float64(a.MaxToolCalls) * 0.8)
+		if threshold > 0 && a.toolCallCount == threshold {
+			a.fire(func() {
+				a.Callbacks.OnInfo(fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls))
+			})
+		}
+		if a.toolCallCount > a.MaxToolCalls {
+			return tools.Errf("tool call limit reached (%d/%d)", a.toolCallCount, a.MaxToolCalls), nil
+		}
+	}
+
 	tool, ok := a.Tools.Get(call.Function.Name)
 	if !ok {
 		return tools.Errf("unknown tool: %s", call.Function.Name), nil
@@ -325,6 +373,11 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	rawArgs := json.RawMessage(call.Function.Arguments)
 	if len(rawArgs) == 0 {
 		rawArgs = json.RawMessage("{}")
+	}
+
+	// Validate tool-call arguments against the tool's JSON Schema.
+	if err := validateToolArgs(tool, rawArgs); err != nil {
+		return tools.Errf("invalid arguments for %s: %v", call.Function.Name, err), nil
 	}
 
 	// Permission gate.
@@ -375,7 +428,8 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		}
 		return tools.Result{}, err
 	}
-	return res, nil
+
+	return res.Truncate(tools.DefaultMaxResultBytes), nil
 }
 
 // isDestructive returns true if this tool call should be reviewed by
@@ -411,6 +465,35 @@ func (a *Agent) transcript() []byte {
 	}
 	b, _ := json.Marshal(a.Messages[start:])
 	return b
+}
+
+// validateToolArgs performs lightweight validation of tool-call arguments
+// against the tool's JSON Schema. It checks: (1) valid JSON, (2) is an
+// object, (3) required fields are present. This catches the most common
+// model mistakes without a full JSON Schema validator dependency.
+func validateToolArgs(t tools.Tool, args json.RawMessage) error {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(args, &m); err != nil {
+		return fmt.Errorf("arguments must be a JSON object: %w", err)
+	}
+
+	// Parse the tool's parameter schema to extract required fields.
+	schema := t.Parameters()
+	if len(schema) == 0 {
+		return nil
+	}
+	var s struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil // schema parsing failure is not the model's fault
+	}
+	for _, field := range s.Required {
+		if _, ok := m[field]; !ok {
+			return fmt.Errorf("missing required field: %s", field)
+		}
+	}
+	return nil
 }
 
 // fire safely invokes a Callback closure, no-op'ing on nil.

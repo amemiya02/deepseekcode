@@ -198,10 +198,9 @@ func (a *App) runAgent(prompt string) {
 
 // Init satisfies tea.Model.
 func (a *App) Init() tea.Cmd {
-	a.appendItem(chatItem{
-		kind: itemInfo,
-		text: "deepseekcode — DeepSeek-native coding agent. Type a prompt and press Enter.",
-	})
+	// No standing welcome line — the input placeholder is the call to
+	// action. Startup notices (resume confirmations, persistence
+	// warnings) still get surfaced because they carry real information.
 	for _, n := range a.startupNotices {
 		a.appendItem(chatItem{kind: itemInfo, text: n})
 	}

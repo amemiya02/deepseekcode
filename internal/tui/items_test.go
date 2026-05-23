@@ -63,3 +63,18 @@ func TestAssistantTextRendersMarkdown(t *testing.T) {
 		t.Errorf("expected ANSI escape codes from Glamour, got plain text: %q", out)
 	}
 }
+
+// TestHeadingPrefixesStripped pins the Claude-Code-style clean
+// heading rendering: no literal "### " or "## " noise before the
+// heading text. Bold + color still applies via the StylePrimitive.
+func TestHeadingPrefixesStripped(t *testing.T) {
+	src := "# H1\n## H2\n### H3\n#### H4\n"
+	item := chatItem{kind: itemAssistantText, text: src}
+	out := item.render(DarkTheme(), 80)
+
+	for _, marker := range []string{"# ", "## ", "### ", "#### "} {
+		if strings.Contains(out, marker) {
+			t.Errorf("heading prefix %q leaked into render: %q", marker, out)
+		}
+	}
+}

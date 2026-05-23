@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/muesli/reflow/wordwrap"
 )
 
@@ -23,6 +25,25 @@ var (
 	mdMu    sync.Mutex
 	mdCache = map[rendererKey]*glamour.TermRenderer{}
 )
+
+// cleanStyle returns a Glamour style with heading prefixes / suffixes
+// stripped. The shipped dark/light styles render H3 as literal "### "
+// before the heading text — useful as a visual cue for plain terminals
+// but visual noise in a TUI that already styles headings with bold +
+// color. We want Claude-Code-style clean headings.
+func cleanStyle(name string) ansi.StyleConfig {
+	var s ansi.StyleConfig
+	if name == "light" {
+		s = styles.LightStyleConfig
+	} else {
+		s = styles.DarkStyleConfig
+	}
+	for _, h := range []*ansi.StyleBlock{&s.H1, &s.H2, &s.H3, &s.H4, &s.H5, &s.H6} {
+		h.Prefix = ""
+		h.Suffix = ""
+	}
+	return s
+}
 
 // renderMarkdown turns markdown text into ANSI-styled output that fits
 // the given column width. Falls back to the raw text on any error so a
@@ -51,7 +72,7 @@ func getRenderer(style string, width int) *glamour.TermRenderer {
 		return r
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(style),
+		glamour.WithStyles(cleanStyle(style)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

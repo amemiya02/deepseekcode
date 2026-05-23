@@ -1,0 +1,27 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Local agent state (this binary writes here)
+.deepseek/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Coverage
+coverage.out
+coverage.html
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Per-project Claude state (parent dir uses this; we don't ship it)
+.omc/

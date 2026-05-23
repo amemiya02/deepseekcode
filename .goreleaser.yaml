@@ -1,0 +1,70 @@
+version: 2
+project_name: deepseekcode
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dsc
+    binary: dsc
+    main: ./cmd/dsc
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/amemiya02/deepseekcode/internal/version.Version={{.Version}}
+      - -X github.com/amemiya02/deepseekcode/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/amemiya02/deepseekcode/internal/version.BuildDate={{.Date}}
+
+archives:
+  - id: dsc
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}darwin
+      {{- else if eq .Os "linux"  }}linux
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}amd64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - docs/*.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - '^ci:'
+      - '^style:'
+
+# Homebrew tap. After your first release, create a github.com/<you>/homebrew-deepseekcode
+# repo and set GORELEASER_GITHUB_TOKEN. Until then, leave this commented out.
+# brews:
+#   - name: deepseekcode
+#     repository:
+#       owner: amemiya02
+#       name: homebrew-deepseekcode
+#     homepage: https://github.com/amemiya02/deepseekcode
+#     description: Terminal-native coding agent for DeepSeek models.
+#     license: MIT
+#     test: |
+#       system "#{bin}/dsc -version"

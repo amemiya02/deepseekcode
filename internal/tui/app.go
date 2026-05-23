@@ -322,10 +322,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.refreshView()
 	}
 
-	// Always update sub-models.
+	// Forward to sub-models. Mouse events are routed to the viewport only
+	// (for wheel scrolling); sending them to the textarea would let raw
+	// SGR escape sequences leak into the input box as garbled characters
+	// like "[<66;101;9M".
 	var c tea.Cmd
-	a.input, c = a.input.Update(msg)
-	cmds = append(cmds, c)
+	if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+		a.input, c = a.input.Update(msg)
+		cmds = append(cmds, c)
+	}
 	a.vp, c = a.vp.Update(msg)
 	cmds = append(cmds, c)
 	return a, tea.Batch(cmds...)

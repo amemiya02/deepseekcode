@@ -64,17 +64,21 @@ func (i chatItem) render(t Theme, width int) string {
 	case itemUser:
 		return t.UserPrompt.Render("> "+i.text) + "\n"
 	case itemAssistantText:
-		return t.AssistantText.Render(i.text)
+		// Trailing newline is load-bearing: without it the next chat
+		// item glues onto the last visual row of the assistant text and
+		// overflows past the viewport's right edge (showing as "[st" or
+		// similar truncation artifacts).
+		return t.AssistantText.Render(i.text) + "\n"
 	case itemReasoning:
 		if i.folded {
 			label := fmt.Sprintf("▸ thinking (%.1fs · ~%d tok)", i.duration.Seconds(), i.tokens)
-			return t.ReasoningFold.Render(label) + t.Hint.Render("  [r to expand]") + "\n"
+			return t.ReasoningFold.Render(label) + t.Hint.Render("  [^R to expand]") + "\n"
 		}
 		// expanded
 		body := wrap(i.reasoning, width-2)
 		return t.ReasoningFold.Render("▾ thinking") + "\n" +
 			t.Reasoning.Render(indent(body, "  ")) + "\n" +
-			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok)", i.duration.Seconds(), i.tokens)) + "\n"
+			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens)) + "\n"
 	case itemToolCall:
 		return t.ToolCall.Render(fmt.Sprintf("▶ %s(%s)", i.tool, oneline(i.args, 100))) + "\n"
 	case itemToolResult:

@@ -19,6 +19,11 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
+// DefaultMaxResultBytes is the upper bound on tool-result Content length
+// fed back to the model. Results exceeding this are truncated by the
+// agent loop so that a single tool call cannot flood the context window.
+const DefaultMaxResultBytes = 50000
+
 // Tool is the abstract built-in or MCP tool. Implementations are
 // expected to be safe to call from arbitrary goroutines.
 type Tool interface {

@@ -109,6 +109,68 @@ func TestCompactArgsTruncates(t *testing.T) {
 	}
 }
 
+// TestRebindStopsAtTurnBoundary pins the fix for the bug where a new
+// turn's text deltas were extending the previous turn's assistant-text
+// block — making the user prompt appear AFTER its own response in the
+// scrollback.
+func TestRebindStopsAtTurnBoundary(t *testing.T) {
+	a := &App{
+		items: []chatItem{
+			{kind: itemUser, text: "hello"},
+			{kind: itemAssistantText, text: "world"},
+			{kind: itemStepFinish, model: "x"},
+			{kind: itemUser, text: "what next"},
+		},
+	}
+	a.rebindStreamPointers()
+	if a.streamText != nil {
+		t.Errorf("streamText must be nil after a new user message; got pointer to %+v", *a.streamText)
+	}
+	if a.streamThink != nil {
+		t.Errorf("streamThink must be nil after a new user message; got pointer to %+v", *a.streamThink)
+	}
+}
+
+// TestRebindFindsCurrentTurnStream confirms the boundary fix did not
+// regress the legitimate case: when the most recent items belong to
+// the current in-progress turn, streamText must point to the trailing
+// assistant-text block so subsequent text deltas extend it correctly.
+func TestRebindFindsCurrentTurnStream(t *testing.T) {
+	a := &App{
+		items: []chatItem{
+			{kind: itemUser, text: "hello"},
+			{kind: itemReasoning, folded: true, reasoning: "thinking…"},
+			{kind: itemAssistantText, text: "partial"},
+		},
+	}
+	a.rebindStreamPointers()
+	if a.streamText == nil {
+		t.Fatalf("streamText should point at the trailing asst text item, got nil")
+	}
+	if a.streamText.text != "partial" {
+		t.Errorf("streamText should point at the 'partial' item; got %q", a.streamText.text)
+	}
+	if a.streamThink == nil || a.streamThink.reasoning != "thinking…" {
+		t.Errorf("streamThink should point at the reasoning item; got %+v", a.streamThink)
+	}
+}
+
+// TestRebindStopsAtStepFinish ensures multi-step ReAct flows don't
+// bleed text from a finished step into the next step's text block.
+func TestRebindStopsAtStepFinish(t *testing.T) {
+	a := &App{
+		items: []chatItem{
+			{kind: itemUser, text: "do X"},
+			{kind: itemAssistantText, text: "step1 reply"},
+			{kind: itemStepFinish, model: "x"},
+		},
+	}
+	a.rebindStreamPointers()
+	if a.streamText != nil {
+		t.Errorf("streamText must be nil after stepFinish; got %+v", *a.streamText)
+	}
+}
+
 func TestLineCount(t *testing.T) {
 	cases := []struct {
 		in   string

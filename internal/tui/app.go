@@ -454,6 +454,14 @@ func (a *App) appendItem(it chatItem) {
 
 // rebindStreamPointers reattaches streamText/streamThink to the last
 // in-progress item of each kind after a slice realloc.
+//
+// Iteration stops at the first non-streaming item — user prompt, step
+// finish, tool call/result, info, error, duet. Those mark the end of
+// any prior stream window, so we must NOT rebind past them. Without
+// this guard, a new turn's text deltas would extend the previous
+// turn's assistant-text block (which sits BEFORE the new user prompt
+// in the scrollback), making the new user line appear to render after
+// the response instead of before it.
 func (a *App) rebindStreamPointers() {
 	for i := len(a.items) - 1; i >= 0; i-- {
 		switch a.items[i].kind {
@@ -466,6 +474,8 @@ func (a *App) rebindStreamPointers() {
 				// still streaming reasoning if not yet ended
 				a.streamThink = &a.items[i]
 			}
+		default:
+			return
 		}
 	}
 }

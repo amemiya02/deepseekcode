@@ -77,11 +77,7 @@ func (p *pagerState) render(t Theme, width, height int) string {
 // solves this TUI-natively; this command gives users the *terminal*-
 // native answer when they want native copy/scroll behavior.
 func (a *App) openExternalPager() tea.Cmd {
-	var b strings.Builder
-	for _, it := range a.items {
-		b.WriteString(it.render(a.theme, a.width))
-	}
-	content := b.String()
+	content := a.scrollback.Render(a.theme, a.width)
 
 	f, err := os.CreateTemp("", "dsc-scrollback-*.txt")
 	if err != nil {

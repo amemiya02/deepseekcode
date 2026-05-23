@@ -50,16 +50,3 @@ func yankToClipboardCmd(text string) tea.Cmd {
 	}
 }
 
-// yankLastAssistantText finds the most recent itemAssistantText entry
-// and queues a clipboard write. Returns (bytesCopied, cmd). When no
-// assistant text exists yet, returns (0, nil) so the caller can show
-// a "nothing to copy" notice.
-func (a *App) yankLastAssistantText() (int, tea.Cmd) {
-	for i := len(a.items) - 1; i >= 0; i-- {
-		it := a.items[i]
-		if it.kind == itemAssistantText && it.text != "" {
-			return len(it.text), yankToClipboardCmd(it.text)
-		}
-	}
-	return 0, nil
-}

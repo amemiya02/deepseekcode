@@ -40,11 +40,11 @@ type App struct {
 	height int
 	mode   appMode
 
-	// Chat scrollback
-	items       []chatItem
-	streamText  *chatItem // pointer into items for in-progress assistant text
-	streamThink *chatItem // pointer into items for in-progress reasoning
-	thinkStart  time.Time
+	// Chat scrollback. Owns items, in-progress stream cursors, the
+	// rendered-line cache, and visual-mode selection. Mutations only
+	// through its methods — direct slice access is read-only.
+	scrollback *Scrollback
+	thinkStart time.Time // mirrored for chrome's startedAt
 
 	// Per-run cancellation
 	runMu     sync.Mutex
@@ -59,13 +59,6 @@ type App struct {
 
 	// Pager overlay (modal; takes the body band when non-nil).
 	pager *pagerState
-
-	// Visual mode selection. fullLines is the line-split of the current
-	// rendered viewport content; vis tracks the selection range. Both
-	// are maintained by refreshView so visual mode can operate on a
-	// consistent line index space even as new tokens stream in.
-	vis       visualState
-	fullLines []string
 
 	// Status
 	status    statusState
@@ -144,6 +137,7 @@ func New(cfg Config) *App {
 		keymap:         defaultKeymap(),
 		vp:             vp,
 		input:          ta,
+		scrollback:     NewScrollback(),
 		sessionID:      cfg.SessionID,
 		undoFn:         cfg.UndoFn,
 		listSessions:   cfg.ListSessions,
@@ -240,9 +234,9 @@ func (a *App) runAgent(prompt string) {
 // welcome banner (whale mascot + DEEPSEEKCODE wordmark); startup
 // notices like resume confirmations follow.
 func (a *App) Init() tea.Cmd {
-	a.appendItem(chatItem{kind: itemWelcome})
+	a.scrollback.AppendWelcome()
 	for _, n := range a.startupNotices {
-		a.appendItem(chatItem{kind: itemInfo, text: n})
+		a.scrollback.AppendInfo(n)
 	}
 	return textarea.Blink
 }
@@ -308,77 +302,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.chrome.phase = phaseThinking
 		a.chrome.startedAt = a.thinkStart
 		a.chrome.tokens = 0
-		it := chatItem{kind: itemReasoning, folded: true, timestamp: time.Now()}
-		a.appendItem(it)
-		a.streamThink = &a.items[len(a.items)-1]
+		a.scrollback.StartReasoning()
+		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
 	case reasoningDeltaMsg:
-		if a.streamThink != nil {
-			a.streamThink.reasoning += m.Text
-			a.streamThink.tokens = len(a.streamThink.reasoning) / 4
-			a.streamThink.duration = time.Since(a.thinkStart)
-			a.chrome.tokens = a.streamThink.tokens
-			a.dirty = true
-		}
+		a.chrome.tokens = a.scrollback.AppendReasoning(m.Text)
+		a.dirty = true
 	case reasoningEndMsg:
-		if a.streamThink != nil {
-			a.streamThink.duration = time.Since(a.thinkStart)
-			a.streamThink = nil
-		}
+		a.scrollback.EndReasoning()
 	case textDeltaMsg:
-		if a.streamText == nil {
+		created, toks := a.scrollback.AppendText(m.Text)
+		if created {
 			a.chrome.phase = phaseWriting
 			a.chrome.startedAt = time.Now()
 			a.chrome.tokens = 0
-			a.appendItem(chatItem{kind: itemAssistantText, timestamp: time.Now()})
-			a.streamText = &a.items[len(a.items)-1]
+			a.refreshView()
 			cmds = append(cmds, a.ensureTick())
 		}
-		a.streamText.text += m.Text
-		a.chrome.tokens = len(a.streamText.text) / 4
+		a.chrome.tokens = toks
 		a.dirty = true
 	case toolCallStartMsg:
-		a.streamText = nil // a new tool call ends any in-progress assistant text segment
 		a.chrome.phase = phaseTool
 		a.chrome.activeTool = m.Call.Function.Name
 		a.chrome.startedAt = time.Now()
-		a.appendItem(chatItem{
-			kind:       itemToolCall,
-			tool:       m.Call.Function.Name,
-			args:       m.Call.Function.Arguments,
-			toolCallID: m.Call.ID,
-			timestamp:  time.Now(),
-		})
+		a.scrollback.AppendToolCall(m.Call.ID, m.Call.Function.Name, m.Call.Function.Arguments)
+		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
 	case toolCallResultMsg:
-		// Find the matching tool call to attach duration; fall back to a
-		// standalone result item if not found.
-		tool := ""
-		for i := len(a.items) - 1; i >= 0; i-- {
-			if a.items[i].kind == itemToolCall && a.items[i].toolCallID == m.CallID {
-				tool = a.items[i].tool
-				break
-			}
-		}
-		a.appendItem(chatItem{
-			kind:       itemToolResult,
-			tool:       tool,
-			toolCallID: m.CallID,
-			result:     m.Result,
-			duration:   m.Dur,
-			timestamp:  time.Now(),
-		})
+		a.scrollback.AppendToolResult(m.CallID, m.Result, m.Dur)
+		a.refreshView()
 	case duetMsg:
-		a.appendItem(chatItem{
-			kind:          itemDuet,
-			toolCallID:    m.CallID,
-			approved:      m.Approved,
-			duetReasoning: m.Reasoning,
-			duration:      m.Dur,
-			timestamp:     time.Now(),
-		})
+		a.scrollback.AppendDuet(m.CallID, m.Approved, m.Reasoning, m.Dur)
 		a.status.duetActive = true
 		a.status.proCalls++
+		a.refreshView()
 	case stepFinishMsg:
 		a.stepTotal++
 		a.status.steps = a.stepTotal
@@ -387,15 +344,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.status.usage.PromptCacheHitTokens += m.Usage.PromptCacheHitTokens
 		a.status.usage.PromptCacheMissTokens += m.Usage.PromptCacheMissTokens
 		a.status.costYuan += llm.Cost(a.model, m.Usage)
-		a.appendItem(chatItem{
-			kind:       itemStepFinish,
-			stopReason: m.Reason.String(),
-			usage:      m.Usage,
-			model:      a.model,
-			timestamp:  time.Now(),
-		})
+		a.scrollback.AppendStepFinish(m.Reason.String(), m.Usage, a.model)
+		a.refreshView()
 	case infoMsg:
-		a.appendItem(chatItem{kind: itemInfo, text: m.Text, timestamp: time.Now()})
+		a.scrollback.AppendInfo(m.Text)
+		a.refreshView()
 	case permissionAskMsg:
 		a.pendingPerm = &m
 		a.permCursor = 0
@@ -404,10 +357,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// viewport — the permission card is the active surface now.
 		a.layout()
 	case agentErrMsg:
-		a.appendItem(chatItem{kind: itemError, text: m.Err.Error(), timestamp: time.Now()})
+		a.scrollback.AppendError(m.Err.Error())
+		a.refreshView()
 	case agentDoneMsg:
-		a.streamText = nil
-		a.streamThink = nil
+		a.scrollback.EndStreams()
 		a.chrome.reset()
 		a.refreshView()
 		a.dirty = false
@@ -553,7 +506,7 @@ func (a *App) renderOverlay() string {
 	var body string
 	switch a.overlay {
 	case modeTape:
-		body = renderTape(a.theme, a.items, a.overlayCursor, a.width, a.height-2)
+		body = renderTape(a.theme, a.scrollback.Items(), a.overlayCursor, a.width, a.height-2)
 	case modeModels:
 		body = renderModelsPicker(a.theme, a.models, a.overlayCursor, a.model, a.width, a.height-2)
 	case modeSessions:
@@ -606,75 +559,20 @@ func (a *App) layout() {
 	a.refreshView()
 }
 
-// refreshView re-renders the scrollback into the viewport content.
-// It preserves the user's scroll position: if the viewport was already
-// at the bottom, it auto-scrolls to show new content; if the user had
-// scrolled up to read history, the position is kept.
-//
-// Two extras for visual mode:
-//   - fullLines is cached so cursor moves and yank operations have a
-//     stable line-index space without re-splitting on every keystroke.
-//   - When visual mode is active, the [anchor,cursor] range is
-//     reverse-video styled before SetContent, and auto-scroll-to-
-//     bottom is suppressed so streaming output doesn't yank the
-//     cursor away from the user's selection.
+// refreshView pushes the scrollback's rendered content into the
+// viewport. Preserves scroll position: if the viewport was at the
+// bottom we auto-scroll; if the user has scrolled up we keep it.
+// Auto-scroll is suppressed while a selection is active so streaming
+// output doesn't yank focus away from what the user is highlighting.
 func (a *App) refreshView() {
 	if a.width == 0 {
 		return
 	}
 	wasAtBottom := a.vp.AtBottom()
-	var b strings.Builder
-	for _, it := range a.items {
-		b.WriteString(it.render(a.theme, a.width))
-	}
-	content := b.String()
-	a.fullLines = strings.Split(content, "\n")
-	if a.vis.active {
-		highlighted := a.applyVisualHighlight(a.fullLines)
-		content = strings.Join(highlighted, "\n")
-	}
+	content := a.scrollback.Render(a.theme, a.width)
 	a.vp.SetContent(content)
-	if wasAtBottom && !a.vis.active {
+	if wasAtBottom && !a.scrollback.SelectionActive() {
 		a.vp.GotoBottom()
-	}
-}
-
-// appendItem mutates items and re-renders.
-func (a *App) appendItem(it chatItem) {
-	a.items = append(a.items, it)
-	// Reset the streamText pointer if it pointed into items that may have moved.
-	// (append may reallocate; we always re-grab via index in callers that need it.)
-	a.streamText = nil
-	a.streamThink = nil
-	a.rebindStreamPointers()
-	a.refreshView()
-}
-
-// rebindStreamPointers reattaches streamText/streamThink to the last
-// in-progress item of each kind after a slice realloc.
-//
-// Iteration stops at the first non-streaming item — user prompt, step
-// finish, tool call/result, info, error, duet. Those mark the end of
-// any prior stream window, so we must NOT rebind past them. Without
-// this guard, a new turn's text deltas would extend the previous
-// turn's assistant-text block (which sits BEFORE the new user prompt
-// in the scrollback), making the new user line appear to render after
-// the response instead of before it.
-func (a *App) rebindStreamPointers() {
-	for i := len(a.items) - 1; i >= 0; i-- {
-		switch a.items[i].kind {
-		case itemAssistantText:
-			if a.streamText == nil {
-				a.streamText = &a.items[i]
-			}
-		case itemReasoning:
-			if a.streamThink == nil && a.items[i].folded {
-				// still streaming reasoning if not yet ended
-				a.streamThink = &a.items[i]
-			}
-		default:
-			return
-		}
 	}
 }
 
@@ -748,7 +646,8 @@ func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
 		if strings.HasPrefix(text, "/") {
 			return a.handleSlash(text), true
 		}
-		a.appendItem(chatItem{kind: itemUser, text: text, timestamp: time.Now()})
+		a.scrollback.AppendUser(text)
+		a.refreshView()
 		return a.submitPromptCmd(text), true
 	}
 
@@ -792,7 +691,9 @@ func (a *App) handleNormalKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	case "v":
 		return a.enterVisual(), true
 	case "e":
-		a.expandLastResult()
+		if a.scrollback.ExpandLastResult() {
+			a.refreshView()
+		}
 		return nil, true
 	case "p":
 		a.openLastResultPager()
@@ -806,14 +707,15 @@ func (a *App) handleNormalKey(km tea.KeyMsg) (tea.Cmd, bool) {
 		// Yank the most recent assistant text to the system clipboard.
 		// On terminals without OSC 52 support this silently no-ops; we
 		// still emit the info line so the user has feedback either way.
-		n, cmd := a.yankLastAssistantText()
-		if n == 0 {
-			a.appendItem(chatItem{kind: itemInfo, text: "nothing to yank (no assistant text yet)"})
+		text := a.scrollback.LastAssistantText()
+		if text == "" {
+			a.scrollback.AppendInfo("nothing to yank (no assistant text yet)")
+			a.refreshView()
 			return nil, true
 		}
-		a.appendItem(chatItem{kind: itemInfo,
-			text: fmt.Sprintf("yanked %d bytes to clipboard (OSC 52)", n)})
-		return cmd, true
+		a.scrollback.AppendInfo(fmt.Sprintf("yanked %d bytes to clipboard (OSC 52)", len(text)))
+		a.refreshView()
+		return yankToClipboardCmd(text), true
 	case "esc":
 		// Already in Normal mode; no-op.
 		return nil, true
@@ -828,25 +730,10 @@ func (a *App) handleNormalKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	return nil, true // swallow non-printable keys in Normal mode
 }
 
-// expandLastResult expands the most recent collapsed tool result.
-// Walks items backwards from the end; expands the first one found.
-func (a *App) expandLastResult() {
-	for i := len(a.items) - 1; i >= 0; i-- {
-		if a.items[i].kind == itemToolResult && !a.items[i].expanded && lineCount(a.items[i].result.Content) > 30 {
-			a.items[i].expanded = true
-			a.refreshView()
-			return
-		}
-	}
-}
-
 // openLastResultPager opens the pager for the most recent tool result.
 func (a *App) openLastResultPager() {
-	for i := len(a.items) - 1; i >= 0; i-- {
-		if a.items[i].kind == itemToolResult && a.items[i].result.Content != "" {
-			a.openPager(a.items[i].tool, a.items[i].result.Content)
-			return
-		}
+	if tool, content, ok := a.scrollback.LastToolResult(); ok {
+		a.openPager(tool, content)
 	}
 }
 
@@ -866,9 +753,10 @@ func (a *App) handleSlash(line string) tea.Cmd {
 	case "/quit", "/exit", "/q":
 		return tea.Quit
 	case "/help", "/?":
-		a.appendItem(chatItem{kind: itemInfo, text: helpText()})
+		a.scrollback.AppendInfo(helpText())
+		a.refreshView()
 	case "/clear":
-		a.items = nil
+		a.scrollback.Clear()
 		a.refreshView()
 	case "/models":
 		// Direct switch: /models <id>
@@ -884,12 +772,14 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		a.overlayCursor = 0
 	case "/sessions":
 		if a.listSessions == nil {
-			a.appendItem(chatItem{kind: itemInfo, text: "/sessions unavailable (no persistence wired)"})
+			a.scrollback.AppendInfo("/sessions unavailable (no persistence wired)")
+			a.refreshView()
 			return nil
 		}
 		sessList, err := a.listSessions()
 		if err != nil {
-			a.appendItem(chatItem{kind: itemError, text: "loading sessions: " + err.Error()})
+			a.scrollback.AppendError("loading sessions: " + err.Error())
+			a.refreshView()
 			return nil
 		}
 		a.sessionsRows = a.sessionsRows[:0]
@@ -912,7 +802,8 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		}
 		a.applyUndo(n)
 	default:
-		a.appendItem(chatItem{kind: itemInfo, text: "unknown command: " + cmd + " (/help for list)"})
+		a.scrollback.AppendInfo("unknown command: " + cmd + " (/help for list)")
+		a.refreshView()
 	}
 	return nil
 }
@@ -1102,10 +993,8 @@ func (a *App) handlePermissionKey(km tea.KeyMsg) tea.Cmd {
 	focusCmd := a.setMode(modeInsert)
 	// Re-layout so the input box and hint row return to the budget.
 	a.layout()
-	a.appendItem(chatItem{
-		kind: itemInfo,
-		text: fmt.Sprintf("permission %s for %s", decisionLabel(resp), check.Tool.Name()),
-	})
+	a.scrollback.AppendInfo(fmt.Sprintf("permission %s for %s", decisionLabel(resp), check.Tool.Name()))
+	a.refreshView()
 	go func() { reply <- resp }()
 	return focusCmd
 }
@@ -1122,30 +1011,14 @@ func decisionLabel(r agent.PermissionResponse) string {
 
 // toggleLastReasoning expands/collapses the most recent reasoning block.
 func (a *App) toggleLastReasoning() {
-	for i := len(a.items) - 1; i >= 0; i-- {
-		if a.items[i].kind == itemReasoning {
-			a.items[i].folded = !a.items[i].folded
-			a.refreshView()
-			return
-		}
-	}
+	a.scrollback.ToggleLastReasoning()
+	a.refreshView()
 }
 
 // toggleAllReasoning expands/collapses every reasoning block (all to
 // same target state — collapse if any are open, else expand).
 func (a *App) toggleAllReasoning() {
-	anyOpen := false
-	for _, it := range a.items {
-		if it.kind == itemReasoning && !it.folded {
-			anyOpen = true
-			break
-		}
-	}
-	for i := range a.items {
-		if a.items[i].kind == itemReasoning {
-			a.items[i].folded = anyOpen
-		}
-	}
+	a.scrollback.ToggleAllReasoning()
 	a.refreshView()
 }
 
@@ -1176,8 +1049,8 @@ func (a *App) handleOverlayKey(km tea.KeyMsg) tea.Cmd {
 			// records intent and asks the user to restart with -r <id>.
 			if a.overlayCursor < len(a.sessionsRows) {
 				picked := a.sessionsRows[a.overlayCursor].Sess.ID
-				a.appendItem(chatItem{kind: itemInfo,
-					text: "to switch sessions, restart with: dsc -r " + picked})
+				a.scrollback.AppendInfo("to switch sessions, restart with: dsc -r " + picked)
+				a.refreshView()
 			}
 			a.overlay = modeChat
 		case modeTape:
@@ -1202,7 +1075,8 @@ func (a *App) applyModelSwitch(id string) {
 		}
 	}
 	if !known {
-		a.appendItem(chatItem{kind: itemError, text: "unknown model: " + id})
+		a.scrollback.AppendError("unknown model: " + id)
+		a.refreshView()
 		return
 	}
 	a.model = id
@@ -1210,26 +1084,30 @@ func (a *App) applyModelSwitch(id string) {
 	a.agent.Model = id
 	if a.setModelFn != nil {
 		if err := a.setModelFn(id); err != nil {
-			a.appendItem(chatItem{kind: itemInfo, text: "model switched (warning: persist failed: " + err.Error() + ")"})
+			a.scrollback.AppendInfo("model switched (warning: persist failed: " + err.Error() + ")")
+			a.refreshView()
 			return
 		}
 	}
-	a.appendItem(chatItem{kind: itemInfo, text: "active model → " + id})
+	a.scrollback.AppendInfo("active model → " + id)
+	a.refreshView()
 }
 
 // applyUndo reverts the last n snapshot steps.
 func (a *App) applyUndo(n int) {
 	if a.undoFn == nil {
-		a.appendItem(chatItem{kind: itemInfo, text: "/undo unavailable (no snapshots wired)"})
+		a.scrollback.AppendInfo("/undo unavailable (no snapshots wired)")
+		a.refreshView()
 		return
 	}
 	restored, err := a.undoFn(n)
 	if err != nil {
-		a.appendItem(chatItem{kind: itemError, text: "/undo: " + err.Error()})
+		a.scrollback.AppendError("/undo: " + err.Error())
+		a.refreshView()
 		return
 	}
-	a.appendItem(chatItem{kind: itemInfo,
-		text: fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n)})
+	a.scrollback.AppendInfo(fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n))
+	a.refreshView()
 }
 
 func (a *App) activeModelCursor() int {

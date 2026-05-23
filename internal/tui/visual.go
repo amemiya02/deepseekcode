@@ -21,14 +21,15 @@ package tui
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // visualState tracks the active selection. anchor and cursor are
-// indices into App.fullLines.
+// indices into Scrollback.fullLines. Lives in scrollback.go's module
+// but is named here to keep the selection-rendering helpers
+// (applyVisualHighlightLines, stripANSI) self-contained.
 type visualState struct {
 	active bool
 	anchor int
@@ -46,39 +47,14 @@ func stripANSI(s string) string {
 	return ansiCSI.ReplaceAllString(s, "")
 }
 
-// enterVisual starts visual selection at the top visible line of the
-// viewport. Caller is responsible for ensuring we're transitioning
-// from Normal mode.
-func (a *App) enterVisual() tea.Cmd {
-	a.vis.active = true
-	start := a.vp.YOffset
-	if start >= len(a.fullLines) {
-		start = max0(len(a.fullLines) - 1)
-	}
-	a.vis.anchor = start
-	a.vis.cursor = start
-	cmd := a.setMode(modeVisual)
-	a.refreshView()
-	return cmd
-}
-
-// exitVisual leaves visual mode without yanking. Highlight clears on
-// the next refreshView.
-func (a *App) exitVisual() tea.Cmd {
-	a.vis.active = false
-	cmd := a.setMode(modeNormal)
-	a.refreshView()
-	return cmd
-}
-
-// applyVisualHighlight returns content with reverse-video styling on
-// the selected range. If visual mode is inactive, returns content
-// unchanged.
-func (a *App) applyVisualHighlight(lines []string) []string {
-	if !a.vis.active || len(lines) == 0 {
+// applyVisualHighlightLines returns lines with reverse-video styling
+// applied to the [anchor, cursor] range. Stand-alone (not a method)
+// so Scrollback.Render can call it without circular deps.
+func applyVisualHighlightLines(lines []string, vis visualState) []string {
+	if !vis.active || len(lines) == 0 {
 		return lines
 	}
-	lo, hi := a.vis.anchor, a.vis.cursor
+	lo, hi := vis.anchor, vis.cursor
 	if lo > hi {
 		lo, hi = hi, lo
 	}
@@ -100,6 +76,25 @@ func (a *App) applyVisualHighlight(lines []string) []string {
 	return out
 }
 
+// enterVisual starts visual selection at the top visible line of the
+// viewport. Caller is responsible for ensuring we're transitioning
+// from Normal mode.
+func (a *App) enterVisual() tea.Cmd {
+	a.scrollback.BeginSelection(a.vp.YOffset)
+	cmd := a.setMode(modeVisual)
+	a.refreshView()
+	return cmd
+}
+
+// exitVisual leaves visual mode without yanking. Highlight clears on
+// the next refreshView.
+func (a *App) exitVisual() tea.Cmd {
+	a.scrollback.CancelSelection()
+	cmd := a.setMode(modeNormal)
+	a.refreshView()
+	return cmd
+}
+
 // handleVisualKey dispatches keys while in Visual mode. Always
 // intercepts — visual mode is modal.
 func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
@@ -115,11 +110,11 @@ func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	case "ctrl+u":
 		a.moveCursor(-a.vp.Height / 2)
 	case "g":
-		a.vis.cursor = 0
+		a.scrollback.ExtendSelection(0)
 		a.vp.GotoTop()
 		a.refreshView()
 	case "G":
-		a.vis.cursor = max0(len(a.fullLines) - 1)
+		a.scrollback.ExtendSelection(len(a.scrollback.FullLines()) - 1)
 		a.vp.GotoBottom()
 		a.refreshView()
 	case "y", "enter":
@@ -127,7 +122,7 @@ func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	case "o":
 		// Vim convention: 'o' swaps anchor and cursor so the user can
 		// extend selection from the other end.
-		a.vis.anchor, a.vis.cursor = a.vis.cursor, a.vis.anchor
+		a.scrollback.SwapSelectionEnds()
 		a.refreshView()
 	}
 	return nil, true
@@ -136,24 +131,22 @@ func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
 // moveCursor advances the visual cursor by delta lines and scrolls
 // the viewport so the cursor stays visible.
 func (a *App) moveCursor(delta int) {
-	if len(a.fullLines) == 0 {
+	lines := a.scrollback.FullLines()
+	if len(lines) == 0 {
 		return
 	}
-	a.vis.cursor += delta
-	if a.vis.cursor < 0 {
-		a.vis.cursor = 0
-	}
-	if a.vis.cursor >= len(a.fullLines) {
-		a.vis.cursor = len(a.fullLines) - 1
-	}
+	cursor := a.scrollback.SelectionCursor() + delta
+	a.scrollback.ExtendSelection(cursor)
+	// Re-read post-clamp so the viewport math uses the actual cursor.
+	cursor = a.scrollback.SelectionCursor()
 	// Keep cursor inside the viewport window. YOffset is the top
 	// visible line; YOffset+Height-1 is the bottom visible line.
 	top := a.vp.YOffset
 	bottom := top + a.vp.Height - 1
-	if a.vis.cursor < top {
-		a.vp.SetYOffset(a.vis.cursor)
-	} else if a.vis.cursor > bottom {
-		a.vp.SetYOffset(a.vis.cursor - a.vp.Height + 1)
+	if cursor < top {
+		a.vp.SetYOffset(cursor)
+	} else if cursor > bottom {
+		a.vp.SetYOffset(cursor - a.vp.Height + 1)
 	}
 	a.refreshView()
 }
@@ -162,37 +155,22 @@ func (a *App) moveCursor(delta int) {
 // system clipboard (OSC 52), ANSI-stripped. Logs an info line with
 // the byte count and exits visual mode.
 func (a *App) yankVisualSelection() tea.Cmd {
-	lo, hi := a.vis.anchor, a.vis.cursor
-	if lo > hi {
-		lo, hi = hi, lo
-	}
-	if lo < 0 {
-		lo = 0
-	}
-	if hi >= len(a.fullLines) {
-		hi = len(a.fullLines) - 1
-	}
-	if lo > hi {
+	lo, hi, active := a.scrollback.SelectionRange()
+	if !active {
 		return a.exitVisual()
 	}
-	plain := stripANSI(strings.Join(a.fullLines[lo:hi+1], "\n"))
+	plain := a.scrollback.EndSelection()
+	if plain == "" {
+		modeCmd := a.setMode(modeNormal)
+		a.refreshView()
+		return modeCmd
+	}
 	yankCmd := yankToClipboardCmd(plain)
 	lineCount := hi - lo + 1
-	a.vis.active = false
 	modeCmd := a.setMode(modeNormal)
-	a.appendItem(chatItem{
-		kind: itemInfo,
-		text: fmt.Sprintf("yanked %d bytes (%d lines) to clipboard", len(plain), lineCount),
-	})
+	a.scrollback.AppendInfo(fmt.Sprintf("yanked %d bytes (%d lines) to clipboard", len(plain), lineCount))
 	a.refreshView()
 	return tea.Batch(yankCmd, modeCmd)
-}
-
-func max0(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }
 
 // handleMouse drives mouse-based visual selection. Mouse capture is
@@ -231,28 +209,21 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 	// Map screen-row → line index in fullLines. This assumes one
 	// fullLines entry per visual row, which holds because chatItem
 	// rendering pre-wraps content to width.
+	lines := a.scrollback.FullLines()
 	line := a.vp.YOffset + m.Y
-	if line < 0 {
-		line = 0
-	}
-	if line >= len(a.fullLines) {
-		line = max0(len(a.fullLines) - 1)
-	}
 
 	switch m.Action {
 	case tea.MouseActionPress:
-		a.vis.active = true
-		a.vis.anchor = line
-		a.vis.cursor = line
+		a.scrollback.BeginSelection(line)
 		cmd := a.setMode(modeVisual)
 		a.refreshView()
 		return cmd
 
 	case tea.MouseActionMotion:
-		if !a.vis.active {
+		if !a.scrollback.SelectionActive() {
 			return nil
 		}
-		a.vis.cursor = line
+		a.scrollback.ExtendSelection(line)
 		// Auto-scroll when the drag pointer is near the viewport
 		// edge. One row of slack on each side avoids juddering as
 		// the cursor crosses the boundary.
@@ -260,19 +231,20 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 		if m.Y <= edge && a.vp.YOffset > 0 {
 			a.vp.SetYOffset(a.vp.YOffset - 1)
 		} else if m.Y >= a.vp.Height-1-edge &&
-			a.vp.YOffset+a.vp.Height < len(a.fullLines) {
+			a.vp.YOffset+a.vp.Height < len(lines) {
 			a.vp.SetYOffset(a.vp.YOffset + 1)
 		}
 		a.refreshView()
 		return nil
 
 	case tea.MouseActionRelease:
-		if !a.vis.active {
+		if !a.scrollback.SelectionActive() {
 			return nil
 		}
+		lo, hi, _ := a.scrollback.SelectionRange()
 		// If anchor == cursor it was a plain click, not a drag — bail
 		// without yanking so users don't get spurious clipboard writes.
-		if a.vis.anchor == a.vis.cursor {
+		if lo == hi {
 			return a.exitVisual()
 		}
 		return a.yankVisualSelection()

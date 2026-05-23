@@ -1,6 +1,7 @@
 # Build artifacts
 /bin/
 /dist/
+/dsc
 *.exe
 *.test
 *.out

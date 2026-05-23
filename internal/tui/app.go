@@ -40,57 +40,51 @@ type App struct {
 	height int
 	mode   appMode
 
-	// Chat scrollback. Owns items, in-progress stream cursors, the
-	// rendered-line cache, and visual-mode selection. Mutations only
-	// through its methods — direct slice access is read-only.
-	scrollback *Scrollback
-	thinkStart time.Time // mirrored for chrome's startedAt
+	// Sub-modules. Each owns the state it renders/mutates; App
+	// orchestrates by calling their methods rather than reaching
+	// into fields.
+	scrollback *Scrollback     // chat history + streams + selection
+	chrome     *Chrome         // live activity band + redraw ticker flag
+	overlay    *Overlay        // modal pickers (tape / models / sessions)
+	permission *PermissionFlow // modal permission card
 
-	// Per-run cancellation
+	// Pager overlay (modal; takes the body band when non-nil).
+	pager *pagerState
+
+	// Per-run cancellation.
 	runMu     sync.Mutex
 	runCtx    context.Context
 	runCancel context.CancelFunc
 	running   bool
 
-	// Live activity band rendered between viewport and status.
-	chrome     chromeState
-	dirty      bool // a delta arrived; redraw on next tick
-	tickActive bool // a redrawMsg tick is scheduled
-
-	// Pager overlay (modal; takes the body band when non-nil).
-	pager *pagerState
-
-	// Status
+	// Bottom status bar (model name, cumulative usage, step count).
 	status    statusState
 	stepTotal int
 
-	// Permission asks
-	pendingPerm *permissionAskMsg
-	// permCursor indexes into the 2×2 button grid:
-	//   0 = allow once   1 = session
-	//   2 = always       3 = deny
-	// Reset to 0 on each new permissionAskMsg so the default focus is
-	// the safest fast-path: allow once.
-	permCursor int
+	// Session / snapshot integration. nil when ephemeral. The four
+	// callbacks travel together so we pack them in one struct field
+	// rather than four flat ones.
+	session sessionIntegration
 
-	// Overlays (modeTape / modeModels / modeSessions)
-	overlay       overlayMode
-	overlayCursor int
-	models        []modelOption
-	sessionsRows  []sessionRow
-
-	// Session/snapshot integration. May be nil; the TUI degrades to
-	// ephemeral mode (no /undo, no /sessions, no resume).
-	sessionID    string
-	undoFn       func(n int) (int, error)
-	listSessions func() ([]session.Session, error)
-	setModelFn   func(model string) error
-
-	// Wiring back to the tea.Program for callbacks running off the UI loop
+	// Wiring back to the tea.Program for callbacks running off the UI loop.
 	send func(tea.Msg)
 
 	// Notices shown once at startup (resume confirmation, warnings).
 	startupNotices []string
+
+	// lastRenderSeq is the scrollback Seq value at the last refreshView
+	// call. The redraw tick refreshes only when the live seq has drifted,
+	// replacing the older "dirty bool" pattern.
+	lastRenderSeq uint64
+}
+
+// sessionIntegration bundles the optional persistence hooks. All four
+// nil ⇒ TUI runs ephemeral (no /undo, /sessions, model persistence).
+type sessionIntegration struct {
+	id           string
+	undo         func(n int) (int, error)
+	list         func() ([]session.Session, error)
+	setModel     func(model string) error
 }
 
 // Config bundles construction params for New.
@@ -138,11 +132,16 @@ func New(cfg Config) *App {
 		vp:             vp,
 		input:          ta,
 		scrollback:     NewScrollback(),
-		sessionID:      cfg.SessionID,
-		undoFn:         cfg.UndoFn,
-		listSessions:   cfg.ListSessions,
-		setModelFn:     cfg.SetModelFn,
+		chrome:         NewChrome(),
+		overlay:        NewOverlay(),
+		permission:     NewPermissionFlow(),
 		startupNotices: cfg.StartupNotices,
+		session: sessionIntegration{
+			id:       cfg.SessionID,
+			undo:     cfg.UndoFn,
+			list:     cfg.ListSessions,
+			setModel: cfg.SetModelFn,
+		},
 		status: statusState{
 			model:    cfg.Model,
 			thinking: cfg.Thinking,
@@ -276,55 +275,41 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fired immediately after submitPromptCmd; the agent goroutine
 		// is up but no callback has arrived yet. Spin up the chrome
 		// indicator so the user sees activity during the cold-start gap.
-		a.chrome.active = true
-		a.chrome.phase = phaseThinking
-		a.chrome.activeTool = ""
-		a.chrome.tokens = 0
-		a.chrome.startedAt = time.Now()
+		a.chrome.BeginThinking()
 		cmds = append(cmds, a.ensureTick())
 	case redrawMsg:
-		// Coalesced re-render: deltas flag a.dirty; we rebuild the
-		// viewport at most once per tick. Spinner frame advances every
+		// Coalesced re-render. Streaming deltas don't refresh on
+		// arrival; instead they bump scrollback.Seq() and we check
+		// for drift here at the tick. Spinner frame advances every
 		// tick regardless so the indicator animates smoothly.
-		a.chrome.frame++
-		if a.dirty {
+		a.chrome.AdvanceFrame()
+		if a.scrollback.Seq() != a.lastRenderSeq {
 			a.refreshView()
-			a.dirty = false
 		}
-		if a.chrome.active || a.running {
+		if a.chrome.Active() || a.running {
 			cmds = append(cmds, a.scheduleRedraw())
 		} else {
-			a.tickActive = false
+			a.chrome.MarkTickStopped()
 		}
 	case reasoningStartMsg:
-		a.thinkStart = time.Now()
-		a.chrome.active = true
-		a.chrome.phase = phaseThinking
-		a.chrome.startedAt = a.thinkStart
-		a.chrome.tokens = 0
+		a.chrome.BeginThinking()
 		a.scrollback.StartReasoning()
 		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
 	case reasoningDeltaMsg:
-		a.chrome.tokens = a.scrollback.AppendReasoning(m.Text)
-		a.dirty = true
+		a.chrome.UpdateTokens(a.scrollback.AppendReasoning(m.Text))
 	case reasoningEndMsg:
 		a.scrollback.EndReasoning()
 	case textDeltaMsg:
 		created, toks := a.scrollback.AppendText(m.Text)
 		if created {
-			a.chrome.phase = phaseWriting
-			a.chrome.startedAt = time.Now()
-			a.chrome.tokens = 0
+			a.chrome.BeginWriting()
 			a.refreshView()
 			cmds = append(cmds, a.ensureTick())
 		}
-		a.chrome.tokens = toks
-		a.dirty = true
+		a.chrome.UpdateTokens(toks)
 	case toolCallStartMsg:
-		a.chrome.phase = phaseTool
-		a.chrome.activeTool = m.Call.Function.Name
-		a.chrome.startedAt = time.Now()
+		a.chrome.BeginTool(m.Call.Function.Name)
 		a.scrollback.AppendToolCall(m.Call.ID, m.Call.Function.Name, m.Call.Function.Arguments)
 		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
@@ -350,8 +335,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.scrollback.AppendInfo(m.Text)
 		a.refreshView()
 	case permissionAskMsg:
-		a.pendingPerm = &m
-		a.permCursor = 0
+		a.permission.Open(m)
 		cmds = append(cmds, a.setMode(modePermission))
 		// Re-layout so the hidden input box gives its rows back to the
 		// viewport — the permission card is the active surface now.
@@ -361,9 +345,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.refreshView()
 	case agentDoneMsg:
 		a.scrollback.EndStreams()
-		a.chrome.reset()
+		a.chrome.Reset()
 		a.refreshView()
-		a.dirty = false
 	case tea.MouseMsg:
 		// Mouse drives visual selection (click-drag-release) and
 		// wheel-scrolls the viewport. handleMouse only intercepts
@@ -407,12 +390,12 @@ func (a *App) scheduleRedraw() tea.Cmd {
 // ensureTick starts the redraw ticker if one isn't already pending.
 // Idempotent — safe to call from any message handler that observes
 // new activity. The tick stops itself on the next redrawMsg after
-// chrome.active and a.running both flip false.
+// chrome.Active() and a.running both flip false.
 func (a *App) ensureTick() tea.Cmd {
-	if a.tickActive {
+	if a.chrome.TickActive() {
 		return nil
 	}
-	a.tickActive = true
+	a.chrome.MarkTickStarted()
 	return a.scheduleRedraw()
 }
 
@@ -422,7 +405,7 @@ func (a *App) View() string {
 		return "starting…"
 	}
 
-	if a.overlay != modeChat {
+	if a.overlay.IsOpen() {
 		return a.renderOverlay()
 	}
 
@@ -441,14 +424,14 @@ func (a *App) View() string {
 	// when active; "new content below" indicator when the user has
 	// scrolled away from the bottom mid-run; blank otherwise.
 	showNewBelow := a.running && !a.vp.AtBottom() && a.pager == nil
-	chrome := a.chrome.render(a.theme, showNewBelow)
+	chrome := a.chrome.Render(a.theme, showNewBelow)
 	if chrome == "" {
 		chrome = " " // reserve the row to prevent reflow when state flips
 	}
 
 	var permView string
-	if a.pendingPerm != nil {
-		permView = a.renderPermissionPrompt()
+	if a.permission.Active() {
+		permView = a.permission.Render(a.theme, a.width)
 	}
 
 	status := a.status.render(a.theme)
@@ -504,13 +487,13 @@ func (a *App) View() string {
 // sessions). The bottom hint line + status still show for context.
 func (a *App) renderOverlay() string {
 	var body string
-	switch a.overlay {
+	switch a.overlay.Mode() {
 	case modeTape:
-		body = renderTape(a.theme, a.scrollback.Items(), a.overlayCursor, a.width, a.height-2)
+		body = renderTape(a.theme, a.scrollback.Items(), a.overlay.Cursor(), a.width, a.height-2)
 	case modeModels:
-		body = renderModelsPicker(a.theme, a.models, a.overlayCursor, a.model, a.width, a.height-2)
+		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.Cursor(), a.model, a.width, a.height-2)
 	case modeSessions:
-		body = renderSessionsPicker(a.theme, a.sessionsRows, a.overlayCursor, a.sessionID, a.width, a.height-2)
+		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.Cursor(), a.session.id, a.width, a.height-2)
 	}
 	hint := a.theme.Hint.Render("  j/k move · ⏎ select · esc back · q quit")
 	return body + "\n" + hint
@@ -538,9 +521,9 @@ func (a *App) layout() {
 	inputH := 5 // textarea(3) + rounded border(2)
 	hintH := 1
 	permH := 0
-	if a.pendingPerm != nil {
+	if a.permission.Active() {
 		// Modal: 7 body lines + 2 border ≈ 9. Match this to the row
-		// count rendered by renderPermissionPrompt.
+		// count rendered by PermissionFlow.Render.
 		permH = 9
 		// Hide input box + hint rows while the modal is up — the View
 		// layer also skips them, but we have to reclaim the rows here
@@ -571,6 +554,7 @@ func (a *App) refreshView() {
 	wasAtBottom := a.vp.AtBottom()
 	content := a.scrollback.Render(a.theme, a.width)
 	a.vp.SetContent(content)
+	a.lastRenderSeq = a.scrollback.Seq()
 	if wasAtBottom && !a.scrollback.SelectionActive() {
 		a.vp.GotoBottom()
 	}
@@ -581,7 +565,7 @@ func (a *App) refreshView() {
 // falls through so the textarea receives the key.
 func (a *App) handleKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	// Overlays consume nearly all keys until ESC.
-	if a.overlay != modeChat {
+	if a.overlay.IsOpen() {
 		return a.handleOverlayKey(km), true
 	}
 
@@ -764,30 +748,26 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			a.applyModelSwitch(fields[1])
 			return nil
 		}
-		a.models = availableModels()
-		a.overlay = modeModels
-		a.overlayCursor = a.activeModelCursor()
+		a.overlay.OpenModels(a.model)
 	case "/tape":
-		a.overlay = modeTape
-		a.overlayCursor = 0
+		a.overlay.OpenTape()
 	case "/sessions":
-		if a.listSessions == nil {
+		if a.session.list == nil {
 			a.scrollback.AppendInfo("/sessions unavailable (no persistence wired)")
 			a.refreshView()
 			return nil
 		}
-		sessList, err := a.listSessions()
+		sessList, err := a.session.list()
 		if err != nil {
 			a.scrollback.AppendError("loading sessions: " + err.Error())
 			a.refreshView()
 			return nil
 		}
-		a.sessionsRows = a.sessionsRows[:0]
+		rows := make([]sessionRow, 0, len(sessList))
 		for _, s := range sessList {
-			a.sessionsRows = append(a.sessionsRows, sessionRow{Sess: s})
+			rows = append(rows, sessionRow{Sess: s})
 		}
-		a.overlay = modeSessions
-		a.overlayCursor = 0
+		a.overlay.OpenSessions(rows)
 	case "/export", "/scrollback":
 		// Same as `P` in Normal mode — dump scrollback to $PAGER so
 		// the user gets terminal-native drag-select across the whole
@@ -830,168 +810,40 @@ func helpText() string {
 	}, "\n")
 }
 
-// renderPermissionPrompt draws the modal permission card.
-//
-// Layout: a 2×2 grid of buttons. The currently focused button gets a
-// solid background so it reads as actionable; the rest dim. Arrow
-// keys / tab move focus; Enter activates. Single-letter shortcuts
-// (y/n/s/a) still work as accelerators.
-//
-// The input box is hidden in View() while this card is up — it is
-// the active surface, not a passive notice.
-func (a *App) renderPermissionPrompt() string {
-	if a.pendingPerm == nil {
-		return ""
-	}
-	innerW := a.width - 4
-	if innerW < 30 {
-		innerW = 30
-	}
-	tool := a.pendingPerm.Check.Tool.Name()
-	args := oneline(string(a.pendingPerm.Check.Args), innerW-10)
-
-	title := a.theme.PermPrompt.Render("⚠ permission required")
-	toolLine := a.theme.AssistantText.Render("  tool  ") +
-		a.theme.StatusModel.Render(tool)
-	argsLine := a.theme.AssistantText.Render("  args  ") +
-		a.theme.Hint.Render(args)
-
-	// Each button is fixed-width so the grid stays aligned regardless
-	// of label length. Padding-1 around the label gives the focused
-	// background visual weight without looking cramped.
-	const btnW = 20
-	btns := []struct{ key, label string }{
-		{"Y", "allow once"},
-		{"S", "session"},
-		{"A", "always"},
-		{"N", "deny"},
-	}
-	renderBtn := func(idx int) string {
-		b := btns[idx]
-		text := " [" + b.key + "] " + b.label
-		// Right-pad to btnW columns so focus/unfocus are the same width.
-		pad := btnW - lipglossWidth(text)
-		if pad > 0 {
-			text += strings.Repeat(" ", pad)
-		}
-		if idx == a.permCursor {
-			return a.theme.PermFocus.Render(text)
-		}
-		return a.theme.PermButton.Render(text)
-	}
-
-	row1 := "  " + renderBtn(0) + "  " + renderBtn(1)
-	row2 := "  " + renderBtn(2) + "  " + renderBtn(3)
-	hint := a.theme.Hint.Render("  ←↑↓→ / tab move · ⏎ select · esc deny · y/s/a/n direct")
-
-	body := strings.Join([]string{
-		title,
-		toolLine,
-		argsLine,
-		"",
-		row1,
-		row2,
-		hint,
-	}, "\n")
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(a.theme.PermPrompt.GetForeground()).
-		Padding(0, 1).
-		Width(a.width - 2).
-		Render(body)
-}
-
-// lipglossWidth returns the visible cell width of s, ignoring ANSI
-// escape sequences. Used to compute padding for fixed-width buttons
-// where the input string might include styled fragments.
-func lipglossWidth(s string) int {
-	// The strings we pass here are plain ASCII labels (no styling and
-	// no double-width runes), so a byte count suffices and avoids the
-	// dependency surface of a runewidth library.
-	return len(s)
-}
-
-// handlePermissionKey processes a single keystroke while a permission
-// prompt is up. Returns a tea.Cmd; the reply is sent on the request
-// channel asynchronously so the UI doesn't block.
+// handlePermissionKey processes a single keystroke while the permission
+// modal is up. Nav keys move the focus within the 2×2 grid; resolution
+// keys (y/s/a/n/enter) commit a decision via PermissionFlow.Resolve.
 func (a *App) handlePermissionKey(km tea.KeyMsg) tea.Cmd {
-	if a.pendingPerm == nil {
+	if !a.permission.Active() {
 		return nil
 	}
-	key := strings.ToLower(km.String())
-
-	// Grid navigation. The 2×2 layout maps to permCursor like so:
-	//   0 1
-	//   2 3
-	// Up/down moves by 2, left/right by 1, tab cycles.
-	switch key {
+	switch strings.ToLower(km.String()) {
 	case "up", "k":
-		if a.permCursor >= 2 {
-			a.permCursor -= 2
-		}
+		a.permission.MoveUp()
 		return nil
 	case "down", "j":
-		if a.permCursor < 2 {
-			a.permCursor += 2
-		}
+		a.permission.MoveDown()
 		return nil
 	case "left", "h":
-		if a.permCursor%2 == 1 {
-			a.permCursor--
-		}
+		a.permission.MoveLeft()
 		return nil
 	case "right", "l":
-		if a.permCursor%2 == 0 && a.permCursor < 3 {
-			a.permCursor++
-		}
+		a.permission.MoveRight()
 		return nil
 	case "tab":
-		a.permCursor = (a.permCursor + 1) % 4
+		a.permission.Tab()
 		return nil
 	case "shift+tab":
-		a.permCursor = (a.permCursor + 3) % 4
+		a.permission.ShiftTab()
 		return nil
 	}
-
-	// Resolve the chosen button index. Enter activates focus; the
-	// single-letter shortcuts (y/o/s/a/n/d) still work directly so
-	// muscle-memory users skip the grid entirely.
-	btn := -1
-	switch key {
-	case "enter":
-		btn = a.permCursor
-	case "y", "o":
-		btn = 0
-	case "s":
-		btn = 1
-	case "a":
-		btn = 2
-	case "n", "d", "esc":
-		btn = 3
-	}
-	if btn < 0 {
+	resp, reply, check, ok := a.permission.Resolve(km.String())
+	if !ok {
 		// Swallow — modal modes must not leak keys to the textarea
 		// even when the user mashes something unmapped.
 		return nil
 	}
-
-	var resp agent.PermissionResponse
-	switch btn {
-	case 0: // allow once
-		resp = agent.PermissionResponse{Allow: true}
-	case 1: // session
-		resp = agent.PermissionResponse{Allow: true}
-	case 2: // always
-		resp = agent.PermissionResponse{Allow: true, PersistPattern: true}
-	case 3: // deny
-		resp = agent.PermissionResponse{Allow: false}
-	}
-	reply := a.pendingPerm.Reply
-	check := a.pendingPerm.Check
-	a.pendingPerm = nil
 	focusCmd := a.setMode(modeInsert)
-	// Re-layout so the input box and hint row return to the budget.
 	a.layout()
 	a.scrollback.AppendInfo(fmt.Sprintf("permission %s for %s", decisionLabel(resp), check.Tool.Name()))
 	a.refreshView()
@@ -1026,37 +878,29 @@ func (a *App) toggleAllReasoning() {
 func (a *App) handleOverlayKey(km tea.KeyMsg) tea.Cmd {
 	switch km.String() {
 	case "esc", "q":
-		a.overlay = modeChat
+		a.overlay.Close()
 		return nil
 	case "ctrl+c":
 		return tea.Quit
 	case "j", "down":
-		a.overlayCursor++
+		a.overlay.MoveDown()
 	case "k", "up":
-		a.overlayCursor--
-		if a.overlayCursor < 0 {
-			a.overlayCursor = 0
-		}
+		a.overlay.MoveUp()
 	case "enter":
-		switch a.overlay {
+		switch a.overlay.Mode() {
 		case modeModels:
-			if a.overlayCursor < len(a.models) {
-				a.applyModelSwitch(a.models[a.overlayCursor].ID)
+			if id := a.overlay.SelectedModelID(); id != "" {
+				a.applyModelSwitch(id)
 			}
-			a.overlay = modeChat
 		case modeSessions:
 			// Session switching is a wave-6 polish — for v0.1 it just
 			// records intent and asks the user to restart with -r <id>.
-			if a.overlayCursor < len(a.sessionsRows) {
-				picked := a.sessionsRows[a.overlayCursor].Sess.ID
-				a.scrollback.AppendInfo("to switch sessions, restart with: dsc -r " + picked)
+			if id := a.overlay.SelectedSessionID(); id != "" {
+				a.scrollback.AppendInfo("to switch sessions, restart with: dsc -r " + id)
 				a.refreshView()
 			}
-			a.overlay = modeChat
-		case modeTape:
-			// Future: branch from cursor. For v0.1 wave-5 we just exit.
-			a.overlay = modeChat
 		}
+		a.overlay.Close()
 	}
 	return nil
 }
@@ -1082,8 +926,8 @@ func (a *App) applyModelSwitch(id string) {
 	a.model = id
 	a.status.model = id
 	a.agent.Model = id
-	if a.setModelFn != nil {
-		if err := a.setModelFn(id); err != nil {
+	if a.session.setModel != nil {
+		if err := a.session.setModel(id); err != nil {
 			a.scrollback.AppendInfo("model switched (warning: persist failed: " + err.Error() + ")")
 			a.refreshView()
 			return
@@ -1095,12 +939,12 @@ func (a *App) applyModelSwitch(id string) {
 
 // applyUndo reverts the last n snapshot steps.
 func (a *App) applyUndo(n int) {
-	if a.undoFn == nil {
+	if a.session.undo == nil {
 		a.scrollback.AppendInfo("/undo unavailable (no snapshots wired)")
 		a.refreshView()
 		return
 	}
-	restored, err := a.undoFn(n)
+	restored, err := a.session.undo(n)
 	if err != nil {
 		a.scrollback.AppendError("/undo: " + err.Error())
 		a.refreshView()
@@ -1108,15 +952,6 @@ func (a *App) applyUndo(n int) {
 	}
 	a.scrollback.AppendInfo(fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n))
 	a.refreshView()
-}
-
-func (a *App) activeModelCursor() int {
-	for i, m := range a.models {
-		if m.ID == a.model {
-			return i
-		}
-	}
-	return 0
 }
 
 func parsePositiveInt(s string) int {

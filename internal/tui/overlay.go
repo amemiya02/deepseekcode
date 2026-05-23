@@ -19,6 +19,87 @@ const (
 	modeSessions             // /sessions — session tree picker
 )
 
+// Overlay owns the modal-picker state — which picker is up, where
+// the cursor sits, and the picker-specific data rows. App composes
+// one of these instead of carrying overlay/overlayCursor/models/
+// sessionsRows as four flat fields.
+type Overlay struct {
+	mode         overlayMode
+	cursor       int
+	models       []modelOption
+	sessionsRows []sessionRow
+}
+
+// NewOverlay returns an idle Overlay (mode = chat, nothing open).
+func NewOverlay() *Overlay { return &Overlay{mode: modeChat} }
+
+// Mode returns the active overlay mode (modeChat when none is open).
+func (o *Overlay) Mode() overlayMode { return o.mode }
+
+// IsOpen reports whether a picker is currently visible.
+func (o *Overlay) IsOpen() bool { return o.mode != modeChat }
+
+// Cursor returns the picker's current cursor index.
+func (o *Overlay) Cursor() int { return o.cursor }
+
+// Close returns to the chat view.
+func (o *Overlay) Close() { o.mode = modeChat; o.cursor = 0 }
+
+// OpenTape switches to the /tape view with the cursor at the top.
+func (o *Overlay) OpenTape() { o.mode = modeTape; o.cursor = 0 }
+
+// OpenModels switches to the /models picker. Cursor lands on the
+// row that matches activeID, falling back to 0 if no match.
+func (o *Overlay) OpenModels(activeID string) {
+	o.models = availableModels()
+	o.mode = modeModels
+	o.cursor = 0
+	for i, m := range o.models {
+		if m.ID == activeID {
+			o.cursor = i
+			break
+		}
+	}
+}
+
+// OpenSessions switches to the /sessions picker with the supplied rows.
+func (o *Overlay) OpenSessions(rows []sessionRow) {
+	o.sessionsRows = rows
+	o.mode = modeSessions
+	o.cursor = 0
+}
+
+// MoveDown / MoveUp advance the cursor inside the picker.
+func (o *Overlay) MoveDown() { o.cursor++ }
+func (o *Overlay) MoveUp() {
+	if o.cursor > 0 {
+		o.cursor--
+	}
+}
+
+// Models / SessionsRows return the picker-specific row slices for
+// rendering. Returned slices are read-only.
+func (o *Overlay) Models() []modelOption  { return o.models }
+func (o *Overlay) SessionsRows() []sessionRow { return o.sessionsRows }
+
+// SelectedModelID returns the model id under the cursor, or "" when
+// the cursor is out of range.
+func (o *Overlay) SelectedModelID() string {
+	if o.cursor >= 0 && o.cursor < len(o.models) {
+		return o.models[o.cursor].ID
+	}
+	return ""
+}
+
+// SelectedSessionID returns the session id under the cursor, or ""
+// when the cursor is out of range.
+func (o *Overlay) SelectedSessionID() string {
+	if o.cursor >= 0 && o.cursor < len(o.sessionsRows) {
+		return o.sessionsRows[o.cursor].Sess.ID
+	}
+	return ""
+}
+
 // modelOption is one row in the /models picker.
 type modelOption struct {
 	ID    string

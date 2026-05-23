@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -81,19 +83,38 @@ func (i chatItem) render(t Theme, width int) string {
 			t.Reasoning.Render(indent(body, "  ")) + "\n" +
 			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens)) + "\n"
 	case itemToolCall:
-		return t.ToolCall.Render(fmt.Sprintf("▶ %s(%s)", i.tool, oneline(i.args, 100))) + "\n"
+		// Claude-Code-style header: ⏺ tool(k1="v1", k2=v2) — tool name
+		// in accent color, args humanized + dimmed in parens.
+		argsMax := width - len(i.tool) - 6
+		args := compactArgs(i.args, argsMax)
+		return t.ToolCall.Render("⏺ "+i.tool) +
+			t.Hint.Render("("+args+")") + "\n"
 	case itemToolResult:
-		var head string
+		// Connector + summary line: "  ⎿ N lines · 42ms" (or "✗ error · ...")
+		dur := i.duration.Round(time.Millisecond).String()
+		var summary string
 		if i.result.IsError {
-			head = t.ToolErr.Render(fmt.Sprintf("✗ %s (%s)", i.tool, i.duration.Round(time.Millisecond)))
+			summary = t.ToolErr.Render("✗ error · " + dur)
 		} else {
-			head = t.ToolOk.Render(fmt.Sprintf("✓ %s (%s)", i.tool, i.duration.Round(time.Millisecond)))
+			n := lineCount(i.result.Content)
+			switch {
+			case n == 0:
+				summary = t.ToolOk.Render("✓ " + dur)
+			case n == 1:
+				summary = t.ToolOk.Render("✓ 1 line · " + dur)
+			default:
+				summary = t.ToolOk.Render(fmt.Sprintf("✓ %d lines · %s", n, dur))
+			}
 		}
+		head := "  " + t.Hint.Render("⎿ ") + summary + "\n"
+
 		body := i.result.Content
-		if len(body) > 0 {
-			return head + "\n" + t.ToolBody.Render(indent(truncate(body, 30, width-2), "  ")) + "\n"
+		if body == "" {
+			return head
 		}
-		return head + "\n"
+		// Body indented 4 cols to align under the ⎿ connector.
+		truncated := truncate(body, 30, width-4)
+		return head + t.ToolBody.Render(indent(truncated, "    ")) + "\n"
 	case itemDuet:
 		head := "approved"
 		style := t.DuetApprove
@@ -132,6 +153,51 @@ func oneline(s string, max int) string {
 		s = s[:max-1] + "…"
 	}
 	return s
+}
+
+// compactArgs turns {"path":"foo","line":3} into 'path="foo", line=3'
+// for readable inline display. Falls back to oneline if args isn't a
+// well-formed JSON object.
+func compactArgs(args string, max int) string {
+	if max < 12 {
+		max = 12
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil || len(m) == 0 {
+		return oneline(args, max)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case string:
+			parts = append(parts, fmt.Sprintf("%s=%q", k, v))
+		default:
+			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		}
+	}
+	s := strings.Join(parts, ", ")
+	runes := []rune(s)
+	if len(runes) > max {
+		s = string(runes[:max-1]) + "…"
+	}
+	return s
+}
+
+// lineCount counts effective lines (ignores trailing blank line).
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 // truncate keeps head + tail of long output with a marker, mirroring

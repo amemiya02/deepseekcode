@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -75,6 +76,54 @@ func TestHeadingPrefixesStripped(t *testing.T) {
 	for _, marker := range []string{"# ", "## ", "### ", "#### "} {
 		if strings.Contains(out, marker) {
 			t.Errorf("heading prefix %q leaked into render: %q", marker, out)
+		}
+	}
+}
+
+func TestCompactArgs(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`{"path":"cmd/dsc/main.go"}`, `path="cmd/dsc/main.go"`},
+		{`{"path":"a","line":3}`, `line=3, path="a"`}, // sorted keys
+		{`{}`, `{}`},                                   // empty → fall back
+		{`not json`, `not json`},                       // bad json → fall back
+	}
+	for _, c := range cases {
+		got := compactArgs(c.in, 200)
+		if got != c.want {
+			t.Errorf("compactArgs(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCompactArgsTruncates(t *testing.T) {
+	long := `{"path":"` + strings.Repeat("x", 500) + `"}`
+	got := compactArgs(long, 40)
+	if n := utf8.RuneCountInString(got); n > 40 {
+		t.Errorf("compactArgs did not respect max: runes=%d, got=%q", n, got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected truncation marker …, got %q", got)
+	}
+}
+
+func TestLineCount(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"one", 1},
+		{"one\n", 1},
+		{"one\ntwo", 2},
+		{"one\ntwo\n", 2},
+		{"a\nb\nc\nd", 4},
+	}
+	for _, c := range cases {
+		if got := lineCount(c.in); got != c.want {
+			t.Errorf("lineCount(%q) = %d, want %d", c.in, got, c.want)
 		}
 	}
 }

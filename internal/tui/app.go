@@ -137,8 +137,14 @@ func New(cfg Config) *App {
 }
 
 // Run starts the Bubble Tea program. Blocks until quit.
+//
+// Mouse mode is deliberately NOT enabled: in our terminal stack the
+// SGR mouse sequences leak into the textarea as literal characters
+// ("[<65;103;21M"). Keyboard scroll (pgup/pgdn, arrows, home/end) is
+// already wired through viewport's default key handling, which is
+// enough until the upstream parsing issue is sorted out.
 func (a *App) Run() error {
-	prog := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	prog := tea.NewProgram(a, tea.WithAltScreen())
 	a.send = prog.Send
 	_, err := prog.Run()
 	return err

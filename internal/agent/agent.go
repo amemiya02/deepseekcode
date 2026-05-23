@@ -19,32 +19,23 @@ type PermissionResponse struct {
 	PersistPattern bool // when true (bash + "always"), persist to allowlist
 }
 
-// Callbacks is the table-driven event bus the loop pushes events through.
-// The TUI subscribes by populating fields. Persistence (session.Store)
-// also subscribes. Nil callbacks are silently skipped.
-type Callbacks struct {
-	OnTextDelta      func(text string)
-	OnReasoningStart func()
-	OnReasoningDelta func(text string)
-	OnReasoningEnd   func()
-	OnToolCallStart  func(call llm.ToolCall)
-	OnToolCallResult func(callID string, result tools.Result, dur time.Duration)
-	OnStepFinish     func(reason StopReason, usage llm.Usage)
-	OnDuetValidation func(callID string, approved bool, reasoning string, dur time.Duration)
-	OnPermissionAsk  func(check permissions.Check) PermissionResponse
-	OnInfo           func(msg string) // out-of-band notices (skipped validator, etc.)
-}
-
 // Agent is one running ReAct loop. Construct with New, drive with Run.
 //
 // Agent is *not* safe for concurrent use within a single session. The
-// TUI wraps it in a goroutine and pipes interaction through Callbacks.
+// TUI wraps it in a goroutine and a consumer reads events from
+// Events() to drive the UI.
 type Agent struct {
 	Client      *llm.Client
 	Tools       *tools.Registry
 	Permissions *permissions.Policy
 	Validator   DuetValidator // nil = duet disabled
-	Callbacks   Callbacks
+
+	// events is the agent-lifetime event channel. The consumer
+	// (TUI or CLI) ranges over Events() and type-switches on the
+	// concrete Event type. Buffered so streaming token bursts don't
+	// block the model goroutine; capacity matched to ~4 seconds of
+	// fast SSE token rate.
+	events chan Event
 
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
@@ -82,12 +73,18 @@ type Agent struct {
 }
 
 // New returns an Agent with sensible defaults for v0.1.
+//
+// The Events channel is buffered at 256: roughly 4 seconds at a 60 tok/s
+// burst rate. Streaming deltas don't block the model goroutine unless
+// the consumer falls more than that behind, which would only happen if
+// the UI goroutine were stuck — an upstream bug we'd want to surface.
 func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model string) *Agent {
 	return &Agent{
 		Client:       client,
 		Tools:        reg,
 		Permissions:  pol,
 		Validator:    NopValidator{}, // wave-5 replaces
+		events:       make(chan Event, 256),
 		Model:        model,
 		Thinking:     true,
 		System:       DefaultSystemPrompt,
@@ -97,6 +94,20 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 			LoopDetection(5, 3),
 		},
 	}
+}
+
+// Events returns the receive end of the agent-lifetime event stream.
+// Consume from one goroutine; the agent guarantees in-order delivery.
+// The channel is never closed by the agent — multiple Run calls share
+// it. Consumers should select against their own ctx.Done() to exit
+// cleanly during shutdown.
+func (a *Agent) Events() <-chan Event { return a.events }
+
+// EmitInfo pushes an out-of-band notice onto the event stream. Used by
+// adjacent components (e.g. llm.Client.OnRetry) that don't otherwise
+// hold the event channel but want to surface user-visible status.
+func (a *Agent) EmitInfo(msg string) {
+	a.events <- EventInfo{Text: msg}
 }
 
 // DefaultSystemPrompt is the cache-stable system prompt. It must not
@@ -148,7 +159,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) 
 		if err != nil {
 			stepCancel()
 			if a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded) {
-				a.fire(func() { a.Callbacks.OnInfo(fmt.Sprintf("step timed out after %s", a.StepTimeout)) })
+				a.events <- EventInfo{Text: fmt.Sprintf("step timed out after %s", a.StepTimeout)}
 				return StopUnknown, nil
 			}
 			return StopUnknown, err
@@ -164,14 +175,14 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) 
 		for _, sc := range a.StopWhen {
 			if stop, reason := sc(a.steps); stop {
 				stepCancel()
-				a.fire(func() { a.Callbacks.OnStepFinish(reason, step.Usage) })
+				a.events <- EventStepFinish{Reason: reason, Usage: step.Usage}
 				return reason, nil
 			}
 		}
 
 		if !hasTools {
 			stepCancel()
-			a.fire(func() { a.Callbacks.OnStepFinish(StopModelDone, step.Usage) })
+			a.events <- EventStepFinish{Reason: StopModelDone, Usage: step.Usage}
 			return StopModelDone, nil
 		}
 
@@ -182,7 +193,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) 
 		if toolErr != nil {
 			return StopUnknown, toolErr
 		}
-		a.fire(func() { a.Callbacks.OnStepFinish(StopUnknown, step.Usage) })
+		a.events <- EventStepFinish{Reason: StopUnknown, Usage: step.Usage}
 	}
 }
 
@@ -225,24 +236,24 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		case llm.EventTextDelta:
 			text += ev.Text
 			if inReasoning {
-				a.fire(func() { a.Callbacks.OnReasoningEnd() })
+				a.events <- EventReasoningEnd{}
 				inReasoning = false
 			}
-			a.fire(func() { a.Callbacks.OnTextDelta(ev.Text) })
+			a.events <- EventTextDelta{Text: ev.Text}
 		case llm.EventReasoningDelta:
 			if !inReasoning {
-				a.fire(func() { a.Callbacks.OnReasoningStart() })
+				a.events <- EventReasoningStart{}
 				inReasoning = true
 			}
 			reasoning += ev.Text
-			a.fire(func() { a.Callbacks.OnReasoningDelta(ev.Text) })
+			a.events <- EventReasoningDelta{Text: ev.Text}
 		case llm.EventToolCallDelta:
 			// tool-call deltas are aggregated by the client; we don't need
 			// per-delta tracking here. The EventFinish carries the
 			// assembled calls.
 		case llm.EventFinish:
 			if inReasoning {
-				a.fire(func() { a.Callbacks.OnReasoningEnd() })
+				a.events <- EventReasoningEnd{}
 				inReasoning = false
 			}
 			finish = ev.FinishReason
@@ -352,7 +363,7 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 // will see, plus an infrastructure error (which the caller serializes
 // into a tool-result message rather than aborting the loop).
 func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result, error) {
-	a.fire(func() { a.Callbacks.OnToolCallStart(call) })
+	a.events <- EventToolCallStart{Call: call}
 
 	// Tool-call rate limit. Warning fires exactly once when crossing 80%
 	// of the cap; the hard cap blocks any call beyond MaxToolCalls.
@@ -360,9 +371,7 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	if a.MaxToolCalls > 0 {
 		threshold := int(float64(a.MaxToolCalls) * 0.8)
 		if threshold > 0 && a.toolCallCount == threshold {
-			a.fire(func() {
-				a.Callbacks.OnInfo(fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls))
-			})
+			a.events <- EventInfo{Text: fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls)}
 		}
 		if a.toolCallCount > a.MaxToolCalls {
 			return tools.Errf("tool call limit reached (%d/%d)", a.toolCallCount, a.MaxToolCalls), nil
@@ -390,10 +399,20 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	case permissions.Deny:
 		return tools.Errf("denied by permissions policy"), nil
 	case permissions.Ask:
-		if a.Callbacks.OnPermissionAsk == nil {
-			return tools.Errf("permission required but no UI to ask"), nil
+		// Emit a permission ask carrying its own reply channel, and
+		// park until the consumer answers. Buffered cap=1 so the UI
+		// can send without waiting on us to receive.
+		reply := make(chan PermissionResponse, 1)
+		a.events <- EventPermissionAsk{
+			Check: permissions.Check{Tool: tool, Args: rawArgs},
+			Reply: reply,
 		}
-		resp := a.Callbacks.OnPermissionAsk(permissions.Check{Tool: tool, Args: rawArgs})
+		var resp PermissionResponse
+		select {
+		case resp = <-reply:
+		case <-ctx.Done():
+			return tools.Errf("cancelled while awaiting permission"), nil
+		}
 		if !resp.Allow {
 			return tools.Errf("user denied tool call"), nil
 		}
@@ -412,9 +431,9 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		dec, err := a.Validator.Validate(ctx, call.Function.Name, rawArgs, a.transcript())
 		dur := time.Since(t0)
 		if err != nil {
-			a.fire(func() { a.Callbacks.OnInfo("pro validation skipped: " + err.Error()) })
+			a.events <- EventInfo{Text: "pro validation skipped: " + err.Error()}
 		} else {
-			a.fire(func() { a.Callbacks.OnDuetValidation(call.ID, dec.Approve, dec.Reasoning, dur) })
+			a.events <- EventDuet{CallID: call.ID, Approved: dec.Approve, Reasoning: dec.Reasoning, Dur: dur}
 			if !dec.Approve {
 				return tools.Errf("blocked by pro validator: %s", dec.Reasoning), nil
 			}
@@ -424,7 +443,7 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	t0 := time.Now()
 	res, err := tool.Execute(ctx, rawArgs)
 	dur := time.Since(t0)
-	a.fire(func() { a.Callbacks.OnToolCallResult(call.ID, res, dur) })
+	a.events <- EventToolCallResult{CallID: call.ID, Result: res, Dur: dur}
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -500,15 +519,3 @@ func validateToolArgs(t tools.Tool, args json.RawMessage) error {
 	return nil
 }
 
-// fire safely invokes a Callback closure, no-op'ing on nil.
-func (a *Agent) fire(fn func()) {
-	defer func() {
-		// Swallow panics from user-supplied callbacks; they should never
-		// take down the loop.
-		_ = recover()
-	}()
-	if fn == nil {
-		return
-	}
-	fn()
-}

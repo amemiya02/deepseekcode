@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/amemiya02/deepseekcode/internal/agent"
 )
 
 // pagerState owns the pager overlay. nil when not active.
@@ -82,14 +84,14 @@ func (a *App) openExternalPager() tea.Cmd {
 	f, err := os.CreateTemp("", "dsc-scrollback-*.txt")
 	if err != nil {
 		return func() tea.Msg {
-			return infoMsg{Text: "external pager: cannot create temp file: " + err.Error()}
+			return agentEventMsg{Event: agent.EventInfo{Text: "external pager: cannot create temp file: " + err.Error()}}
 		}
 	}
 	if _, err := f.WriteString(content); err != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
 		return func() tea.Msg {
-			return infoMsg{Text: "external pager: write failed: " + err.Error()}
+			return agentEventMsg{Event: agent.EventInfo{Text: "external pager: write failed: " + err.Error()}}
 		}
 	}
 	_ = f.Close()
@@ -112,7 +114,7 @@ func (a *App) openExternalPager() tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		_ = os.Remove(f.Name())
 		if err != nil {
-			return infoMsg{Text: "external pager exited with error: " + err.Error()}
+			return agentEventMsg{Event: agent.EventInfo{Text: "external pager exited with error: " + err.Error()}}
 		}
 		return nil
 	})

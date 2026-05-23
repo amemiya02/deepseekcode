@@ -162,12 +162,10 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.Thinking = cfg.Defaults.Thinking
 	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
 
-	// Route retry notices through OnInfo so they appear as chat items
-	// instead of stderr writes that would corrupt the TUI.
+	// Route retry notices through agent.EmitInfo so they appear as
+	// chat items instead of stderr writes that would corrupt the TUI.
 	client.OnRetry = func(attempt int, err error) {
-		if a.Callbacks.OnInfo != nil {
-			a.Callbacks.OnInfo(fmt.Sprintf("retry %d/%d: %v", attempt, client.MaxRetries, err))
-		}
+		a.EmitInfo(fmt.Sprintf("retry %d/%d: %v", attempt, client.MaxRetries, err))
 	}
 
 	if cfg.Duet.Enabled {
@@ -322,7 +320,10 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		a.Validator = nil
 	}
 
-	a.Callbacks = stdoutCallbacks(cfg)
+	// Consumer goroutine: pulls events from the agent's lifetime stream
+	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents
+	// adapter — same channel, different sink.
+	go consumeAgentEvents(a, cfg.Defaults.Model)
 
 	reason, err := a.Run(ctx, prompt)
 	fmt.Fprintf(os.Stderr, "\n[stop: %s", reason)
@@ -333,90 +334,88 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	return nil
 }
 
-// stdoutCallbacks renders the agent's event stream to stdout (text +
-// reasoning + tool calls + cost). Reasoning blocks are bracketed with
-// ▸/◂ so the human reading along can fold them mentally.
-func stdoutCallbacks(cfg config.Config) agent.Callbacks {
+// consumeAgentEvents drives the CLI's stdout rendering off the agent's
+// Events() channel. Each event maps to a small fprintf — reasoning
+// dimmed and bracketed with ▸/◂, text streamed to stdout, tool calls /
+// results in cyan, duet validations in magenta, step footers in dim.
+// Permission asks read a single character from stdin and answer on
+// the embedded Reply chan.
+func consumeAgentEvents(a *agent.Agent, model string) {
 	var (
 		inReasoning bool
 		stepStart   time.Time
 		stepTokens  int
 	)
 	startStep := time.Now()
-	return agent.Callbacks{
-		OnReasoningStart: func() {
+	for ev := range a.Events() {
+		switch e := ev.(type) {
+		case agent.EventReasoningStart:
+			_ = e
 			inReasoning = true
 			stepStart = time.Now()
 			stepTokens = 0
 			fmt.Fprint(os.Stderr, "\n\033[2m▸ thinking ")
-		},
-		OnReasoningDelta: func(text string) {
-			stepTokens += len(text) / 4 // crude estimate
-			fmt.Fprint(os.Stderr, "\033[2m"+text+"\033[0m")
-		},
-		OnReasoningEnd: func() {
-			if !inReasoning {
-				return
+		case agent.EventReasoningDelta:
+			stepTokens += len(e.Text) / 4
+			fmt.Fprint(os.Stderr, "\033[2m"+e.Text+"\033[0m")
+		case agent.EventReasoningEnd:
+			_ = e
+			if inReasoning {
+				inReasoning = false
+				fmt.Fprintf(os.Stderr, "\033[2m ◂ (%.1fs · ~%d tok)\033[0m\n",
+					time.Since(stepStart).Seconds(), stepTokens)
 			}
-			inReasoning = false
-			fmt.Fprintf(os.Stderr, "\033[2m ◂ (%.1fs · ~%d tok)\033[0m\n",
-				time.Since(stepStart).Seconds(), stepTokens)
-		},
-		OnTextDelta: func(text string) {
-			fmt.Print(text)
-		},
-		OnToolCallStart: func(call llm.ToolCall) {
+		case agent.EventTextDelta:
+			fmt.Print(e.Text)
+		case agent.EventToolCallStart:
 			fmt.Fprintf(os.Stderr, "\n\033[36m▶ %s(%s)\033[0m\n",
-				call.Function.Name, oneline(call.Function.Arguments))
-		},
-		OnToolCallResult: func(callID string, res tools.Result, dur time.Duration) {
+				e.Call.Function.Name, oneline(e.Call.Function.Arguments))
+		case agent.EventToolCallResult:
 			tag := "✓"
-			if res.IsError {
+			if e.Result.IsError {
 				tag = "✗"
 			}
 			fmt.Fprintf(os.Stderr, "\033[36m%s %s (%s)\033[0m\n",
-				tag, callID, dur.Round(time.Millisecond))
-			if len(res.Content) > 0 {
-				fmt.Fprintln(os.Stderr, indent(res.Content, "  "))
+				tag, e.CallID, e.Dur.Round(time.Millisecond))
+			if len(e.Result.Content) > 0 {
+				fmt.Fprintln(os.Stderr, indent(e.Result.Content, "  "))
 			}
-		},
-		OnDuetValidation: func(callID string, approved bool, reasoning string, dur time.Duration) {
+		case agent.EventDuet:
 			verdict := "approved"
-			if !approved {
+			if !e.Approved {
 				verdict = "BLOCKED"
 			}
 			fmt.Fprintf(os.Stderr, "\n\033[35m◆ pro check (%s): %s — %s\033[0m\n",
-				dur.Round(time.Millisecond), verdict, reasoning)
-		},
-		OnStepFinish: func(reason agent.StopReason, usage llm.Usage) {
-			cost := llm.Cost(cfg.Defaults.Model, usage)
-			hit := llm.CacheHitRate(usage)
+				e.Dur.Round(time.Millisecond), verdict, e.Reasoning)
+		case agent.EventStepFinish:
+			cost := llm.Cost(model, e.Usage)
+			hit := llm.CacheHitRate(e.Usage)
 			fmt.Fprintf(os.Stderr,
 				"\n\033[2m[step done: %s · in=%d out=%d cache=%.0f%% ¥%.4f · %s]\033[0m\n",
-				reason, usage.PromptTokens, usage.CompletionTokens,
+				e.Reason, e.Usage.PromptTokens, e.Usage.CompletionTokens,
 				hit*100, cost, time.Since(startStep).Round(time.Millisecond))
-		},
-		OnPermissionAsk: func(check permissions.Check) agent.PermissionResponse {
+		case agent.EventInfo:
+			fmt.Fprintf(os.Stderr, "\n\033[2m[info] %s\033[0m\n", e.Text)
+		case agent.EventPermissionAsk:
 			fmt.Fprintf(os.Stderr,
 				"\n\033[33m? approve tool call:\033[0m %s\n  args: %s\n  [o]nce [s]ession [a]lways [d]eny > ",
-				check.Tool.Name(), oneline(string(check.Args)))
+				e.Check.Tool.Name(), oneline(string(e.Check.Args)))
 			rd := bufio.NewReader(os.Stdin)
 			line, _ := rd.ReadString('\n')
 			line = strings.TrimSpace(line)
+			var resp agent.PermissionResponse
 			switch line {
 			case "o", "":
-				return agent.PermissionResponse{Allow: true}
+				resp = agent.PermissionResponse{Allow: true}
 			case "s":
-				return agent.PermissionResponse{Allow: true} // session is wave-3 persistent
+				resp = agent.PermissionResponse{Allow: true}
 			case "a":
-				return agent.PermissionResponse{Allow: true, PersistPattern: true}
+				resp = agent.PermissionResponse{Allow: true, PersistPattern: true}
 			default:
-				return agent.PermissionResponse{Allow: false}
+				resp = agent.PermissionResponse{Allow: false}
 			}
-		},
-		OnInfo: func(msg string) {
-			fmt.Fprintf(os.Stderr, "\n\033[2m[info] %s\033[0m\n", msg)
-		},
+			e.Reply <- resp
+		}
 	}
 }
 

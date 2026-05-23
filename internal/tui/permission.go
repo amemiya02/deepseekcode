@@ -16,7 +16,7 @@ import (
 // PermissionFlow encapsulates the modal permission card. Mutations
 // only through methods.
 type PermissionFlow struct {
-	pending *permissionAskMsg
+	pending *agent.EventPermissionAsk
 	cursor  int // 0=allow once, 1=session, 2=always, 3=deny
 }
 
@@ -29,8 +29,8 @@ func (p *PermissionFlow) Active() bool { return p.pending != nil }
 // Open stores the ask and resets the cursor to the safe default
 // (allow once). Caller is responsible for switching App.mode to
 // modePermission and re-laying out the screen.
-func (p *PermissionFlow) Open(m permissionAskMsg) {
-	p.pending = &m
+func (p *PermissionFlow) Open(ev agent.EventPermissionAsk) {
+	p.pending = &ev
 	p.cursor = 0
 }
 

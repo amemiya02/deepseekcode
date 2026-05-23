@@ -14,16 +14,15 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/llm"
-	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
-	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
 // App is the root Bubble Tea Model.
 //
 // One App per running TUI process. The Agent runs in a goroutine
-// owned by the App; its Callbacks Send() typed messages back to the
-// program via App.send (set in Start).
+// owned by the App; a separate pumpEvents goroutine consumes
+// agent.Events() and forwards each event as an agentEventMsg via
+// App.send (the tea.Program.Send func, captured in Run).
 type App struct {
 	// Wiring
 	agent    *agent.Agent
@@ -147,7 +146,6 @@ func New(cfg Config) *App {
 			thinking: cfg.Thinking,
 		},
 	}
-	app.wireCallbacks()
 	return app
 }
 
@@ -173,35 +171,22 @@ func New(cfg Config) *App {
 func (a *App) Run() error {
 	prog := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	a.send = prog.Send
+	// Spawn the agent-event pump. Reads the agent's lifetime event
+	// stream, wraps each event into a single agentEventMsg, and hands
+	// it to the tea.Program. Replaces the old Callbacks-of-9-funcs
+	// design: now there's one consumer and one envelope.
+	go a.pumpEvents()
 	_, err := prog.Run()
 	return err
 }
 
-// wireCallbacks plugs the agent's Callbacks into program.Send. The
-// callbacks all run on the agent goroutine; they translate events to
-// typed messages and hand them to the UI thread.
-func (a *App) wireCallbacks() {
-	a.agent.Callbacks = agent.Callbacks{
-		OnReasoningStart: func() { a.send(reasoningStartMsg{}) },
-		OnReasoningDelta: func(s string) { a.send(reasoningDeltaMsg{Text: s}) },
-		OnReasoningEnd:   func() { a.send(reasoningEndMsg{}) },
-		OnTextDelta:      func(s string) { a.send(textDeltaMsg{Text: s}) },
-		OnToolCallStart:  func(c llm.ToolCall) { a.send(toolCallStartMsg{Call: c}) },
-		OnToolCallResult: func(id string, r tools.Result, d time.Duration) {
-			a.send(toolCallResultMsg{CallID: id, Result: r, Dur: d})
-		},
-		OnDuetValidation: func(id string, ok bool, reason string, d time.Duration) {
-			a.send(duetMsg{CallID: id, Approved: ok, Reasoning: reason, Dur: d})
-		},
-		OnStepFinish: func(reason agent.StopReason, u llm.Usage) {
-			a.send(stepFinishMsg{Reason: reason, Usage: u})
-		},
-		OnInfo: func(s string) { a.send(infoMsg{Text: s}) },
-		OnPermissionAsk: func(check permissions.Check) agent.PermissionResponse {
-			reply := make(chan agent.PermissionResponse, 1)
-			a.send(permissionAskMsg{Check: check, Reply: reply})
-			return <-reply
-		},
+// pumpEvents bridges agent.Events() to the tea.Program by wrapping
+// each event into an agentEventMsg. Runs for the lifetime of the
+// process; exits when the channel is closed (which the agent does
+// not currently do — process exit cleans it up).
+func (a *App) pumpEvents() {
+	for ev := range a.agent.Events() {
+		a.send(agentEventMsg{Event: ev})
 	}
 }
 
@@ -291,55 +276,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.chrome.MarkTickStopped()
 		}
-	case reasoningStartMsg:
-		a.chrome.BeginThinking()
-		a.scrollback.StartReasoning()
-		a.refreshView()
-		cmds = append(cmds, a.ensureTick())
-	case reasoningDeltaMsg:
-		a.chrome.UpdateTokens(a.scrollback.AppendReasoning(m.Text))
-	case reasoningEndMsg:
-		a.scrollback.EndReasoning()
-	case textDeltaMsg:
-		created, toks := a.scrollback.AppendText(m.Text)
-		if created {
-			a.chrome.BeginWriting()
-			a.refreshView()
-			cmds = append(cmds, a.ensureTick())
-		}
-		a.chrome.UpdateTokens(toks)
-	case toolCallStartMsg:
-		a.chrome.BeginTool(m.Call.Function.Name)
-		a.scrollback.AppendToolCall(m.Call.ID, m.Call.Function.Name, m.Call.Function.Arguments)
-		a.refreshView()
-		cmds = append(cmds, a.ensureTick())
-	case toolCallResultMsg:
-		a.scrollback.AppendToolResult(m.CallID, m.Result, m.Dur)
-		a.refreshView()
-	case duetMsg:
-		a.scrollback.AppendDuet(m.CallID, m.Approved, m.Reasoning, m.Dur)
-		a.status.duetActive = true
-		a.status.proCalls++
-		a.refreshView()
-	case stepFinishMsg:
-		a.stepTotal++
-		a.status.steps = a.stepTotal
-		a.status.usage.PromptTokens += m.Usage.PromptTokens
-		a.status.usage.CompletionTokens += m.Usage.CompletionTokens
-		a.status.usage.PromptCacheHitTokens += m.Usage.PromptCacheHitTokens
-		a.status.usage.PromptCacheMissTokens += m.Usage.PromptCacheMissTokens
-		a.status.costYuan += llm.Cost(a.model, m.Usage)
-		a.scrollback.AppendStepFinish(m.Reason.String(), m.Usage, a.model)
-		a.refreshView()
-	case infoMsg:
-		a.scrollback.AppendInfo(m.Text)
-		a.refreshView()
-	case permissionAskMsg:
-		a.permission.Open(m)
-		cmds = append(cmds, a.setMode(modePermission))
-		// Re-layout so the hidden input box gives its rows back to the
-		// viewport — the permission card is the active surface now.
-		a.layout()
+	case agentEventMsg:
+		cmds = append(cmds, a.dispatchAgentEvent(m.Event)...)
 	case agentErrMsg:
 		a.scrollback.AppendError(m.Err.Error())
 		a.refreshView()
@@ -375,6 +313,67 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.vp, c = a.vp.Update(msg)
 	cmds = append(cmds, c)
 	return a, tea.Batch(cmds...)
+}
+
+// dispatchAgentEvent routes one agent.Event to the right sub-module
+// and returns any tea.Cmds to schedule. Single type-switch replaces
+// the ten-case fan-out that used to live in Update.
+func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
+	var cmds []tea.Cmd
+	switch e := ev.(type) {
+	case agent.EventReasoningStart:
+		_ = e
+		a.chrome.BeginThinking()
+		a.scrollback.StartReasoning()
+		a.refreshView()
+		cmds = append(cmds, a.ensureTick())
+	case agent.EventReasoningDelta:
+		a.chrome.UpdateTokens(a.scrollback.AppendReasoning(e.Text))
+	case agent.EventReasoningEnd:
+		_ = e
+		a.scrollback.EndReasoning()
+	case agent.EventTextDelta:
+		created, toks := a.scrollback.AppendText(e.Text)
+		if created {
+			a.chrome.BeginWriting()
+			a.refreshView()
+			cmds = append(cmds, a.ensureTick())
+		}
+		a.chrome.UpdateTokens(toks)
+	case agent.EventToolCallStart:
+		a.chrome.BeginTool(e.Call.Function.Name)
+		a.scrollback.AppendToolCall(e.Call.ID, e.Call.Function.Name, e.Call.Function.Arguments)
+		a.refreshView()
+		cmds = append(cmds, a.ensureTick())
+	case agent.EventToolCallResult:
+		a.scrollback.AppendToolResult(e.CallID, e.Result, e.Dur)
+		a.refreshView()
+	case agent.EventDuet:
+		a.scrollback.AppendDuet(e.CallID, e.Approved, e.Reasoning, e.Dur)
+		a.status.duetActive = true
+		a.status.proCalls++
+		a.refreshView()
+	case agent.EventStepFinish:
+		a.stepTotal++
+		a.status.steps = a.stepTotal
+		a.status.usage.PromptTokens += e.Usage.PromptTokens
+		a.status.usage.CompletionTokens += e.Usage.CompletionTokens
+		a.status.usage.PromptCacheHitTokens += e.Usage.PromptCacheHitTokens
+		a.status.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
+		a.status.costYuan += llm.Cost(a.model, e.Usage)
+		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
+		a.refreshView()
+	case agent.EventInfo:
+		a.scrollback.AppendInfo(e.Text)
+		a.refreshView()
+	case agent.EventPermissionAsk:
+		a.permission.Open(e)
+		cmds = append(cmds, a.setMode(modePermission))
+		// Re-layout so the hidden input box gives its rows back to the
+		// viewport — the permission card is the active surface now.
+		a.layout()
+	}
+	return cmds
 }
 
 // scheduleRedraw returns a tea.Cmd that fires one redrawMsg after the

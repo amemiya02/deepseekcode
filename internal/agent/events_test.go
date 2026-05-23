@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -39,5 +42,34 @@ func TestEmitInfoPushesEvent(t *testing.T) {
 		}
 	default:
 		t.Fatal("EmitInfo should push an event synchronously")
+	}
+}
+
+// TestRunEmitsEventDoneOnExit pins the load-bearing contract: every
+// Run terminates with an EventDone on the event channel, even on
+// early-exit paths (ctx cancel, stream error, etc.). The TUI relies
+// on EventDone arriving AFTER every other event to reset the chrome
+// caption — bypassing the channel for completion used to race past
+// trailing tokens and leave chrome stuck on "writing…".
+func TestRunEmitsEventDoneOnExit(t *testing.T) {
+	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil), "x")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel: Run's first select fires immediately
+	go func() { _, _ = a.Run(ctx, "") }()
+
+	select {
+	case ev := <-a.Events():
+		done, ok := ev.(EventDone)
+		if !ok {
+			t.Fatalf("expected EventDone, got %T", ev)
+		}
+		if done.Reason != StopContextCancel {
+			t.Errorf("Reason mismatch: got %v, want %v", done.Reason, StopContextCancel)
+		}
+		if !errors.Is(done.Err, context.Canceled) {
+			t.Errorf("Err should wrap context.Canceled; got %v", done.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("EventDone never arrived on the channel")
 	}
 }

@@ -190,7 +190,10 @@ func (a *App) pumpEvents() {
 	}
 }
 
-// runAgent runs one prompt turn in the goroutine spawned by submitPromptCmd.
+// runAgent runs one prompt turn in the goroutine spawned by
+// submitPromptCmd. The "Run finished" signal travels through the
+// agent's event channel as agent.EventDone — runAgent itself just
+// owns the cancellation handles and the running flag.
 func (a *App) runAgent(prompt string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -200,18 +203,13 @@ func (a *App) runAgent(prompt string) {
 	a.running = true
 	a.runMu.Unlock()
 
-	reason, err := a.agent.Run(ctx, prompt)
+	_, _ = a.agent.Run(ctx, prompt)
 
 	a.runMu.Lock()
 	a.runCancel = nil
 	a.runCtx = nil
 	a.running = false
 	a.runMu.Unlock()
-
-	if err != nil {
-		a.send(agentErrMsg{Err: err})
-	}
-	a.send(agentDoneMsg{Reason: reason, Err: err})
 }
 
 // Init satisfies tea.Model. The first scrollback entry is an ASCII
@@ -278,13 +276,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentEventMsg:
 		cmds = append(cmds, a.dispatchAgentEvent(m.Event)...)
-	case agentErrMsg:
-		a.scrollback.AppendError(m.Err.Error())
-		a.refreshView()
-	case agentDoneMsg:
-		a.scrollback.EndStreams()
-		a.chrome.Reset()
-		a.refreshView()
 	case tea.MouseMsg:
 		// Mouse drives visual selection (click-drag-release) and
 		// wheel-scrolls the viewport. handleMouse only intercepts
@@ -372,6 +363,16 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		// Re-layout so the hidden input box gives its rows back to the
 		// viewport — the permission card is the active surface now.
 		a.layout()
+	case agent.EventDone:
+		// Terminator for this Run. Arrives AFTER every other event from
+		// this turn because Run defers the emit. Reset chrome here so
+		// the "writing…" caption can't linger past trailing deltas.
+		if e.Err != nil {
+			a.scrollback.AppendError(e.Err.Error())
+		}
+		a.scrollback.EndStreams()
+		a.chrome.Reset()
+		a.refreshView()
 	}
 	return cmds
 }

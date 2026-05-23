@@ -85,13 +85,26 @@ type EventPermissionAsk struct {
 	Reply chan<- PermissionResponse
 }
 
-func (EventReasoningStart) isAgentEvent()  {}
-func (EventReasoningDelta) isAgentEvent()  {}
-func (EventReasoningEnd) isAgentEvent()    {}
-func (EventTextDelta) isAgentEvent()       {}
-func (EventToolCallStart) isAgentEvent()   {}
-func (EventToolCallResult) isAgentEvent()  {}
-func (EventDuet) isAgentEvent()            {}
-func (EventStepFinish) isAgentEvent()      {}
-func (EventInfo) isAgentEvent()            {}
-func (EventPermissionAsk) isAgentEvent()   {}
+// EventDone is the agent's "this Run is finished" signal. Emitted via
+// defer from Run, so it travels the same channel as every other event
+// and arrives in strict order AFTER the final EventStepFinish. This
+// is load-bearing: routing the "done" signal through a separate
+// goroutine + tea.Msg path used to race past trailing text deltas,
+// leaving the UI's chrome stuck on "writing…" because a late delta
+// would re-fire BeginWriting after the reset.
+type EventDone struct {
+	Reason StopReason
+	Err    error
+}
+
+func (EventReasoningStart) isAgentEvent() {}
+func (EventReasoningDelta) isAgentEvent() {}
+func (EventReasoningEnd) isAgentEvent()   {}
+func (EventTextDelta) isAgentEvent()      {}
+func (EventToolCallStart) isAgentEvent()  {}
+func (EventToolCallResult) isAgentEvent() {}
+func (EventDuet) isAgentEvent()           {}
+func (EventStepFinish) isAgentEvent()     {}
+func (EventInfo) isAgentEvent()           {}
+func (EventPermissionAsk) isAgentEvent()  {}
+func (EventDone) isAgentEvent()           {}

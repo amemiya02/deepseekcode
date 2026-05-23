@@ -25,21 +25,12 @@ import (
 // the tea.Program. The Update switch type-switches on Event to route
 // to the right sub-module. Replaces the older "one tea.Msg type per
 // callback" design (9 types) with one envelope + a type switch.
+//
+// agent.EventDone (deferred-emit terminator) is the only "this run
+// is finished" signal — there is no separate agentDoneMsg. Routing
+// completion through the same channel as the deltas is what keeps
+// chrome.Reset() ordered AFTER any trailing tokens still in flight.
 type agentEventMsg struct{ Event agent.Event }
-
-// agentDoneMsg signals that agent.Run returned. Carries the final
-// stop reason and error (if any). Distinct from any agent.Event —
-// the Event stream is the agent's runtime emission; agentDoneMsg is
-// the "the goroutine exited" notification from the App's perspective.
-type agentDoneMsg struct {
-	Reason agent.StopReason
-	Err    error
-}
-
-// agentErrMsg surfaces an infrastructure error from a failed Run —
-// distinct from a tool error or a model error, both of which travel
-// the event stream as text/result/info.
-type agentErrMsg struct{ Err error }
 
 // runStartMsg fires immediately after a prompt is submitted, before
 // the agent goroutine has emitted anything. Lets the UI start the

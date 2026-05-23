@@ -133,7 +133,16 @@ Behavioral rules:
 // The userPrompt is appended as a user message. To resume without a
 // new user prompt (e.g. after a tool result the model needs to react
 // to), pass "".
-func (a *Agent) Run(ctx context.Context, userPrompt string) (StopReason, error) {
+//
+// Run defers an EventDone emit so the consumer sees a strict
+// terminator AFTER every other event from this turn. Bypassing the
+// events channel for the "done" signal used to race trailing deltas
+// and leave the UI's chrome stuck on "writing…" — never do that.
+func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, err error) {
+	defer func() {
+		a.events <- EventDone{Reason: reason, Err: err}
+	}()
+
 	if userPrompt != "" {
 		a.Messages = append(a.Messages, llm.Message{
 			Role:    "user",

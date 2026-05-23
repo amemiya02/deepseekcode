@@ -64,18 +64,19 @@ func (i chatItem) render(t Theme, width int) string {
 	case itemUser:
 		return t.UserPrompt.Render("> "+i.text) + "\n"
 	case itemAssistantText:
-		// Trailing newline is load-bearing: without it the next chat
-		// item glues onto the last visual row of the assistant text and
-		// overflows past the viewport's right edge (showing as "[st" or
-		// similar truncation artifacts).
-		return t.AssistantText.Render(i.text) + "\n"
+		// Assistant output is markdown — render through Glamour so
+		// **bold** / `code` / lists / headings get proper ANSI styling
+		// AND the line wrapping respects the terminal width. Without
+		// this, long lines overflow past the viewport's right edge.
+		body := renderMarkdown(i.text, t.Name, width)
+		return body + "\n"
 	case itemReasoning:
 		if i.folded {
 			label := fmt.Sprintf("▸ thinking (%.1fs · ~%d tok)", i.duration.Seconds(), i.tokens)
 			return t.ReasoningFold.Render(label) + t.Hint.Render("  [^R to expand]") + "\n"
 		}
-		// expanded
-		body := wrap(i.reasoning, width-2)
+		// expanded — reasoning is plain text, not markdown; just wrap.
+		body := wrapWords(i.reasoning, width-2)
 		return t.ReasoningFold.Render("▾ thinking") + "\n" +
 			t.Reasoning.Render(indent(body, "  ")) + "\n" +
 			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens)) + "\n"
@@ -115,31 +116,6 @@ func (i chatItem) render(t Theme, width int) string {
 		return t.Error.Render("error: "+i.text) + "\n"
 	}
 	return ""
-}
-
-func wrap(s string, width int) string {
-	if width <= 10 || len(s) == 0 {
-		return s
-	}
-	var b strings.Builder
-	for _, line := range strings.Split(s, "\n") {
-		if len(line) <= width {
-			b.WriteString(line)
-			b.WriteByte('\n')
-			continue
-		}
-		// hard wrap on width; preserves indentation visually
-		for len(line) > width {
-			b.WriteString(line[:width])
-			b.WriteByte('\n')
-			line = line[width:]
-		}
-		if len(line) > 0 {
-			b.WriteString(line)
-			b.WriteByte('\n')
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 func indent(s, prefix string) string {

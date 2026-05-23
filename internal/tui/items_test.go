@@ -48,3 +48,18 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// TestAssistantTextRendersMarkdown guards against regressing back to
+// raw `**bold**` literals showing in the scrollback. Glamour should
+// consume the markdown syntax and emit ANSI-styled output.
+func TestAssistantTextRendersMarkdown(t *testing.T) {
+	item := chatItem{kind: itemAssistantText, text: "Hello **world**"}
+	out := item.render(DarkTheme(), 80)
+
+	if strings.Contains(out, "**") {
+		t.Errorf("markdown asterisks leaked into render: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("expected ANSI escape codes from Glamour, got plain text: %q", out)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ type Client struct {
 	// ChunkStallTimeout caps the gap between SSE events once streaming
 	// has begun. Default 20s.
 	ChunkStallTimeout time.Duration
+
+	// MaxRetries is the maximum number of retries for transient errors
+	// (429 rate-limit, 5xx server errors). Default 3. 0 disables retry.
+	MaxRetries int
+
+	// OnRetry, if non-nil, is called before each retry sleep with the
+	// attempt number (1-based) and the error that triggered it.
+	OnRetry func(attempt int, err error)
 }
 
 // NewClient returns a Client with sensible defaults.
@@ -36,6 +45,7 @@ func NewClient(apiKey, baseURL string) *Client {
 		BaseURL:           strings.TrimRight(baseURL, "/"),
 		FirstTokenTimeout: 45 * time.Second,
 		ChunkStallTimeout: 20 * time.Second,
+		MaxRetries:        3,
 	}
 }
 
@@ -44,6 +54,10 @@ func NewClient(apiKey, baseURL string) *Client {
 // the channel is closed by the goroutine that reads the SSE body.
 //
 // Caller is expected to drain the channel. To abort, cancel ctx.
+//
+// Transient errors (429, 5xx) are retried with exponential backoff +
+// jitter up to c.MaxRetries times. Non-transient errors (400, 401,
+// 403) are returned immediately.
 func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	req.Stream = true
 	if req.StreamOptions == nil {
@@ -55,6 +69,44 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	maxRetries := c.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 0 // explicit no-retry
+	}
+
+	for attempt := 0; ; attempt++ {
+		ch, err := c.doStream(ctx, body)
+		if err == nil {
+			return ch, nil
+		}
+
+		// Non-transient or exhausted retries: fail immediately.
+		if !IsTransient(err) || attempt >= maxRetries {
+			return nil, err
+		}
+
+		if c.OnRetry != nil {
+			c.OnRetry(attempt+1, err)
+		}
+
+		// Exponential backoff: 1s, 2s, 4s ... capped at 30s, with jitter.
+		delay := time.Second << uint(attempt)
+		if delay > 30*time.Second {
+			delay = 30 * time.Second
+		}
+		jitter := time.Duration(rand.Int63n(int64(delay) / 2)) // 0..delay/2
+		delay += jitter
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+// doStream performs a single HTTP+SSE request attempt.
+func (c *Client) doStream(ctx context.Context, body []byte) (<-chan Event, error) {
 	url := c.BaseURL + "/v1/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -69,7 +121,6 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 		return nil, err
 	}
 	if resp.StatusCode/100 != 2 {
-		// Drain a small portion of the body for error context.
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		return nil, &APIError{Status: resp.StatusCode, Body: string(buf)}

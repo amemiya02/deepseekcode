@@ -25,3 +25,14 @@ func IsAuth(err error) bool {
 	a, ok := err.(*APIError)
 	return ok && (a.Status == 401 || a.Status == 403)
 }
+
+// IsTransient reports whether the error is retryable: rate-limit or
+// server-side (5xx) errors. Auth errors (401/403) and client errors
+// (400) are NOT transient — retrying them wastes time.
+func IsTransient(err error) bool {
+	a, ok := err.(*APIError)
+	if !ok {
+		return false
+	}
+	return a.Status == 429 || a.Status >= 500
+}

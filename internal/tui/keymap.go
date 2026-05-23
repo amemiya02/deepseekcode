@@ -16,6 +16,10 @@ type keymap struct {
 	Bottom   key.Binding
 	ToggleR  key.Binding
 	ToggleRR key.Binding
+	EnterN   key.Binding // switch to Normal (scroll) mode
+	EnterI   key.Binding // switch to Insert (typing) mode
+	Expand   key.Binding // expand last collapsed tool result
+	Pager    key.Binding // open pager for last tool result
 }
 
 func defaultKeymap() keymap {
@@ -32,5 +36,9 @@ func defaultKeymap() keymap {
 		Bottom:   key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
 		ToggleR:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "toggle last thinking")),
 		ToggleRR: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "toggle all thinking")),
+		EnterN:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "scroll mode")),
+		EnterI:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "type mode")),
+		Expand:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "expand result")),
+		Pager:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pager")),
 	}
 }

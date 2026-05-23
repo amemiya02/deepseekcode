@@ -51,6 +51,7 @@ type chatItem struct {
 	tool       string
 	args       string
 	result     tools.Result
+	expanded   bool // true when user has expanded a truncated tool result
 
 	// Duet
 	approved      bool
@@ -76,6 +77,9 @@ func (i chatItem) render(t Theme, width int) string {
 	case itemReasoning:
 		if i.folded {
 			label := fmt.Sprintf("▸ thinking (%.1fs · ~%d tok)", i.duration.Seconds(), i.tokens)
+			if peek := reasoningPeek(i.reasoning, 60); peek != "" {
+				label += "  " + t.Reasoning.Render(peek)
+			}
 			return t.ReasoningFold.Render(label) + t.Hint.Render("  [^R to expand]") + "\n"
 		}
 		// expanded — reasoning is plain text, not markdown; just wrap.
@@ -114,8 +118,15 @@ func (i chatItem) render(t Theme, width int) string {
 			return head
 		}
 		// Body indented 4 cols to align under the ⎿ connector.
+		if i.expanded {
+			return head + t.ToolBody.Render(indent(body, "    ")) + "\n"
+		}
 		truncated := truncate(body, 30, width-4)
-		return head + t.ToolBody.Render(indent(truncated, "    ")) + "\n"
+		rendered := head + t.ToolBody.Render(indent(truncated, "    "))
+		if lineCount(body) > 30 {
+			rendered += "\n" + t.Hint.Render("    ... press e to expand ...")
+		}
+		return rendered + "\n"
 	case itemDuet:
 		head := "approved"
 		style := t.DuetApprove
@@ -201,6 +212,28 @@ func lineCount(s string) int {
 		n++
 	}
 	return n
+}
+
+// reasoningPeek returns a single-line preview of the reasoning body
+// for the collapsed-thinking summary chip. Returns "" for empty input.
+// Strips newlines, trims whitespace, and ellipsis-truncates at max
+// runes so the chip never wraps.
+func reasoningPeek(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	// Collapse runs of spaces for compactness.
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	runes := []rune(s)
+	if len(runes) > max {
+		s = string(runes[:max-1]) + "…"
+	}
+	return "\"" + s + "\""
 }
 
 // truncate keeps head + tail of long output with a marker, mirroring

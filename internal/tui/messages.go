@@ -79,15 +79,30 @@ type (
 
 	// agentErrMsg surfaces an infrastructure error from the agent.
 	agentErrMsg struct{ Err error }
+
+	// runStartMsg fires immediately after a prompt is submitted, before
+	// the agent goroutine has emitted anything. Lets the UI start the
+	// chrome spinner and redraw ticker so the user sees activity even
+	// during the cold-start gap before the first reasoning token.
+	runStartMsg struct{}
+
+	// redrawMsg drives the coalesced re-render loop. While the agent is
+	// running, deltas (text/reasoning tokens) only mark a.dirty=true;
+	// the actual viewport rebuild happens on the redraw tick, capped at
+	// ~12 fps. Without this, fast token streams cause O(N²) renders
+	// that block scroll input.
+	redrawMsg struct{}
 )
 
 // UI → agent commands
 
 // submitPromptCmd starts a new agent Run with userPrompt. The agent
-// goroutine emits agent → UI messages as work progresses.
+// goroutine emits agent → UI messages as work progresses. We return
+// runStartMsg so the UI thread can spin up the chrome ticker before
+// any agent callback has fired.
 func (a *App) submitPromptCmd(userPrompt string) tea.Cmd {
 	return func() tea.Msg {
 		go a.runAgent(userPrompt)
-		return nil
+		return runStartMsg{}
 	}
 }

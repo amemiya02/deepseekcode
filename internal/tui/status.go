@@ -19,14 +19,20 @@ type statusState struct {
 	proCalls   int
 	proCost    float64
 	hint       string
+	mode       appMode
 }
 
 // render returns the one- or two-line status string. Two lines when
 // the Duet validator has actually fired this session.
+// When in Normal (scroll) mode, a "NORMAL" badge is shown on the left.
 func (s statusState) render(t Theme) string {
 	hit := llm.CacheHitRate(s.usage) * 100
-	line1 := fmt.Sprintf("%s · %d steps · cache %.0f%% · ¥%.4f",
-		t.StatusModel.Render(shortModel(s.model)), s.steps, hit, s.costYuan)
+	var modeBadge string
+	if s.mode == modeNormal {
+		modeBadge = t.Hint.Render("NORMAL ") + "· "
+	}
+	line1 := fmt.Sprintf("%s%s · %d steps · cache %.0f%% · ¥%.4f",
+		modeBadge, t.StatusModel.Render(shortModel(s.model)), s.steps, hit, s.costYuan)
 	if s.hint != "" {
 		line1 += t.Hint.Render("  · " + s.hint)
 	}

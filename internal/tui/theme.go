@@ -30,8 +30,11 @@ type Theme struct {
 	Error         lipgloss.Style
 	Hint          lipgloss.Style
 
-	InputBorder   lipgloss.Style
-	PermPrompt    lipgloss.Style
+	InputBorder    lipgloss.Style
+	InputBorderDim lipgloss.Style // Normal mode: dim border around textarea
+	PermPrompt     lipgloss.Style
+	PermFocus      lipgloss.Style // focused permission-card button (inverted)
+	PermButton     lipgloss.Style // unfocused permission-card button
 }
 
 // DarkTheme returns the default dark theme. Flash voice = cyan,
@@ -64,8 +67,14 @@ func DarkTheme() Theme {
 		Info:          lipgloss.NewStyle().Foreground(yellow),
 		Error:         lipgloss.NewStyle().Foreground(red).Bold(true),
 		Hint:          lipgloss.NewStyle().Foreground(dim),
-		InputBorder:   lipgloss.NewStyle().Foreground(cyan),
-		PermPrompt:    lipgloss.NewStyle().Foreground(yellow).Bold(true),
+		InputBorder:    lipgloss.NewStyle().Foreground(cyan),
+		InputBorderDim: lipgloss.NewStyle().Foreground(dim),
+		PermPrompt:     lipgloss.NewStyle().Foreground(yellow).Bold(true),
+		PermFocus: lipgloss.NewStyle().
+			Background(yellow).
+			Foreground(lipgloss.Color("#1c1c1c")).
+			Bold(true),
+		PermButton: lipgloss.NewStyle().Foreground(white),
 	}
 }
 
@@ -98,8 +107,14 @@ func LightTheme() Theme {
 		Info:          lipgloss.NewStyle().Foreground(yellow),
 		Error:         lipgloss.NewStyle().Foreground(red).Bold(true),
 		Hint:          lipgloss.NewStyle().Foreground(dim),
-		InputBorder:   lipgloss.NewStyle().Foreground(cyan),
-		PermPrompt:    lipgloss.NewStyle().Foreground(yellow).Bold(true),
+		InputBorder:    lipgloss.NewStyle().Foreground(cyan),
+		InputBorderDim: lipgloss.NewStyle().Foreground(dim),
+		PermPrompt:     lipgloss.NewStyle().Foreground(yellow).Bold(true),
+		PermFocus: lipgloss.NewStyle().
+			Background(yellow).
+			Foreground(lipgloss.Color("#ffffff")).
+			Bold(true),
+		PermButton: lipgloss.NewStyle().Foreground(black),
 	}
 }
 

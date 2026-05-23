@@ -177,8 +177,9 @@ func TestRebindStopsAtStepFinish(t *testing.T) {
 // wide enough.
 func TestWelcomeRenders(t *testing.T) {
 	out := renderWelcome(DarkTheme(), 100)
-	if !strings.Contains(out, "~~~~") {
-		t.Errorf("expected whale waterline in welcome; got %q", out)
+	// Spot-check the wordmark block-font (top row) and the tagline.
+	if !strings.Contains(out, "____") {
+		t.Errorf("expected wordmark block characters in welcome; got %q", out)
 	}
 	if !strings.Contains(out, "DeepSeek") {
 		t.Errorf("expected 'DeepSeek' tagline in welcome; got %q", out)

@@ -74,8 +74,8 @@ Respond ONLY with a JSON object of the form:
 	req := llm.Request{
 		Model: v.Model,
 		Messages: []llm.Message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: userMsg},
+			{Role: "system", Blocks: []llm.ContentBlock{llm.TextBlock{Text: system}}},
+			{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: userMsg}}},
 		},
 		Thinking:       llm.ThinkingEnabled(true),
 		ResponseFormat: &llm.ResponseFmt{Type: "json_object"},

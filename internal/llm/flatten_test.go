@@ -13,18 +13,6 @@ func TestFlattenForWire(t *testing.T) {
 		assert func(t *testing.T, got wireMessage)
 	}{
 		{
-			"legacy_only",
-			Message{Role: "assistant", Content: "hi", ReasoningContent: "think", ToolCalls: []ToolCall{{ID: "x", Type: "function", Function: ToolCallFunc{Name: "bash", Arguments: "{}"}}}},
-			func(t *testing.T, got wireMessage) {
-				if got.Content != "hi" || got.ReasoningContent != "think" {
-					t.Errorf("legacy fields not preserved: %+v", got)
-				}
-				if len(got.ToolCalls) != 1 || got.ToolCalls[0].ID != "x" {
-					t.Errorf("legacy tool_calls not preserved: %+v", got.ToolCalls)
-				}
-			},
-		},
-		{
 			"blocks_text_only",
 			Message{Role: "assistant", Blocks: []ContentBlock{TextBlock{Text: "hello"}}},
 			func(t *testing.T, got wireMessage) {

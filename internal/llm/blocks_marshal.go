@@ -23,9 +23,8 @@ type wireMessage struct {
 }
 
 // flattenForWire converts a Message into the DeepSeek wire shape.
-// When Blocks is empty, the legacy Content/ReasoningContent/ToolCalls
-// fields pass through unchanged. When Blocks is non-empty, those
-// legacy fields are ignored and the wire shape is built from blocks:
+// Empty Blocks yields a wireMessage with only Role/Name set (used
+// for placeholder system or empty-turn envelopes). Otherwise:
 //
 //   - Multiple TextBlocks concatenate into Content (no separator)
 //   - Multiple ThinkingBlocks concatenate into ReasoningContent
@@ -35,10 +34,6 @@ type wireMessage struct {
 func flattenForWire(m Message) wireMessage {
 	out := wireMessage{Role: m.Role, Name: m.Name}
 	if len(m.Blocks) == 0 {
-		out.Content = m.Content
-		out.ReasoningContent = m.ReasoningContent
-		out.ToolCalls = m.ToolCalls
-		out.ToolCallID = m.ToolCallID
 		return out
 	}
 	var (

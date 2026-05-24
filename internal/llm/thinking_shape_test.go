@@ -9,7 +9,7 @@ import (
 func TestThinkingSerializesAsStruct(t *testing.T) {
 	req := Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []Message{{Role: "user", Content: "hi"}},
+		Messages: []Message{{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "hi"}}}},
 		Thinking: ThinkingEnabled(true),
 	}
 	b, err := req.MarshalCacheStable()
@@ -30,8 +30,11 @@ func TestReasoningContentRoundtrips(t *testing.T) {
 	req := Request{
 		Model: "deepseek-v4-flash",
 		Messages: []Message{
-			{Role: "user", Content: "hi"},
-			{Role: "assistant", Content: "ok", ReasoningContent: "let me think"},
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "hi"}}},
+			{Role: "assistant", Blocks: []ContentBlock{
+				ThinkingBlock{Text: "let me think"},
+				TextBlock{Text: "ok"},
+			}},
 		},
 	}
 	b, err := req.MarshalCacheStable()
@@ -47,7 +50,7 @@ func TestReasoningContentOmittedWhenEmpty(t *testing.T) {
 	req := Request{
 		Model: "deepseek-v4-flash",
 		Messages: []Message{
-			{Role: "assistant", Content: "ok"},
+			{Role: "assistant", Blocks: []ContentBlock{TextBlock{Text: "ok"}}},
 		},
 	}
 	b, err := req.MarshalCacheStable()
@@ -62,7 +65,7 @@ func TestReasoningContentOmittedWhenEmpty(t *testing.T) {
 func TestThinkingNilOmitted(t *testing.T) {
 	req := Request{
 		Model:    "deepseek-v4-flash",
-		Messages: []Message{{Role: "user", Content: "hi"}},
+		Messages: []Message{{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "hi"}}}},
 		Thinking: ThinkingEnabled(false), // nil
 	}
 	b, err := req.MarshalCacheStable()

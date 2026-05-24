@@ -302,7 +302,10 @@ func (a *Agent) fullMessages() []llm.Message {
 		return a.Messages
 	}
 	out := make([]llm.Message, 0, len(a.Messages)+1)
-	out = append(out, llm.Message{Role: "system", Content: a.System})
+	out = append(out, llm.Message{
+		Role:   "system",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: a.System}},
+	})
 	out = append(out, a.Messages...)
 	return out
 }

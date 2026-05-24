@@ -55,18 +55,11 @@ type StreamOptions struct {
 // Message is a single turn in the chat. Role is one of:
 // "system" | "user" | "assistant" | "tool".
 //
-// Blocks is the new canonical representation. The Phase 0 migration
-// keeps the Content/ReasoningContent/ToolCalls/ToolCallID fields
-// alive on the read path so old SQLite rows still decode; once
-// T-019 lands those four fields will be removed and Blocks becomes
-// the sole content carrier. The wire flatten layer (T-006/T-008)
-// prefers Blocks when present.
-//
-// ReasoningContent is DeepSeek's thinking-mode echo channel: when the
-// previous assistant turn streamed reasoning_content, the server demands
-// it back on the assistant message in the next request, alongside any
-// tool_calls. Omitting it yields a 400 "The `reasoning_content` in the
-// thinking mode must be passed back to the API."
+// Blocks is the canonical representation. The wire flatten layer
+// (Request.MarshalCacheStable → flattenForWire) folds Blocks back
+// into DeepSeek's OpenAI-shape {content, reasoning_content,
+// tool_calls} fields per request, so reasoning_content still
+// round-trips for thinking mode.
 type Message struct {
 	Role string `json:"role"`
 
@@ -75,15 +68,6 @@ type Message struct {
 	Blocks []ContentBlock `json:"-"`
 
 	Name string `json:"name,omitempty"`
-
-	// DEPRECATED — populated for legacy code paths until T-019 removes them.
-	Content string `json:"content,omitempty"`
-	// DEPRECATED — see Content.
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-	// DEPRECATED — see Content.
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	// DEPRECATED — see Content.
-	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 // Tool is a function-calling tool definition.

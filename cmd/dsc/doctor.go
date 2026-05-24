@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
 )
 
@@ -33,6 +34,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkSnapshots(),
 		checkTerminal(),
 		checkGit(),
+		checkInstructions(),
 		{
 			Name:   "platform",
 			Status: "ok",
@@ -150,13 +152,36 @@ func checkTerminal() checkResult {
 }
 
 func checkGit() checkResult {
+	// Git is optional — the agent runs fine without it. Surface a warn
+	// so the user knows git-aware features (git_diff / commit log in
+	// the system prompt) will be inactive, but don't fail Doctor.
 	path, err := exec.LookPath("git")
 	if err != nil {
-		return checkResult{"git", "fail", "git not found in PATH"}
+		return checkResult{"git", "warn", "git not found in PATH (git-aware prompt context will be empty)"}
 	}
 	out, err := exec.Command("git", "version").Output()
 	if err != nil {
 		return checkResult{"git", "warn", "found at " + path + " but version check failed"}
 	}
 	return checkResult{"git", "ok", strings.TrimSpace(string(out))}
+}
+
+func checkInstructions() checkResult {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return checkResult{"instructions", "warn", "cwd unreadable: " + err.Error()}
+	}
+	home, _ := os.UserHomeDir()
+	files, err := promptpkg.LoadInstructionFiles(cwd, home)
+	if err != nil {
+		return checkResult{"instructions", "warn", err.Error()}
+	}
+	if len(files) == 0 {
+		return checkResult{"instructions", "warn", "none found — consider creating DEEPSEEK.md"}
+	}
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		names = append(names, filepath.Base(f.Path))
+	}
+	return checkResult{"instructions", "ok", fmt.Sprintf("%d file(s): %s", len(files), strings.Join(names, ", "))}
 }

@@ -388,6 +388,60 @@ func TestReplaceWithCompactionAtomic(t *testing.T) {
 	}
 }
 
+// TestReplaceWithCompactionThenBranch validates that branching a
+// session AFTER its parent has been compacted produces a Replay
+// that includes the synthetic summary at idx 0 followed by the
+// post-compaction tail of the parent, then the branch's own
+// messages.
+func TestReplaceWithCompactionThenBranch(t *testing.T) {
+	s, parentID := newStoreWithSession(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		text := "msg-" + string(rune('A'+i))
+		if _, err := s.AppendMessage(ctx, parentID, Message{
+			Role:   "user",
+			Blocks: []llm.ContentBlock{llm.TextBlock{Text: text}},
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	if _, err := s.ReplaceWithCompaction(ctx, parentID, 0, 3, "PARENT_SUMMARY"); err != nil {
+		t.Fatalf("compact parent: %v", err)
+	}
+
+	// Parent now has [summary, m3, m4] at idx 0,1,2.
+	// Branch at point 2 → child sees parent[:2] = [summary, m3].
+	child, err := s.NewBranch(ctx, parentID, 2)
+	if err != nil {
+		t.Fatalf("new branch: %v", err)
+	}
+	if _, err := s.AppendMessage(ctx, child.ID, Message{
+		Role:   "assistant",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: "branch-reply"}},
+	}); err != nil {
+		t.Fatalf("append child: %v", err)
+	}
+
+	msgs, err := s.Replay(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("replay child: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages (summary + parent[1] + child[0]); got %d", len(msgs))
+	}
+	if tb, ok := msgs[0].Blocks[0].(llm.TextBlock); !ok || tb.Text != "PARENT_SUMMARY" {
+		t.Errorf("msgs[0] should be PARENT_SUMMARY; got %#v", msgs[0].Blocks[0])
+	}
+	if tb, ok := msgs[1].Blocks[0].(llm.TextBlock); !ok || tb.Text != "msg-D" {
+		t.Errorf("msgs[1] should be parent post-compact tail (msg-D); got %#v", msgs[1].Blocks[0])
+	}
+	if tb, ok := msgs[2].Blocks[0].(llm.TextBlock); !ok || tb.Text != "branch-reply" {
+		t.Errorf("msgs[2] should be branch own message; got %#v", msgs[2].Blocks[0])
+	}
+}
+
 func TestReplaceWithCompactionNoOp(t *testing.T) {
 	s, sessID := newStoreWithSession(t)
 	ctx := context.Background()

@@ -3,7 +3,83 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 )
+
+// wireMessage is the JSON shape DeepSeek's chat-completions endpoint
+// expects. It mirrors the OpenAI Chat Completions message envelope:
+// content as a single string, reasoning_content alongside, and any
+// tool invocations on tool_calls[]. Tool results travel as separate
+// {role:"tool"} envelopes — split out by the caller in T-008, not
+// here.
+type wireMessage struct {
+	Role             string     `json:"role"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	Name             string     `json:"name,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+}
+
+// flattenForWire converts a Message into the DeepSeek wire shape.
+// When Blocks is empty, the legacy Content/ReasoningContent/ToolCalls
+// fields pass through unchanged. When Blocks is non-empty, those
+// legacy fields are ignored and the wire shape is built from blocks:
+//
+//   - Multiple TextBlocks concatenate into Content (no separator)
+//   - Multiple ThinkingBlocks concatenate into ReasoningContent
+//   - ToolUseBlocks become ToolCalls, sorted by ID for cache stability
+//   - ToolResultBlocks are NOT handled here — the caller must split
+//     them out as separate {role:"tool"} wireMessages
+func flattenForWire(m Message) wireMessage {
+	out := wireMessage{Role: m.Role, Name: m.Name}
+	if len(m.Blocks) == 0 {
+		out.Content = m.Content
+		out.ReasoningContent = m.ReasoningContent
+		out.ToolCalls = m.ToolCalls
+		out.ToolCallID = m.ToolCallID
+		return out
+	}
+	var (
+		text     strings.Builder
+		thinking strings.Builder
+		calls    []ToolCall
+	)
+	for _, b := range m.Blocks {
+		switch v := b.(type) {
+		case TextBlock:
+			text.WriteString(v.Text)
+		case ThinkingBlock:
+			thinking.WriteString(v.Text)
+		case ToolUseBlock:
+			args := string(v.Input)
+			if args == "" {
+				args = "{}"
+			}
+			calls = append(calls, ToolCall{
+				ID:   v.ID,
+				Type: "function",
+				Function: ToolCallFunc{
+					Name:      v.Name,
+					Arguments: args,
+				},
+			})
+		case ToolResultBlock:
+			// Caller's job (see T-008). Intentionally a no-op here so
+			// flattenForWire on a {role:"tool", Blocks:[ToolResult]}
+			// produces an empty wireMessage instead of synthesizing
+			// the wrong envelope.
+		}
+	}
+	if calls != nil {
+		sort.SliceStable(calls, func(i, j int) bool { return calls[i].ID < calls[j].ID })
+	}
+	out.Content = text.String()
+	out.ReasoningContent = thinking.String()
+	out.ToolCalls = calls
+	return out
+}
 
 // MarshalBlocks serializes a slice of ContentBlock to a JSON array.
 // Each element carries a "kind" discriminator key followed by the

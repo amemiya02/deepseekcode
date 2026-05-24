@@ -7,7 +7,7 @@ OpenAI-style function calling.
 |------|-------|--------------|-------|
 | `read_file` | read | yes | Returns content with `cat -n` line numbers. Optional `start_line`/`end_line` range. 2 MiB cap per file. |
 | `write_file` | mutate | inside cwd | Atomic write (tempfile + rename). Snapshotted before write. |
-| `edit_file` | mutate | inside cwd | String-replace with unique-match enforcement; `replace_all` opts in to multi-replace. Snapshotted. |
+| `edit_file` | mutate | inside cwd | String-replace with unique-match enforcement; `replace_all` opts in to multi-replace. Fuzzy hint when exact match fails (≤3 line-level edits). Snapshotted. |
 | `bash` | execute | per-pattern | Runs in user shell with 120s default timeout. Permission gate per `bashPattern` matcher. Destructive bash triggers the Duet validator. |
 | `glob` | read | yes | Doublestar pattern (`**/*.go`). Skips `.git`, `node_modules`, `.venv`, etc. |
 | `grep` | read | yes | Regex search. Shells out to `rg` when present; falls back to a stdlib walker. |
@@ -63,3 +63,26 @@ are enabled by default** — the binary ships with the surface above.
 > MCP integration ships partially in v0.1 — configuration is parsed but
 > the runtime bridge is on the v0.2 roadmap. Until then, the built-in
 > tool surface is the working set.
+
+## Fuzzy matching in edit_file
+
+When `edit_file` cannot find an exact match for `old_string`, it
+attempts a fuzzy fallback using line-level Levenshtein distance:
+
+1. The file is split into lines. A sliding window of the same line count
+   as `old_string` is moved across the file.
+2. Each window is compared to `old_string` using
+   `LevenshteinLines` (standard DP, O(n×m) on line tokens).
+3. If the closest window is within **3 line edits** (insert, delete, or
+   substitute), `edit_file` returns an error hint:
+
+   ```
+   old_string not found in path. Closest match at line N (distance D): "preview..."
+   ```
+
+4. If the closest match exceeds 3 edits, the plain "not found" error is
+   returned instead.
+
+The fuzzy hint **never auto-applies** the change. The model (or user)
+must retry with the correct `old_string`. This prevents silent
+mis-edits while still providing actionable feedback on near-matches.

@@ -90,3 +90,67 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 	}
 	return b
 }
+
+func TestEditFileFuzzyHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fuzzy.txt")
+	content := "line one\nline two\nline three\nline four\n"
+	must(t, os.WriteFile(path, []byte(content), 0o644))
+
+	t.Run("close match gives hint", func(t *testing.T) {
+		args := mustJSON(t, map[string]any{
+			"path":       path,
+			"old_string": "line one\nline two\nline threeX",
+			"new_string": "replaced",
+		})
+		res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatalf("expected error result; got: %s", res.Content)
+		}
+		if !strings.Contains(res.Content, "Closest match at line 1") {
+			t.Fatalf("expected fuzzy hint; got: %s", res.Content)
+		}
+		if !strings.Contains(res.Content, "distance 1") {
+			t.Fatalf("expected distance 1; got: %s", res.Content)
+		}
+	})
+
+	t.Run("too far gives plain not found", func(t *testing.T) {
+		args := mustJSON(t, map[string]any{
+			"path":       path,
+			"old_string": "completely\ndifferent\ncontent\nhere\nnow",
+			"new_string": "replaced",
+		})
+		res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatalf("expected error result; got: %s", res.Content)
+		}
+		if strings.Contains(res.Content, "Closest match") {
+			t.Fatalf("should not give fuzzy hint for distant match; got: %s", res.Content)
+		}
+		if !strings.Contains(res.Content, "old_string not found") {
+			t.Fatalf("expected plain not-found; got: %s", res.Content)
+		}
+	})
+
+	t.Run("exact match still works", func(t *testing.T) {
+		args := mustJSON(t, map[string]any{
+			"path":       path,
+			"old_string": "line two",
+			"new_string": "line 2",
+		})
+		res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.IsError {
+			t.Fatalf("unexpected error: %s", res.Content)
+		}
+	})
+}

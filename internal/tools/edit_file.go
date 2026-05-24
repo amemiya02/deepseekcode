@@ -107,7 +107,7 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 
 	count := strings.Count(content, p.OldString)
 	if count == 0 {
-		return Errf("old_string not found in %s. The exact substring (including whitespace) must match.", p.Path), nil
+		return fuzzyHint(content, p.OldString, p.Path)
 	}
 	if count > 1 && !p.ReplaceAll {
 		return Errf("old_string appears %d times in %s. Provide a longer, unique snippet or set replace_all=true.",
@@ -133,4 +133,44 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+const fuzzyMaxDist = 3
+
+// fuzzyHint tries to find a close match for old in the file content using
+// line-level Levenshtein distance. If a candidate within fuzzyMaxDist lines is
+// found, it returns a hint error with the match location and preview.
+// Otherwise it falls back to the plain "not found" error.
+func fuzzyHint(content, old, path string) (Result, error) {
+	fileLines := splitLines(content)
+	oldLines := splitLines(old)
+	if len(oldLines) == 0 {
+		return Errf("old_string not found in %s. The exact substring (including whitespace) must match.", path), nil
+	}
+
+	// Slide a window of len(oldLines) across the file to find the closest region.
+	windowSize := len(oldLines)
+	if windowSize > len(fileLines) {
+		windowSize = len(fileLines)
+	}
+
+	var candidates []string
+	for i := 0; i <= len(fileLines)-windowSize; i++ {
+		candidates = append(candidates, strings.Join(fileLines[i:i+windowSize], "\n"))
+	}
+
+	idx, dist := ClosestMatch(old, candidates, fuzzyMaxDist)
+	if idx < 0 || dist > fuzzyMaxDist {
+		return Errf("old_string not found in %s. The exact substring (including whitespace) must match.", path), nil
+	}
+
+	// Convert window index back to 1-based line number.
+	lineNo := idx + 1
+	preview := candidates[idx]
+	if len(preview) > 80 {
+		preview = preview[:80] + "..."
+	}
+
+	return Errf("old_string not found in %s. Closest match at line %d (distance %d): %q",
+		path, lineNo, dist, preview), nil
 }

@@ -18,6 +18,11 @@
 // prefix can split on DynamicContextBoundary.
 package prompt
 
+import (
+	"fmt"
+	"strings"
+)
+
 // DynamicContextBoundary marks the cut between cache-stable static
 // prompt content and per-turn dynamic context. Everything after this
 // string is regenerated on every turn; everything before it must
@@ -63,13 +68,70 @@ type ProjectContext struct {
 	Shell        string
 }
 
-// Build returns the assembled system prompt. T-108 fleshes out the
-// rendering of Instructions and Project; this stub keeps the
-// signature stable for downstream tasks (T-104) to depend on.
+// Build returns the assembled system prompt:
+//
+//	<StaticBase>
+//	<rendered instructions> (omitted if no instructions)
+//	<DynamicContextBoundary>
+//	<rendered project context>  (omitted if Project is nil)
+//
+// The bytes before DynamicContextBoundary must stay identical
+// across turns within one session — cache invariant.
 func (b *SystemPromptBuilder) Build() string {
 	base := b.StaticBase
 	if base == "" {
 		base = BasePromptV1
 	}
-	return base + DynamicContextBoundary
+	var out strings.Builder
+	out.WriteString(base)
+	if len(b.Instructions) > 0 {
+		out.WriteString("\n\n## Instruction Files (session-once)\n")
+		for _, f := range b.Instructions {
+			fmt.Fprintf(&out, "\n[%s]\n%s\n", f.Path, f.Content)
+		}
+	}
+	out.WriteString(DynamicContextBoundary)
+	if b.Project != nil {
+		out.WriteString(renderProject(*b.Project))
+	}
+	return out.String()
+}
+
+func renderProject(p ProjectContext) string {
+	var b strings.Builder
+	b.WriteString("\n## Project\n")
+	if p.CWD != "" {
+		fmt.Fprintf(&b, "- cwd: %s\n", p.CWD)
+	}
+	if p.CurrentDate != "" {
+		fmt.Fprintf(&b, "- date: %s\n", p.CurrentDate)
+	}
+	if p.OSName != "" {
+		fmt.Fprintf(&b, "- os: %s %s\n", p.OSName, p.OSVersion)
+	}
+	if p.Shell != "" {
+		fmt.Fprintf(&b, "- shell: %s\n", p.Shell)
+	}
+	if p.ActiveBranch != "" {
+		fmt.Fprintf(&b, "- branch: %s\n", p.ActiveBranch)
+	}
+	b.WriteString("\n## Git status\n")
+	if strings.TrimSpace(p.GitStatus) == "" {
+		b.WriteString("(clean)\n")
+	} else {
+		b.WriteString(p.GitStatus)
+		if !strings.HasSuffix(p.GitStatus, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("\n## Git diff\n")
+	if strings.TrimSpace(p.GitDiff) == "" {
+		b.WriteString("(no diff)\n")
+	} else {
+		b.WriteString(p.GitDiff)
+		if !strings.HasSuffix(p.GitDiff, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }

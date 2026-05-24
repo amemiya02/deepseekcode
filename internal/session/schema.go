@@ -53,4 +53,24 @@ CREATE INDEX IF NOT EXISTS idx_sessions_parent   ON sessions(parent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session  ON messages(session_id, idx);
 `
 
-const currentSchemaVersion = 1
+// schemaV2 extends v1 with:
+//   - messages.blocks: JSON-encoded ContentBlock slice (the canonical
+//     representation; legacy columns remain for read-side fallback
+//     during the migration window)
+//   - sessions.compaction_count + compaction_summary: bookkeeping
+//     for Phase 2's CompactSession
+//   - sessions.workspace_fp: FNV-1a fingerprint of the cwd at session
+//     creation; used by Phase 8's cross-workspace guard
+//
+// SQLite's "ALTER TABLE ... ADD COLUMN" is idempotent only by
+// migration version tracking, not at the DDL level — so this script
+// must run exactly once per DB and is guarded by the schema_version
+// table in migrate().
+const schemaV2 = `
+ALTER TABLE messages ADD COLUMN blocks TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN compaction_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN compaction_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN workspace_fp TEXT NOT NULL DEFAULT '';
+`
+
+const currentSchemaVersion = 2

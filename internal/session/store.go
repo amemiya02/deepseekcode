@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -104,12 +105,56 @@ func (s *Store) migrate() error {
 	if err := row.Scan(&existing); err != nil {
 		return fmt.Errorf("reading schema_version: %w", err)
 	}
-	if existing < currentSchemaVersion {
-		if _, err := s.db.Exec(`INSERT INTO schema_version(version) VALUES (?)`, currentSchemaVersion); err != nil {
-			return fmt.Errorf("recording schema_version: %w", err)
+
+	// Brand-new DB: mark v1 before considering the v2 step, but no
+	// backup needed since there is no prior user data to lose.
+	if existing == 0 {
+		if _, err := s.db.Exec(`INSERT INTO schema_version(version) VALUES (1)`); err != nil {
+			return fmt.Errorf("recording schema_version v1: %w", err)
+		}
+		existing = 1
+	} else if existing == 1 {
+		// Existing v1 DB with user data — back it up before ALTERs so a
+		// failed migration can be hand-rolled back.
+		if err := s.backupForV2(); err != nil {
+			return fmt.Errorf("backing up v1 db: %w", err)
+		}
+	}
+
+	if existing < 2 {
+		if _, err := s.db.Exec(schemaV2); err != nil {
+			return fmt.Errorf("applying schema v2: %w", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO schema_version(version) VALUES (2)`); err != nil {
+			return fmt.Errorf("recording schema_version v2: %w", err)
 		}
 	}
 	return nil
+}
+
+// backupForV2 snapshots the current DB file to <path>.bak.v1 before
+// running irreversible ALTER TABLE statements. Uses a WAL checkpoint
+// to fold pending writes into the main file, then copies the file
+// byte-for-byte via Go IO (no shell `cp`).
+func (s *Store) backupForV2() error {
+	if _, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return fmt.Errorf("checkpoint: %w", err)
+	}
+	bakPath := s.path + ".bak.v1"
+	src, err := os.Open(s.path)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+	dst, err := os.OpenFile(bakPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", bakPath, err)
+	}
+	defer func() { _ = dst.Close() }()
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("copy db file: %w", err)
+	}
+	return dst.Sync()
 }
 
 // NewSession inserts a new (root) session and returns its row.

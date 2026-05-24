@@ -58,6 +58,11 @@ type Agent struct {
 	// the assembled string. nil → System stays as configured.
 	PromptBuilder *prompt.SystemPromptBuilder
 
+	// CompactionCfg controls when the running message list gets
+	// collapsed into a synthetic summary. Initialized to
+	// DefaultCompactionConfig in New; override fields before Run.
+	CompactionCfg CompactionConfig
+
 	// StopWhen runs after each step; first match wins. Defaults below.
 	StopWhen []StopCondition
 
@@ -93,11 +98,12 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		Tools:        reg,
 		Permissions:  pol,
 		Validator:    NopValidator{}, // wave-5 replaces
-		events:       make(chan Event, 256),
-		Model:        model,
-		Thinking:     true,
-		System:       DefaultSystemPrompt,
-		MaxToolCalls: 200,
+		events:        make(chan Event, 256),
+		Model:         model,
+		Thinking:      true,
+		System:        DefaultSystemPrompt,
+		MaxToolCalls:  200,
+		CompactionCfg: DefaultCompactionConfig(),
 		StopWhen: []StopCondition{
 			MaxSteps(50),
 			LoopDetection(5, 3),
@@ -217,6 +223,36 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 			return StopUnknown, toolErr
 		}
 		a.events <- EventStepFinish{Reason: StopUnknown, Usage: step.Usage}
+
+		// Compaction check runs between turns (the next iteration's
+		// runStep will rebuild the wire request). A failure here is
+		// reported but never aborts the loop — compaction is an
+		// optimization, not a correctness requirement.
+		a.maybeCompact(ctx)
+	}
+}
+
+// maybeCompact runs the compaction pipeline and, if it produced a
+// summary, swaps the in-memory message list and persists the
+// collapse. Errors surface via EventInfo so the user sees them
+// without crashing the Run.
+func (a *Agent) maybeCompact(ctx context.Context) {
+	res := CompactSession(a.Messages, a.CompactionCfg)
+	if res.Summary == "" {
+		return
+	}
+	if a.Persister != nil {
+		if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
+			a.events <- EventInfo{Text: "compaction persistence failed: " + err.Error()}
+			return
+		}
+	}
+	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	a.events <- EventCompaction{
+		FromIdx:      res.FromIdx,
+		ToIdx:        res.ToIdx,
+		Summary:      res.Summary,
+		RemovedCount: res.RemovedCount,
 	}
 }
 

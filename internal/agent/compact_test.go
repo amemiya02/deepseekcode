@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -352,6 +353,59 @@ func TestMergeCompactSummaries(t *testing.T) {
 			t.Errorf("expected fallback concat; got %q", got)
 		}
 	})
+}
+
+func TestAgentMaybeCompactTriggers(t *testing.T) {
+	a := New(nil, nil, nil, "m")
+	a.CompactionCfg = CompactionConfig{
+		PreserveRecentMessages: 2,
+		AutoCompactInputTokens: 100,
+	}
+	for i := 0; i < 20; i++ {
+		a.Messages = append(a.Messages, llm.Message{
+			Role:   "user",
+			Blocks: []llm.ContentBlock{llm.TextBlock{Text: strings.Repeat("x", 400)}},
+		})
+	}
+	before := len(a.Messages)
+	a.maybeCompact(context.Background())
+
+	if len(a.Messages) >= before {
+		t.Errorf("expected a.Messages to shrink; before=%d after=%d", before, len(a.Messages))
+	}
+	if a.Messages[0].Role != "system" {
+		t.Errorf("expected summary at head; got role=%q", a.Messages[0].Role)
+	}
+
+	select {
+	case ev := <-a.Events():
+		if _, ok := ev.(EventCompaction); !ok {
+			t.Errorf("expected EventCompaction, got %T", ev)
+		}
+	default:
+		t.Error("no event emitted")
+	}
+}
+
+func TestAgentMaybeCompactNoOpBelowThreshold(t *testing.T) {
+	a := New(nil, nil, nil, "m")
+	a.CompactionCfg = CompactionConfig{
+		PreserveRecentMessages: 2,
+		AutoCompactInputTokens: 1_000_000, // unreachable
+	}
+	a.Messages = []llm.Message{
+		{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}}},
+		{Role: "assistant", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "ok"}}},
+	}
+	a.maybeCompact(context.Background())
+	if len(a.Messages) != 2 {
+		t.Errorf("expected no-op; got %d messages", len(a.Messages))
+	}
+	select {
+	case ev := <-a.Events():
+		t.Errorf("no event expected; got %T", ev)
+	default:
+	}
 }
 
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {

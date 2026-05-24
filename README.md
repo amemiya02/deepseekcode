@@ -68,7 +68,15 @@ r / R      toggle most recent / all thinking blocks
 /tape      open the Reasoning Tape
 /sessions  list this project's sessions
 /undo      revert the last edit step
+/compact   force-compact the running message list
 ```
+
+## Environment variables
+
+| Name | Default | Effect |
+|------|---------|--------|
+| `DEEPSEEK_API_KEY` | (required) | DeepSeek API credential. |
+| `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` | `100000` | Trigger threshold for automatic session compaction. Once the estimated token count of the running message list exceeds this value, older turns are collapsed into a single summary message. Set lower for chattier sessions, higher to disable in practice. |
 
 ## Architecture in one paragraph
 

@@ -28,6 +28,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/logging"
+	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
@@ -101,6 +102,12 @@ func run() error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if errs := config.ValidateStrict(&cfg); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(os.Stderr, "config error:", e.Error())
+		}
+		return fmt.Errorf("config validation failed (%d error(s))", len(errs))
+	}
 
 	// Read prompt from stdin if -p was given as empty and stdin is a pipe.
 	if prompt == "" {
@@ -173,6 +180,15 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		if s.State == mcp.StateConnected {
 			mcpNotices = append(mcpNotices, fmt.Sprintf("mcp: connected to %s (%d tools)", s.Name, len(s.Tools)))
 		}
+	}
+
+	// LSP: detect language servers, connect, expose as a tool.
+	lspReg := lsp.NewRegistry()
+	defer lspReg.Shutdown()
+	lspReg.Start(context.Background(), cwd)
+	reg.Register(tools.NewLSPTool(lspReg))
+	for _, name := range lspReg.Servers() {
+		mcpNotices = append(mcpNotices, fmt.Sprintf("lsp: connected to %s", name))
 	}
 
 	mode := permissions.ModeDefault
@@ -389,6 +405,12 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	reg := tools.New()
 	cwd, _ := os.Getwd()
 	tools.RegisterBuiltins(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd)
+
+	// LSP: one-shot also gets the lsp tool; servers shut down after the turn.
+	lspReg := lsp.NewRegistry()
+	defer lspReg.Shutdown()
+	lspReg.Start(context.Background(), cwd)
+	reg.Register(tools.NewLSPTool(lspReg))
 
 	mode := permissions.ModeDefault
 	switch {

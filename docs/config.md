@@ -67,6 +67,30 @@ auto_resume_age_hours = 24
 # command = "node"
 # args = ["/path/to/server.js"]
 # env = { FOO = "bar" }
+# timeout_seconds = 60
+
+[tools]
+max_read_bytes = 5_242_880   # 5 MiB
+max_write_bytes = 5_242_880  # 5 MiB
+
+# Permission rules: evaluated before the tiered defaults.
+# Decision order: deny > ask > allow > tiered default.
+# [permissions.rules]
+# allow = [{ tool = "read_file", args = ".*" }]
+# deny = [{ tool = "bash", args = "rm\\s+-rf" }]
+# ask = [{ tool = "write_file", args = ".*secret.*" }]
+
+# Hooks: run shell commands or builtins on agent events.
+# [[hooks]]
+# event = "PreToolUse"
+# type = "subprocess"
+# command = "echo '{\"decision\":\"allow\"}'"
+# timeout_seconds = 10
+
+# [[hooks]]
+# event = "PostToolUse"
+# type = "builtin"
+# name = "duet"
 ```
 
 ## CLI flags
@@ -99,6 +123,106 @@ Run inside the TUI:
 ```
 
 ## Storage paths
+
+- `~/.deepseek/config.toml` — user config (this file)
+- `~/.deepseek/sessions.db` — global SQLite session store
+- `./.deepseek/last_session` — pointer for `dsc -c`
+- `./.deepseek/snapshots/<sessionID>/<stepIdx>/` — pre-edit snapshots
+- `./.deepseek/.gitignore` — auto-written so `git status` stays clean
+
+## Field reference
+
+### `[api]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `key` | string | `""` | API key; falls back to `DEEPSEEK_API_KEY` env var |
+| `base_url` | string | `"https://api.deepseek.com"` | API endpoint |
+| `first_token_timeout_ms` | int | `45000` | Timeout for first token (reasoner cold start) |
+| `chunk_stall_timeout_ms` | int | `20000` | Timeout between streaming chunks |
+
+### `[defaults]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | `"deepseek-v4-flash"` | Main-loop model |
+| `thinking` | bool | `true` | Enable reasoning/thinking mode |
+| `theme` | string | `"dark"` | TUI theme |
+| `vim_keybindings` | bool | `true` | Enable Vim key bindings |
+
+### `[tools]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_read_bytes` | int64 | `5242880` (5 MiB) | Max bytes for read_file |
+| `max_write_bytes` | int64 | `5242880` (5 MiB) | Max bytes for write_file |
+
+### `[duet]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Enable Two-Model Duet (Pro validator) |
+| `retry_on_failure` | bool | `true` | Retry on Pro validation failure |
+| `validator_timeout_ms` | int | `10000` | Pro validation timeout |
+| `extra_destructive_patterns` | []string | `[]` | Additional destructive command patterns |
+
+### `[permissions]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `allow_bash` | []string | git/ls/pwd/cat etc. | Bash auto-allow patterns |
+| `secret_path_patterns` | []string | `*.pem`, `*.key` etc. | Sensitive path patterns |
+
+### `[permissions.rules]`
+
+Each rule item has `tool` (glob pattern, e.g. `*`, `read_*`) and `args` (regex on JSON string).
+
+| List | Decision | Priority |
+|---|---|---|
+| `allow` | Auto-allow | Lowest |
+| `ask` | Prompt user | Medium |
+| `deny` | Auto-deny | Highest |
+
+### `[sessions]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `ttl_days` | int | `90` | Session retention days |
+| `snapshot_keep` | int | `30` | Snapshots to keep |
+| `auto_resume_age_hours` | int | `24` | Auto-resume window |
+
+### `[[hooks]]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `event` | string | required | `PreToolUse` / `PostToolUse` / `PostToolUseFailure` / `SessionStart` / `SessionEnd` |
+| `type` | string | `"subprocess"` | `subprocess` / `builtin` |
+| `command` | string | — | Shell command (subprocess type) |
+| `name` | string | — | Hook name (builtin type, e.g. `duet`) |
+| `timeout_seconds` | int | `30` | Hook timeout |
+
+### `[mcp_servers.<name>]`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `command` | string | required | Command to start the MCP server |
+| `args` | []string | `[]` | Command arguments |
+| `env` | map | `{}` | Environment variables |
+| `timeout_seconds` | int | `60` | tools/call timeout |
+
+## Validation rules
+
+`dsc` runs `ValidateStrict` at startup. The following cause exit with error:
+
+- `api.first_token_timeout_ms` must be > 0
+- `api.chunk_stall_timeout_ms` must be > 0
+- MCP server name must not be empty
+- MCP server `command` must not be empty
+- Hook `event` must be a known enum value
+- Hook `type` must be `subprocess` or `builtin`
+- Builtin hooks must have a `name`
+- Subprocess hooks must have a `command`
+- Permission rule `tool` must not be empty
 
 - `~/.deepseek/config.toml` — user config (this file)
 - `~/.deepseek/sessions.db` — global SQLite session store

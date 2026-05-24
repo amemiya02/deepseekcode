@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
@@ -39,7 +40,9 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkHooks(cfg),
 		checkRules(cfg),
 		checkMCP(cfg),
+		checkLSP(),
 		checkCompaction(),
+		checkConfigValidation(cfg),
 		{
 			Name:   "platform",
 			Status: "ok",
@@ -253,6 +256,22 @@ func checkMCP(cfg config.Config) checkResult {
 	return checkResult{"mcp", "ok", strings.Join(parts, ", ")}
 }
 
+func checkLSP() checkResult {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return checkResult{"lsp", "warn", "cwd unreadable: " + err.Error()}
+	}
+	servers := lsp.DetectServers(cwd)
+	if len(servers) == 0 {
+		return checkResult{"lsp", "ok", "no language servers detected for this project"}
+	}
+	var parts []string
+	for _, s := range servers {
+		parts = append(parts, s.Name)
+	}
+	return checkResult{"lsp", "ok", fmt.Sprintf("available: %s", strings.Join(parts, ", "))}
+}
+
 func checkInstructions() checkResult {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -271,4 +290,16 @@ func checkInstructions() checkResult {
 		names = append(names, filepath.Base(f.Path))
 	}
 	return checkResult{"instructions", "ok", fmt.Sprintf("%d file(s): %s", len(files), strings.Join(names, ", "))}
+}
+
+func checkConfigValidation(cfg config.Config) checkResult {
+	errs := config.ValidateStrict(&cfg)
+	if len(errs) == 0 {
+		return checkResult{"config validation", "ok", "PASS"}
+	}
+	details := make([]string, 0, len(errs))
+	for _, e := range errs {
+		details = append(details, e.Error())
+	}
+	return checkResult{"config validation", "fail", strings.Join(details, "; ")}
 }

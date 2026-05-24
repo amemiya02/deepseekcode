@@ -60,6 +60,11 @@ type Event struct {
 	FinishReason string
 	Usage        Usage
 	ToolCalls    []ToolCall
+	// Blocks is the assembled ContentBlock view of the same turn the
+	// legacy ToolCalls/text-delta channel already covers. Consumers
+	// migrating to the Blocks-based path read this; legacy consumers
+	// keep using Text deltas + ToolCalls and ignore Blocks.
+	Blocks []ContentBlock
 
 	// EventError
 	Err error

@@ -148,6 +148,8 @@ func (c *Client) readSSE(ctx context.Context, body io.ReadCloser, out chan<- Eve
 	// State across deltas.
 	var (
 		toolBuf       = map[int]*toolAcc{} // index → accumulator
+		textAcc       strings.Builder
+		thinkAcc      strings.Builder
 		finishReason  string
 		usage         Usage
 		seenFirstByte bool
@@ -248,11 +250,13 @@ func (c *Client) readSSE(ctx context.Context, body io.ReadCloser, out chan<- Eve
 		for _, choice := range chunk.Choices {
 			d := choice.Delta
 			if d.Content != "" {
+				textAcc.WriteString(d.Content)
 				if !emit(Event{Type: EventTextDelta, Text: d.Content}) {
 					return
 				}
 			}
 			if d.ReasoningContent != "" {
+				thinkAcc.WriteString(d.ReasoningContent)
 				if !emit(Event{Type: EventReasoningDelta, Text: d.ReasoningContent}) {
 					return
 				}
@@ -321,11 +325,30 @@ func (c *Client) readSSE(ctx context.Context, body io.ReadCloser, out chan<- Eve
 		calls = append(calls, call)
 	}
 
+	// Assemble Blocks in DeepSeek's logical emission order:
+	// reasoning_content first (model thinks before speaking), then
+	// visible content, then any tool invocations.
+	var blocks []ContentBlock
+	if thinkAcc.Len() > 0 {
+		blocks = append(blocks, ThinkingBlock{Text: thinkAcc.String()})
+	}
+	if textAcc.Len() > 0 {
+		blocks = append(blocks, TextBlock{Text: textAcc.String()})
+	}
+	for _, c := range calls {
+		input := json.RawMessage(c.Function.Arguments)
+		if len(input) == 0 {
+			input = json.RawMessage("{}")
+		}
+		blocks = append(blocks, ToolUseBlock{ID: c.ID, Name: c.Function.Name, Input: input})
+	}
+
 	emit(Event{
 		Type:         EventFinish,
 		FinishReason: finishReason,
 		Usage:        usage,
 		ToolCalls:    calls,
+		Blocks:       blocks,
 	})
 }
 

@@ -71,6 +71,33 @@ func EstimateTokens(messages []llm.Message) int {
 	return total
 }
 
+// ShouldCompact decides whether the message list has grown enough
+// to merit compaction. Returns ok=true with the proposed
+// [fromIdx, toIdx) window of messages to summarize. The window is
+// not yet boundary-safe — callers must run adjustBoundary (T-204)
+// before deleting anything.
+//
+// Returns ok=false (and zero indices) when:
+//   - estimated tokens are below AutoCompactInputTokens, or
+//   - len(messages) <= preserve*2 (nothing meaningful to compact)
+func ShouldCompact(messages []llm.Message, cfg CompactionConfig) (ok bool, fromIdx, toIdx int) {
+	preserve := cfg.PreserveRecentMessages
+	if preserve <= 0 {
+		preserve = 4
+	}
+	threshold := cfg.AutoCompactInputTokens
+	if threshold <= 0 {
+		return false, 0, 0
+	}
+	if len(messages) <= preserve*2 {
+		return false, 0, 0
+	}
+	if EstimateTokens(messages) < threshold {
+		return false, 0, 0
+	}
+	return true, 0, len(messages) - preserve
+}
+
 // DefaultCompactionConfig returns the default config. The
 // AutoCompactInputTokens value can be overridden at process start
 // via DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS — malformed values

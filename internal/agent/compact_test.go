@@ -57,6 +57,68 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func TestShouldCompact(t *testing.T) {
+	// Helper: build n messages, each roughly tokensPer tokens worth.
+	mk := func(n, tokensPer int) []llm.Message {
+		out := make([]llm.Message, n)
+		for i := range out {
+			out[i] = llm.Message{Role: "user", Blocks: []llm.ContentBlock{
+				llm.TextBlock{Text: strings.Repeat("x", tokensPer*4)},
+			}}
+		}
+		return out
+	}
+
+	t.Run("below_threshold", func(t *testing.T) {
+		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 10_000}
+		ok, _, _ := ShouldCompact(mk(20, 100), cfg)
+		if ok {
+			t.Error("expected no compaction below threshold")
+		}
+	})
+
+	t.Run("above_threshold_picks_window", func(t *testing.T) {
+		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 100}
+		ok, from, to := ShouldCompact(mk(20, 100), cfg)
+		if !ok {
+			t.Fatal("expected compaction above threshold")
+		}
+		if from != 0 {
+			t.Errorf("fromIdx: got %d want 0", from)
+		}
+		if to != 16 {
+			t.Errorf("toIdx: got %d want 16 (len=20, preserve=4)", to)
+		}
+	})
+
+	t.Run("too_short", func(t *testing.T) {
+		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 1}
+		ok, _, _ := ShouldCompact(mk(6, 1000), cfg)
+		if ok {
+			t.Error("expected no compaction when len ≤ preserve*2")
+		}
+	})
+
+	t.Run("zero_preserve_defaults_to_4", func(t *testing.T) {
+		cfg := CompactionConfig{AutoCompactInputTokens: 100}
+		ok, _, to := ShouldCompact(mk(20, 100), cfg)
+		if !ok {
+			t.Fatal("expected compaction")
+		}
+		if to != 16 {
+			t.Errorf("expected default preserve=4 → toIdx=16; got %d", to)
+		}
+	})
+
+	t.Run("zero_threshold_disables", func(t *testing.T) {
+		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 0}
+		ok, _, _ := ShouldCompact(mk(20, 1000), cfg)
+		if ok {
+			t.Error("zero threshold should disable compaction")
+		}
+	})
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

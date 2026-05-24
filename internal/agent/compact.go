@@ -71,6 +71,112 @@ func EstimateTokens(messages []llm.Message) int {
 	return total
 }
 
+// adjustBoundary tweaks toIdx so the compaction window doesn't
+// split a tool_use from its matching tool_result. Two-pass:
+//
+//  1. Push toIdx forward past any tool_result whose tool_use is
+//     inside [0, toIdx). The result must travel with its use, so
+//     keeping the use compacted while the result lives in the tail
+//     would leave the model facing a tool_result with no
+//     preceding tool_use.
+//  2. If after step 1 there are still tool_use IDs in [0, toIdx)
+//     with no matching tool_result anywhere in the list, that
+//     tool_use is "orphaned" — the corresponding result never
+//     arrived (interrupted turn). Pull toIdx back so any message
+//     containing an unmatched tool_use sits OUTSIDE the compaction
+//     window, preserving an orphan use in the live tail rather
+//     than silently dropping it.
+//
+// Returns toIdx clamped to [0, len(messages)].
+func adjustBoundary(messages []llm.Message, toIdx int) int {
+	if toIdx <= 0 {
+		return 0
+	}
+	if toIdx > len(messages) {
+		toIdx = len(messages)
+	}
+
+	inWindow := collectToolUseIDs(messages[:toIdx])
+	if len(inWindow) == 0 {
+		return toIdx
+	}
+
+	// Drop uses that already have a matching result inside the
+	// window — both halves of those pairs will be summarized
+	// together; the model never sees the split.
+	for i := 0; i < toIdx; i++ {
+		for _, b := range messages[i].Blocks {
+			if tr, ok := b.(llm.ToolResultBlock); ok {
+				delete(inWindow, tr.ToolUseID)
+			}
+		}
+	}
+	if len(inWindow) == 0 {
+		return toIdx
+	}
+
+	// Pass 1: advance toIdx past every result whose use is in the window.
+	for i := toIdx; i < len(messages); i++ {
+		matched := false
+		for _, b := range messages[i].Blocks {
+			tr, ok := b.(llm.ToolResultBlock)
+			if !ok {
+				continue
+			}
+			if inWindow[tr.ToolUseID] {
+				matched = true
+				delete(inWindow, tr.ToolUseID)
+			}
+		}
+		if matched && i >= toIdx {
+			toIdx = i + 1
+		}
+		if len(inWindow) == 0 {
+			break
+		}
+	}
+
+	// Pass 2: any remaining IDs in inWindow are orphan uses. Pull
+	// toIdx back to exclude the earliest message containing one.
+	if len(inWindow) > 0 {
+		earliest := toIdx
+		for i := 0; i < toIdx; i++ {
+			for _, b := range messages[i].Blocks {
+				tu, ok := b.(llm.ToolUseBlock)
+				if !ok {
+					continue
+				}
+				if inWindow[tu.ID] {
+					if i < earliest {
+						earliest = i
+					}
+				}
+			}
+		}
+		toIdx = earliest
+	}
+
+	if toIdx < 0 {
+		return 0
+	}
+	if toIdx > len(messages) {
+		return len(messages)
+	}
+	return toIdx
+}
+
+func collectToolUseIDs(messages []llm.Message) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range messages {
+		for _, b := range m.Blocks {
+			if tu, ok := b.(llm.ToolUseBlock); ok && tu.ID != "" {
+				out[tu.ID] = true
+			}
+		}
+	}
+	return out
+}
+
 // ShouldCompact decides whether the message list has grown enough
 // to merit compaction. Returns ok=true with the proposed
 // [fromIdx, toIdx) window of messages to summarize. The window is

@@ -119,6 +119,82 @@ func TestShouldCompact(t *testing.T) {
 	})
 }
 
+func TestAdjustBoundaryToolPair(t *testing.T) {
+	// helper constructors for readable test fixtures.
+	use := func(id string) llm.Message {
+		return llm.Message{Role: "assistant", Blocks: []llm.ContentBlock{
+			llm.ToolUseBlock{ID: id, Name: "t", Input: json.RawMessage("{}")},
+		}}
+	}
+	result := func(id string) llm.Message {
+		return llm.Message{Role: "tool", Blocks: []llm.ContentBlock{
+			llm.ToolResultBlock{ToolUseID: id, Content: "out"},
+		}}
+	}
+	text := func(role string) llm.Message {
+		return llm.Message{Role: role, Blocks: []llm.ContentBlock{llm.TextBlock{Text: role}}}
+	}
+
+	cases := []struct {
+		name     string
+		messages []llm.Message
+		toIdx    int
+		want     int
+	}{
+		{
+			"no_tools",
+			[]llm.Message{text("user"), text("assistant"), text("user")},
+			2,
+			2,
+		},
+		{
+			"use_and_result_both_in_window",
+			[]llm.Message{text("user"), use("a"), result("a"), text("user"), text("assistant")},
+			3,
+			3,
+		},
+		{
+			"use_in_window_result_outside",
+			[]llm.Message{text("user"), use("a"), text("user"), result("a"), text("assistant")},
+			3, // would split — must advance past result at idx 3
+			4,
+		},
+		{
+			"nested_multi_turn_pushes_past_both",
+			[]llm.Message{
+				use("a"),       // 0
+				text("user"),   // 1
+				use("b"),       // 2
+				result("a"),    // 3
+				text("user"),   // 4
+				result("b"),    // 5
+				text("assistant"), // 6
+			},
+			3, // wants [0,3); but use(b) at idx 2 has result at 5
+			6,
+		},
+		{
+			"orphan_use_pulled_back",
+			[]llm.Message{
+				text("user"), // 0
+				use("a"),     // 1 — orphan: no result anywhere
+				text("user"), // 2
+				text("assistant"), // 3
+			},
+			3,
+			1, // exclude idx 1 from compaction so the orphan stays in tail
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adjustBoundary(tc.messages, tc.toIdx)
+			if got != tc.want {
+				t.Errorf("got %d want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

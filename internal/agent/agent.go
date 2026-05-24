@@ -236,6 +236,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		reasoning     string
 		inReasoning   bool
 		assembledCall []llm.ToolCall
+		blocks        []llm.ContentBlock
 		finish        string
 		usage         llm.Usage
 	)
@@ -268,21 +269,19 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			finish = ev.FinishReason
 			usage = ev.Usage
 			assembledCall = ev.ToolCalls
+			blocks = ev.Blocks
 		case llm.EventError:
 			return StepRecord{}, fmt.Errorf("stream error: %w", ev.Err)
 		}
 	}
 
-	// Persist the assistant turn. ReasoningContent must round-trip back to
-	// the API on the next request — DeepSeek's thinking mode rejects the
-	// next turn with a 400 if the prior assistant message's reasoning is
-	// missing. Echoing the empty string when thinking is off is harmless
-	// (omitempty drops the field).
+	// The wire flatten layer turns Blocks back into DeepSeek's
+	// {content, reasoning_content, tool_calls} shape on the next
+	// request, so reasoning_content still round-trips and the
+	// thinking-mode 400 stays away.
 	a.Messages = append(a.Messages, llm.Message{
-		Role:             "assistant",
-		Content:          text,
-		ReasoningContent: reasoning,
-		ToolCalls:        assembledCall,
+		Role:   "assistant",
+		Blocks: blocks,
 	})
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendAssistant(context.Background(), text, reasoning, assembledCall, a.Model, usage)

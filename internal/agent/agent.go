@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
+	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
@@ -63,6 +64,10 @@ type Agent struct {
 	// DefaultCompactionConfig in New; override fields before Run.
 	CompactionCfg CompactionConfig
 
+	// HookRunner dispatches lifecycle hooks (PreToolUse, PostToolUse,
+	// SessionStart, SessionEnd). nil = hooks disabled.
+	HookRunner *hooks.Runner
+
 	// StopWhen runs after each step; first match wins. Defaults below.
 	StopWhen []StopCondition
 
@@ -93,11 +98,11 @@ type Agent struct {
 // the consumer falls more than that behind, which would only happen if
 // the UI goroutine were stuck — an upstream bug we'd want to surface.
 func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model string) *Agent {
-	return &Agent{
-		Client:       client,
-		Tools:        reg,
-		Permissions:  pol,
-		Validator:    NopValidator{}, // wave-5 replaces
+	a := &Agent{
+		Client:        client,
+		Tools:         reg,
+		Permissions:   pol,
+		Validator:     NopValidator{}, // wave-5 replaces
 		events:        make(chan Event, 256),
 		Model:         model,
 		Thinking:      true,
@@ -109,6 +114,8 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 			LoopDetection(5, 3),
 		},
 	}
+
+	return a
 }
 
 // Events returns the receive end of the agent-lifetime event stream.
@@ -158,8 +165,34 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		a.events <- EventDone{Reason: reason, Err: err}
 	}()
 
+	defer func() {
+		if a.HookRunner != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			sessionID := ""
+			if a.Persister != nil {
+				sessionID = a.Persister.SessionID()
+			}
+			a.HookRunner.Run(ctx, hooks.EventSessionEnd, hooks.HookInput{
+				Event:     hooks.EventSessionEnd,
+				CWD:       a.Permissions.Cwd,
+				SessionID: sessionID,
+			})
+		}
+	}()
+
 	if a.PromptBuilder != nil {
 		a.System = a.PromptBuilder.Build()
+	}
+
+	// SessionStart hook fires at the beginning of each Run.
+	if a.HookRunner != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		a.HookRunner.Run(ctx, hooks.EventSessionStart, hooks.HookInput{
+			Event: hooks.EventSessionStart,
+			CWD:   a.Permissions.Cwd,
+		})
 	}
 
 	if userPrompt != "" {
@@ -528,6 +561,33 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		}
 	}
 
+	// Pre-tool hook runs after permission gate, before Duet / execution.
+	if a.HookRunner != nil {
+		sessionID := ""
+		if a.Persister != nil {
+			sessionID = a.Persister.SessionID()
+		}
+		hookIn := hooks.HookInput{
+			Event:     hooks.EventPreToolUse,
+			ToolName:  call.Function.Name,
+			ToolInput: rawArgs,
+			CWD:       a.Permissions.Cwd,
+			SessionID: sessionID,
+		}
+		t0 := time.Now()
+		out, _ := a.HookRunner.Run(ctx, hooks.EventPreToolUse, hookIn)
+		a.events <- EventHookFired{
+			HookName: "PreToolUse",
+			Event:    string(hooks.EventPreToolUse),
+			Decision: out.Decision,
+			Reason:   out.Reason,
+			Dur:      time.Since(t0),
+		}
+		if out.Decision == "deny" {
+			return tools.Errf("blocked by hook: %s", out.Reason), nil
+		}
+	}
+
 	// Duet validator on destructive operations.
 	if a.Validator != nil && a.isDestructive(call, rawArgs) && !a.duetSelfValidates() {
 		t0 := time.Now()
@@ -552,10 +612,50 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		if errors.Is(err, context.Canceled) {
 			return tools.Result{Content: "user cancelled"}, nil
 		}
+		// Fire PostToolUseFailure even on infra error so hooks see every tool outcome.
+		a.firePostHook(ctx, call, rawArgs, true)
 		return tools.Result{}, err
 	}
 
+	// Post-tool hook fires after execution. Failure variant runs when
+	// the tool result indicates an error; decision is informational only
+	// (cannot undo completed tool execution).
+	a.firePostHook(ctx, call, rawArgs, res.IsError)
+
 	return res.Truncate(tools.DefaultMaxResultBytes), nil
+}
+
+// firePostHook runs the PostToolUse or PostToolUseFailure hook and
+// emits an EventHookFired. Extracted so the err-early-return path
+// and the success path share one implementation.
+func (a *Agent) firePostHook(ctx context.Context, call llm.ToolCall, rawArgs json.RawMessage, isError bool) {
+	if a.HookRunner == nil {
+		return
+	}
+	hookEvent := hooks.EventPostToolUse
+	if isError {
+		hookEvent = hooks.EventPostToolUseFailure
+	}
+	sessionID := ""
+	if a.Persister != nil {
+		sessionID = a.Persister.SessionID()
+	}
+	hookIn := hooks.HookInput{
+		Event:     hookEvent,
+		ToolName:  call.Function.Name,
+		ToolInput: rawArgs,
+		CWD:       a.Permissions.Cwd,
+		SessionID: sessionID,
+	}
+	t0 := time.Now()
+	out, _ := a.HookRunner.Run(ctx, hookEvent, hookIn)
+	a.events <- EventHookFired{
+		HookName: "PostToolUse",
+		Event:    string(hookEvent),
+		Decision: out.Decision,
+		Reason:   out.Reason,
+		Dur:      time.Since(t0),
+	}
 }
 
 // isDestructive returns true if this tool call should be reviewed by
@@ -621,4 +721,3 @@ func validateToolArgs(t tools.Tool, args json.RawMessage) error {
 	}
 	return nil
 }
-

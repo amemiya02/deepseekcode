@@ -103,6 +103,7 @@ See `docs/design.md` §3.
 - [Tools](docs/tools.md)
 - [Reasoning Tape (`/tape`)](docs/tape.md) — headline feature
 - [Two-Model Duet](docs/duet.md) — second headline feature
+- [Hooks](docs/hooks.md)
 - [MCP](docs/mcp.md)
 
 ## Status & roadmap

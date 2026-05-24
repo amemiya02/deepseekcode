@@ -80,10 +80,10 @@ type App struct {
 // sessionIntegration bundles the optional persistence hooks. All four
 // nil ⇒ TUI runs ephemeral (no /undo, /sessions, model persistence).
 type sessionIntegration struct {
-	id           string
-	undo         func(n int) (int, error)
-	list         func() ([]session.Session, error)
-	setModel     func(model string) error
+	id       string
+	undo     func(n int) (int, error)
+	list     func() ([]session.Session, error)
+	setModel func(model string) error
 }
 
 // Config bundles construction params for New.
@@ -343,6 +343,9 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.scrollback.AppendDuet(e.CallID, e.Approved, e.Reasoning, e.Dur)
 		a.status.duetActive = true
 		a.status.proCalls++
+		a.refreshView()
+	case agent.EventHookFired:
+		a.scrollback.AppendHookFired(e.HookName, e.Event, e.Decision, e.Reason, e.Dur)
 		a.refreshView()
 	case agent.EventStepFinish:
 		a.stepTotal++

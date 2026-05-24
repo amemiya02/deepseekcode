@@ -36,6 +36,7 @@ const (
 	itemToolCall
 	itemToolResult
 	itemDuet
+	itemHookFired
 	itemInfo
 	itemStepFinish
 	itemError
@@ -57,7 +58,7 @@ type chatItem struct {
 	// Reasoning
 	reasoning string
 	folded    bool
-	tokens    int           // rough estimate for collapsed label
+	tokens    int // rough estimate for collapsed label
 	duration  time.Duration
 
 	// ToolCall / ToolResult
@@ -70,6 +71,10 @@ type chatItem struct {
 	// Duet
 	approved      bool
 	duetReasoning string
+
+	// HookFired
+	hookDecision string
+	hookReason   string
 
 	// StepFinish
 	stopReason string
@@ -150,6 +155,16 @@ func (i chatItem) render(t Theme, width int) string {
 		}
 		line := fmt.Sprintf("◆ pro check (%s): %s — %s",
 			i.duration.Round(time.Millisecond), head, i.duetReasoning)
+		return style.Render(line) + "\n"
+	case itemHookFired:
+		style := t.HookInfo
+		if i.hookDecision == "deny" {
+			style = t.HookDeny
+		}
+		line := fmt.Sprintf("[hook %s] %s (%s): %s",
+			i.tool, i.hookDecision,
+			i.duration.Round(time.Millisecond).String(),
+			i.hookReason)
 		return style.Render(line) + "\n"
 	case itemInfo:
 		return t.Info.Render("[info] "+i.text) + "\n"

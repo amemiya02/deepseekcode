@@ -141,6 +141,20 @@ func (s *Scrollback) AppendDuet(callID string, approved bool, reasoning string, 
 	})
 }
 
+// AppendHookFired adds a hook-execution line. Deny decisions are
+// rendered in red; other decisions are informational.
+func (s *Scrollback) AppendHookFired(hookName, event, decision, reason string, dur time.Duration) {
+	s.EndStreams()
+	s.appendItem(chatItem{
+		kind:         itemHookFired,
+		tool:         event,
+		hookDecision: decision,
+		hookReason:   reason,
+		duration:     dur,
+		timestamp:    time.Now(),
+	})
+}
+
 // AppendStepFinish closes the step's footer line with usage and
 // stop-reason. Ends any in-progress stream.
 func (s *Scrollback) AppendStepFinish(stopReason string, usage llm.Usage, model string) {

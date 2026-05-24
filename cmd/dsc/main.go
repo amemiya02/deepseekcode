@@ -25,6 +25,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
@@ -163,6 +164,33 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.Thinking = cfg.Defaults.Thinking
 	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
 	a.PromptBuilder = newPromptBuilder(cwd)
+
+	// Hooks: configure from TOML and wire into agent.
+	if len(cfg.Hooks) > 0 {
+		hookRunner := hooks.NewRunner()
+		var hookConfigs []hooks.HookConfig
+		for _, hi := range cfg.Hooks {
+			hc := hooks.HookConfig{
+				Event:   hooks.HookEvent(hi.Event),
+				Type:    hooks.HookType(hi.Type),
+				Command: hi.Command,
+				Name:    hi.Name,
+			}
+			if hc.Type == "" {
+				hc.Type = hooks.TypeSubprocess
+			}
+			if !validHookEvent(hc.Event) {
+				slog.Warn("skipping hook with unknown event", "event", hi.Event)
+				continue
+			}
+			if hi.Timeout > 0 {
+				hc.Timeout = time.Duration(hi.Timeout) * time.Second
+			}
+			hookConfigs = append(hookConfigs, hc)
+		}
+		hookRunner.Configure(hookConfigs)
+		a.HookRunner = hookRunner
+	}
 
 	// Route retry notices through agent.EmitInfo so they appear as
 	// chat items instead of stderr writes that would corrupt the TUI.
@@ -337,6 +365,16 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 // newPromptBuilder assembles the SystemPromptBuilder both flows wire
 // onto the agent. Returns nil only on a misconfigured cwd, which the
 // callers treat as "no builder — fall back to DefaultSystemPrompt".
+var validHookEvents = map[hooks.HookEvent]bool{
+	hooks.EventPreToolUse:         true,
+	hooks.EventPostToolUse:        true,
+	hooks.EventPostToolUseFailure: true,
+	hooks.EventSessionStart:       true,
+	hooks.EventSessionEnd:         true,
+}
+
+func validHookEvent(e hooks.HookEvent) bool { return validHookEvents[e] }
+
 func newPromptBuilder(cwd string) *promptpkg.SystemPromptBuilder {
 	if cwd == "" {
 		return nil

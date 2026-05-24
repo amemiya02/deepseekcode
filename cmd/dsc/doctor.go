@@ -35,6 +35,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkTerminal(),
 		checkGit(),
 		checkInstructions(),
+		checkHooks(cfg),
 		checkCompaction(),
 		{
 			Name:   "platform",
@@ -188,6 +189,23 @@ func checkCompaction() checkResult {
 	return checkResult{"compaction", "ok",
 		fmt.Sprintf("session compacted %d times; last summary: %d chars",
 			sess.CompactionCount, len(sess.CompactionSummary))}
+}
+
+func checkHooks(cfg config.Config) checkResult {
+	if len(cfg.Hooks) == 0 {
+		return checkResult{"hooks", "ok", "none configured"}
+	}
+	var sub, builtin int
+	for _, h := range cfg.Hooks {
+		switch h.Type {
+		case "subprocess":
+			sub++
+		case "builtin":
+			builtin++
+		}
+	}
+	return checkResult{"hooks", "ok",
+		fmt.Sprintf("%d subprocess, %d builtin", sub, builtin)}
 }
 
 func checkInstructions() checkResult {

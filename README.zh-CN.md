@@ -99,6 +99,7 @@ SQLite（`modernc.org/sqlite`，无 CGO），让 `--continue` / `--resume` /
 - [工具](docs/tools.md)
 - [推理磁带 (`/tape`)](docs/tape.md) — 头号特性
 - [Two-Model Duet](docs/duet.md) — 第二头号特性
+- [Hooks](docs/hooks.md)
 - [MCP](docs/mcp.md)
 
 ## 状态与路线图

@@ -45,3 +45,47 @@ func TestExpandEnv(t *testing.T) {
 		t.Errorf("unknown var = %q want passthrough", got)
 	}
 }
+
+func TestConfigLoadHooks(t *testing.T) {
+	dir := t.TempDir()
+	tomlPath := dir + "/config.toml"
+	toml := `
+[[hooks]]
+event = "PreToolUse"
+type = "subprocess"
+command = "echo allow"
+timeout_seconds = 10
+
+[[hooks]]
+event = "PostToolUse"
+type = "builtin"
+name = "duet"
+`
+	if err := os.WriteFile(tomlPath, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	if err := mergeFile(&cfg, tomlPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Hooks) != 2 {
+		t.Fatalf("expected 2 hooks, got %d", len(cfg.Hooks))
+	}
+	if cfg.Hooks[0].Event != "PreToolUse" {
+		t.Errorf("hook[0].event = %q want PreToolUse", cfg.Hooks[0].Event)
+	}
+	if cfg.Hooks[0].Type != "subprocess" {
+		t.Errorf("hook[0].type = %q want subprocess", cfg.Hooks[0].Type)
+	}
+	if cfg.Hooks[0].Timeout != 10 {
+		t.Errorf("hook[0].timeout = %d want 10", cfg.Hooks[0].Timeout)
+	}
+	if cfg.Hooks[1].Event != "PostToolUse" {
+		t.Errorf("hook[1].event = %q want PostToolUse", cfg.Hooks[1].Event)
+	}
+	if cfg.Hooks[1].Name != "duet" {
+		t.Errorf("hook[1].name = %q want duet", cfg.Hooks[1].Name)
+	}
+}

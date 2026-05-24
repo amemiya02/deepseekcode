@@ -24,6 +24,7 @@ type Config struct {
 	Duet        DuetConfig                 `toml:"duet"`
 	Permissions PermissionsConfig          `toml:"permissions"`
 	Sessions    SessionsConfig             `toml:"sessions"`
+	Hooks       []HookItemConfig           `toml:"hooks"`
 	MCPServers  map[string]MCPServerConfig `toml:"mcp_servers"`
 }
 
@@ -57,6 +58,14 @@ type SessionsConfig struct {
 	TTLDays       int `toml:"ttl_days"`
 	SnapshotKeep  int `toml:"snapshot_keep"`
 	AutoResumeAge int `toml:"auto_resume_age_hours"`
+}
+
+type HookItemConfig struct {
+	Event   string `toml:"event"`   // PreToolUse, PostToolUse, PostToolUseFailure, SessionStart, SessionEnd
+	Type    string `toml:"type"`    // "subprocess" | "builtin"
+	Command string `toml:"command"` // when type == subprocess
+	Name    string `toml:"name"`    // when type == builtin
+	Timeout int    `toml:"timeout_seconds"`
 }
 
 type MCPServerConfig struct {
@@ -194,6 +203,9 @@ func applyOverlay(base *Config, ov Config) {
 		base.Sessions.AutoResumeAge = ov.Sessions.AutoResumeAge
 	}
 
+	if len(ov.Hooks) > 0 {
+		base.Hooks = ov.Hooks
+	}
 	if len(ov.MCPServers) > 0 {
 		base.MCPServers = ov.MCPServers
 	}

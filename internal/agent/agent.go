@@ -348,19 +348,21 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 	// Append results in original order so the conversation transcript
 	// stays deterministic.
 	for _, r := range results {
-		var msg llm.Message
-		msg.Role = "tool"
-		msg.ToolCallID = r.callID
+		block := llm.ToolResultBlock{ToolUseID: r.callID}
 		if r.err != nil {
 			// Infrastructure failure: surface as a tool error so the
 			// model can react instead of crashing the run.
-			msg.Content = "execution error: " + r.err.Error()
+			block.Content = "execution error: " + r.err.Error()
+			block.IsError = true
 		} else {
-			msg.Content = r.res.Content
+			block.Content = r.res.Content
 		}
-		a.Messages = append(a.Messages, msg)
+		a.Messages = append(a.Messages, llm.Message{
+			Role:   "tool",
+			Blocks: []llm.ContentBlock{block},
+		})
 		if a.Persister != nil {
-			_, _ = a.Persister.AppendToolResult(ctx, r.callID, msg.Content)
+			_, _ = a.Persister.AppendToolResult(ctx, r.callID, block.Content)
 		}
 	}
 	return nil

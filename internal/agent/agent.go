@@ -10,6 +10,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
+	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -49,6 +50,12 @@ type Agent struct {
 
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
+
+	// PromptBuilder, when non-nil, overrides System with the builder's
+	// output at the start of Run. The builder owns the static + dynamic
+	// split (see internal/prompt); the agent just calls Build() to get
+	// the assembled string. nil → System stays as configured.
+	PromptBuilder *prompt.SystemPromptBuilder
 
 	// StopWhen runs after each step; first match wins. Defaults below.
 	StopWhen []StopCondition
@@ -142,6 +149,10 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	defer func() {
 		a.events <- EventDone{Reason: reason, Err: err}
 	}()
+
+	if a.PromptBuilder != nil {
+		a.System = a.PromptBuilder.Build()
+	}
 
 	if userPrompt != "" {
 		userBlocks := []llm.ContentBlock{llm.TextBlock{Text: userPrompt}}

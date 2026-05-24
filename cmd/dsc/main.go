@@ -28,6 +28,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
+	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -161,6 +162,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
 	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
+	a.PromptBuilder = newPromptBuilder(cwd)
 
 	// Route retry notices through agent.EmitInfo so they appear as
 	// chat items instead of stderr writes that would corrupt the TUI.
@@ -313,6 +315,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
 	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
+	a.PromptBuilder = newPromptBuilder(cwd)
 	if !cfg.Duet.Enabled {
 		a.Validator = nil
 	}
@@ -329,6 +332,23 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	fmt.Fprintln(os.Stderr, "]")
 	return nil
+}
+
+// newPromptBuilder assembles the SystemPromptBuilder both flows wire
+// onto the agent. Returns nil only on a misconfigured cwd, which the
+// callers treat as "no builder — fall back to DefaultSystemPrompt".
+func newPromptBuilder(cwd string) *promptpkg.SystemPromptBuilder {
+	if cwd == "" {
+		return nil
+	}
+	home, _ := os.UserHomeDir()
+	files, _ := promptpkg.LoadInstructionFiles(cwd, home)
+	project := promptpkg.DiscoverProjectContext(cwd)
+	return &promptpkg.SystemPromptBuilder{
+		StaticBase:   promptpkg.BasePromptV1,
+		Instructions: files,
+		Project:      &project,
+	}
 }
 
 // consumeAgentEvents drives the CLI's stdout rendering off the agent's

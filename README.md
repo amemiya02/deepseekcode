@@ -54,6 +54,7 @@ dsc                                # launch the TUI
 dsc -p "explain pkg/auth"          # one-shot prompt → stdout, exit
 dsc --read-only                    # safe-exploration mode
 dsc --yolo -p "run the tests"      # auto-approve all tools (CI / automation)
+dsc init                           # create DEEPSEEK.md + .deepseek/config.toml
 ```
 
 Inside the TUI:

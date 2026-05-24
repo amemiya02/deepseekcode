@@ -47,6 +47,14 @@ func main() {
 }
 
 func run() error {
+	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		if err := runInit(); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	// Subcommand: dsc doctor. Doctor prints its own report; exit(1) on
 	// failure so main doesn't print "dsc: doctor failed" on top.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {

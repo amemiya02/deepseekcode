@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func initRepo(t *testing.T) string {
@@ -75,6 +76,34 @@ func TestReadMissingCwd(t *testing.T) {
 	r := &Reader{CWD: filepath.Join(t.TempDir(), "does-not-exist")}
 	if _, err := r.Read(context.Background()); err == nil {
 		t.Error("expected error for missing cwd")
+	}
+}
+
+func TestReaderCacheTTL(t *testing.T) {
+	dir := initRepo(t)
+	r := &Reader{CWD: dir, CacheTTL: 5 * time.Second}
+	for i := 0; i < 3; i++ {
+		if _, err := r.Read(context.Background()); err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
+	}
+	if got := r.runCount(); got != 1 {
+		t.Errorf("git invocations: got %d, want 1 (cache hits expected for 2nd/3rd Read)", got)
+	}
+}
+
+func TestReaderCacheExpires(t *testing.T) {
+	dir := initRepo(t)
+	r := &Reader{CWD: dir, CacheTTL: 10 * time.Millisecond}
+	if _, err := r.Read(context.Background()); err != nil {
+		t.Fatalf("read 1: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := r.Read(context.Background()); err != nil {
+		t.Fatalf("read 2: %v", err)
+	}
+	if got := r.runCount(); got != 2 {
+		t.Errorf("git invocations: got %d, want 2 (TTL expired between reads)", got)
 	}
 }
 

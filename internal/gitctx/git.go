@@ -17,20 +17,35 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
 	defaultTimeout    = 2 * time.Second
+	defaultCacheTTL   = 5 * time.Second
 	maxStatusChars    = 4000
 	maxDiffCharsTotal = 8000
 )
 
 // Reader reads git state from a cwd. Construct directly; the zero
-// value with a populated CWD is usable (defaultTimeout applies).
+// value with a populated CWD is usable (defaultTimeout +
+// defaultCacheTTL apply).
+//
+// Within CacheTTL of a successful Read, subsequent Reads return the
+// cached Snapshot without reinvoking git — the agent calls Read on
+// every turn, but git status / diff over the same working tree
+// rarely change that fast and forking git per turn is wasteful.
+// Failed Reads are not cached so the next call retries.
 type Reader struct {
-	CWD     string
-	Timeout time.Duration
+	CWD      string
+	Timeout  time.Duration
+	CacheTTL time.Duration
+
+	mu       sync.Mutex
+	cached   Snapshot
+	cachedAt time.Time
+	runs     int // for tests: count of underlying git invocations
 }
 
 // Snapshot is one read of the cwd's git state. All fields are
@@ -44,7 +59,8 @@ type Snapshot struct {
 }
 
 // Read collects the snapshot. Each git command is bounded by the
-// shorter of ctx and r.Timeout (defaults to 2s).
+// shorter of ctx and r.Timeout (defaults to 2s). Snapshots from
+// successful Reads are cached for CacheTTL (defaults to 5s).
 //
 // Errors are returned only when the cwd itself is malformed (e.g.
 // the directory doesn't exist). Individual git command failures are
@@ -56,10 +72,22 @@ func (r *Reader) Read(ctx context.Context) (Snapshot, error) {
 	if _, err := os.Stat(r.CWD); err != nil {
 		return Snapshot{}, err
 	}
+	ttl := r.CacheTTL
+	if ttl <= 0 {
+		ttl = defaultCacheTTL
+	}
 	timeout := r.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.cachedAt.IsZero() && time.Since(r.cachedAt) < ttl {
+		return r.cached, nil
+	}
+
+	r.runs++
 
 	var out Snapshot
 	out.Status = truncate(runGit(ctx, r.CWD, timeout, "status", "--short"), maxStatusChars)
@@ -75,7 +103,21 @@ func (r *Reader) Read(ctx context.Context) (Snapshot, error) {
 			out.RecentCommits = append(out.RecentCommits, line)
 		}
 	}
+	if ctx.Err() != nil {
+		// Don't cache a partial snapshot produced by a cancellation.
+		return out, ctx.Err()
+	}
+	r.cached = out
+	r.cachedAt = time.Now()
 	return out, nil
+}
+
+// runCount returns the number of times this Reader actually
+// dispatched git commands (cache misses + first reads). Test-only.
+func (r *Reader) runCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runs
 }
 
 func runGit(ctx context.Context, cwd string, timeout time.Duration, args ...string) string {

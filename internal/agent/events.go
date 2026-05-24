@@ -97,6 +97,27 @@ type EventDone struct {
 	Err    error
 }
 
+// EventCompaction reports that the agent collapsed messages
+// [FromIdx, ToIdx) into a single Summary message, freeing
+// RemovedCount slots from the live transcript. Wired in Phase 2.
+type EventCompaction struct {
+	FromIdx, ToIdx int
+	Summary        string
+	RemovedCount   int
+}
+
+// EventHookFired reports that a registered hook ran. Decision is one
+// of allow / deny / continue / ask; Reason is the hook's free-form
+// explanation. Surfaced so the UI can show a `[hook] …` chat line.
+// Wired in Phase 3.
+type EventHookFired struct {
+	HookName string
+	Event    string // PreToolUse / PostToolUse / ...
+	Decision string // allow / deny / continue / ask
+	Reason   string
+	Dur      time.Duration
+}
+
 func (EventReasoningStart) isAgentEvent() {}
 func (EventReasoningDelta) isAgentEvent() {}
 func (EventReasoningEnd) isAgentEvent()   {}
@@ -108,3 +129,5 @@ func (EventStepFinish) isAgentEvent()     {}
 func (EventInfo) isAgentEvent()           {}
 func (EventPermissionAsk) isAgentEvent()  {}
 func (EventDone) isAgentEvent()           {}
+func (EventCompaction) isAgentEvent()     {}
+func (EventHookFired) isAgentEvent()      {}

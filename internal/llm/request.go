@@ -109,18 +109,15 @@ type ResponseFmt struct {
 
 // MarshalCacheStable returns a deterministic JSON encoding of the
 // request: tool definitions sorted by function name, JSON-Schema fields
-// canonicalized by key-sort. Pass this to the HTTP layer instead of
+// canonicalized by key-sort, Messages flattened from ContentBlock form
+// into DeepSeek's OpenAI shape. Pass this to the HTTP layer instead of
 // json.Marshal directly.
 func (r Request) MarshalCacheStable() ([]byte, error) {
-	// Sort tools by function name to stabilize prefix bytes.
 	tools := make([]Tool, len(r.Tools))
 	copy(tools, r.Tools)
 	sort.SliceStable(tools, func(i, j int) bool {
 		return tools[i].Function.Name < tools[j].Function.Name
 	})
-
-	// Canonicalize each tool's Parameters (a JSON-Schema) by re-encoding
-	// with sorted keys.
 	for i, t := range tools {
 		canon, err := canonicalJSON(t.Function.Parameters)
 		if err != nil {
@@ -129,8 +126,68 @@ func (r Request) MarshalCacheStable() ([]byte, error) {
 		tools[i].Function.Parameters = canon
 	}
 
-	r.Tools = tools
-	return json.Marshal(r)
+	wireMsgs := make([]wireMessage, 0, len(r.Messages))
+	for _, m := range r.Messages {
+		results, remainder := splitToolResults(m)
+		// Emit any tool-result envelopes first so they line up after
+		// the assistant tool_calls turn that produced them — DeepSeek
+		// matches by tool_call_id but ordering keeps logs readable.
+		wireMsgs = append(wireMsgs, results...)
+		if len(remainder.Blocks) > 0 || len(results) == 0 {
+			wireMsgs = append(wireMsgs, flattenForWire(remainder))
+		}
+	}
+
+	out := struct {
+		Model          string           `json:"model"`
+		Messages       []wireMessage    `json:"messages"`
+		Stream         bool             `json:"stream"`
+		StreamOptions  *StreamOptions   `json:"stream_options,omitempty"`
+		Tools          []Tool           `json:"tools,omitempty"`
+		ToolChoice     string           `json:"tool_choice,omitempty"`
+		Temperature    *float64         `json:"temperature,omitempty"`
+		MaxTokens      int              `json:"max_tokens,omitempty"`
+		ResponseFormat *ResponseFmt     `json:"response_format,omitempty"`
+		Thinking       *ThinkingOptions `json:"thinking,omitempty"`
+	}{
+		Model:          r.Model,
+		Messages:       wireMsgs,
+		Stream:         r.Stream,
+		StreamOptions:  r.StreamOptions,
+		Tools:          tools,
+		ToolChoice:     r.ToolChoice,
+		Temperature:    r.Temperature,
+		MaxTokens:      r.MaxTokens,
+		ResponseFormat: r.ResponseFormat,
+		Thinking:       r.Thinking,
+	}
+	return json.Marshal(out)
+}
+
+// splitToolResults pulls every ToolResultBlock out of m.Blocks and
+// returns one wireMessage per result (role="tool"). The returned
+// remainder Message keeps m's Role/Name/legacy-fields and a Blocks
+// slice trimmed to the non-result subset. Tool-result wireMessages
+// are emitted in source order to keep request logs readable.
+func splitToolResults(m Message) (results []wireMessage, remainder Message) {
+	remainder = m
+	if len(m.Blocks) == 0 {
+		return nil, remainder
+	}
+	rest := make([]ContentBlock, 0, len(m.Blocks))
+	for _, b := range m.Blocks {
+		if tr, ok := b.(ToolResultBlock); ok {
+			results = append(results, wireMessage{
+				Role:       "tool",
+				ToolCallID: tr.ToolUseID,
+				Content:    tr.Content,
+			})
+			continue
+		}
+		rest = append(rest, b)
+	}
+	remainder.Blocks = rest
+	return results, remainder
 }
 
 // canonicalJSON re-encodes a JSON document with object keys sorted at

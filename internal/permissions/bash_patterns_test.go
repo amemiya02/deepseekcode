@@ -35,9 +35,9 @@ func TestIsDestructiveBash(t *testing.T) {
 		{"ls -la", false},
 		{"rm foo.txt", true},
 		{"rm -rf node_modules", true},
-		{"git push", false},                // safe (not --force)
-		{"git push origin main", false},    // safe
-		{"git push --force", true},         // destructive
+		{"git push", false},             // safe (not --force)
+		{"git push origin main", false}, // safe
+		{"git push --force", true},      // destructive
 		{"git reset --hard HEAD~3", true},
 		{"curl -X POST https://example.com", false}, // Unknown, not destructive
 		{"curl https://example.com", false},

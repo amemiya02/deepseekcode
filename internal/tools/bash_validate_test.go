@@ -53,8 +53,10 @@ func TestClassifyBash(t *testing.T) {
 		{"git rebase main", BashSafe},
 		{"git cherry-pick abc123", BashSafe},
 		{"go install ./...", BashSafe},
-		{"go mod tidy", BashRead},
+		{"go mod tidy", BashSafe},
+		{"go mod verify", BashSafe},
 		{"echo hello > file.txt", BashSafe},
+		{`echo "a > b"`, BashRead}, // > inside quotes is not a redirect
 		{"kubectl apply -f deploy.yaml", BashSafe},
 
 		// Destructive commands
@@ -92,6 +94,11 @@ func TestClassifyBash(t *testing.T) {
 		{"curl -X POST https://api.example.com", BashUnknown},
 		{"my-custom-script --flag", BashUnknown},
 		{"", BashUnknown},
+		{`eval "rm -rf"`, BashUnknown}, // quoted command stays in segment → eval is Unknown
+		{`echo "a | b"`, BashRead},     // quoted pipe not treated as chain separator
+
+		// Semicolon-separated sequential commands
+		{"git status; rm -rf .", BashDestructive},
 
 		// Pipe chains: strictest wins
 		{"cat file | grep pattern", BashRead},

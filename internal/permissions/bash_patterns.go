@@ -8,20 +8,20 @@ import (
 // matching. See docs/design.md §8.2.
 //
 // Heuristic:
-//   1. Take the first word as the verb.
-//   2. If the verb has a subcommand (git status / npm install / kubectl
-//      delete / cargo build / docker push), include the subcommand.
-//   3. Replace remaining args with a single "*".
-//   4. Collapse trailing whitespace.
+//  1. Take the first word as the verb.
+//  2. If the verb has a subcommand (git status / npm install / kubectl
+//     delete / cargo build / docker push), include the subcommand.
+//  3. Replace remaining args with a single "*".
+//  4. Collapse trailing whitespace.
 //
 // Examples:
 //
-//   git status -sb           → "git status *"
-//   git status               → "git status *"
-//   npm install foo bar      → "npm install *"
-//   rm -rf node_modules      → "rm -rf *"
-//   ls                       → "ls"
-//   ./build.sh --verbose     → "./build.sh *"
+//	git status -sb           → "git status *"
+//	git status               → "git status *"
+//	npm install foo bar      → "npm install *"
+//	rm -rf node_modules      → "rm -rf *"
+//	ls                       → "ls"
+//	./build.sh --verbose     → "./build.sh *"
 //
 // We deliberately keep this loose; users who want surgical patterns can
 // hand-edit ~/.deepseek/config.toml's allow_bash list.
@@ -38,24 +38,24 @@ func bashPattern(cmd string) string {
 
 	// Verbs with significant subcommands.
 	subverbs := map[string]bool{
-		"git":        true,
-		"npm":        true,
-		"pnpm":       true,
-		"yarn":       true,
-		"kubectl":    true,
-		"cargo":      true,
-		"docker":     true,
-		"go":         true,
-		"make":       true,
-		"terraform":  true,
-		"helm":       true,
-		"poetry":     true,
-		"pip":        true,
-		"uv":         true,
-		"brew":       true,
-		"systemctl":  true,
-		"apt":        true,
-		"apt-get":    true,
+		"git":       true,
+		"npm":       true,
+		"pnpm":      true,
+		"yarn":      true,
+		"kubectl":   true,
+		"cargo":     true,
+		"docker":    true,
+		"go":        true,
+		"make":      true,
+		"terraform": true,
+		"helm":      true,
+		"poetry":    true,
+		"pip":       true,
+		"uv":        true,
+		"brew":      true,
+		"systemctl": true,
+		"apt":       true,
+		"apt-get":   true,
 	}
 
 	// Verbs where the first flag should stay in the pattern.

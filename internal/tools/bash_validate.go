@@ -6,7 +6,7 @@ import "strings"
 type BashIntent int
 
 const (
-	BashRead       BashIntent = iota // read-only: ls, cat, grep, git status, etc.
+	BashRead        BashIntent = iota // read-only: ls, cat, grep, git status, etc.
 	BashSafe                          // safe-mutating: mkdir, touch, git add/commit, etc.
 	BashDestructive                   // destructive: rm, git push --force, sed -i, etc.
 	BashUnknown                       // unclear or complex: conservatively treated as ask
@@ -45,7 +45,7 @@ func ClassifyBash(command string) BashIntent {
 	return worst
 }
 
-// splitChain splits on |, &&, || respecting quotes.
+// splitChain splits on ;, |, &&, || respecting quotes and paren depth.
 func splitChain(s string) []string {
 	var segs []string
 	var cur strings.Builder
@@ -77,6 +77,12 @@ func splitChain(s string) []string {
 		}
 		if depth > 0 {
 			cur.WriteByte(c)
+			continue
+		}
+		// ; splits sequential commands.
+		if c == ';' {
+			segs = append(segs, strings.TrimSpace(cur.String()))
+			cur.Reset()
 			continue
 		}
 		// Check for |, &&, ||
@@ -113,8 +119,8 @@ func classifySingle(cmd string) BashIntent {
 		return BashUnknown
 	}
 
-	// Redirect check: any > or >> makes it at least safe-mutating.
-	if strings.Contains(cmd, ">") || strings.Contains(cmd, ">>") {
+	// Redirect check: > or >> outside quotes makes it at least safe-mutating.
+	if hasRedirect(cmd) {
 		return BashSafe
 	}
 
@@ -238,8 +244,7 @@ func classifySingle(cmd string) BashIntent {
 	if verb == "go" && len(tokens) > 1 {
 		goRead := map[string]bool{
 			"list": true, "vet": true, "doc": true, "version": true,
-			"env": true, "mod tidy": true, "mod verify": true,
-			"test": true, "build": true,
+			"env": true, "test": true, "build": true,
 		}
 		if goRead[tokens[1]] {
 			return BashRead
@@ -266,6 +271,7 @@ func classifySingle(cmd string) BashIntent {
 	if verb == "go" && len(tokens) > 1 {
 		goSafe := map[string]bool{
 			"install": true, "get": true, "mod download": true,
+			"mod tidy": true, "mod verify": true,
 			"generate": true, "run": true,
 		}
 		if goSafe[tokens[1]] {
@@ -367,6 +373,29 @@ func hasFlag(tokens []string, flags ...string) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// hasRedirect returns true if the command contains > or >> outside of
+// quotes. This avoids misclassifying e.g. echo "a > b" as a redirect.
+func hasRedirect(s string) bool {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if c == '>' {
+			return true
 		}
 	}
 	return false

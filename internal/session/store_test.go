@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 func TestStoreNewAndLoad(t *testing.T) {
@@ -180,6 +183,90 @@ func TestMigrateV1ToV2(t *testing.T) {
 	if got != 2 {
 		t.Errorf("schema_version max: want 2, got %d", got)
 	}
+}
+
+// TestLoadMessagesBlocksFromNew pins the fast path: a row written
+// via AppendMessage with Blocks populated is read back with the
+// same blocks.
+func TestLoadMessagesBlocksFromNew(t *testing.T) {
+	s, sessID := newStoreWithSession(t)
+	ctx := context.Background()
+
+	want := []llm.ContentBlock{
+		llm.ThinkingBlock{Text: "plan"},
+		llm.TextBlock{Text: "answer"},
+	}
+	if _, err := s.AppendMessage(ctx, sessID, Message{Role: "assistant", Blocks: want}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	msgs, err := s.LoadMessages(ctx, sessID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 msg, got %d", len(msgs))
+	}
+	if len(msgs[0].Blocks) != 2 {
+		t.Fatalf("want 2 blocks, got %d", len(msgs[0].Blocks))
+	}
+	if _, ok := msgs[0].Blocks[0].(llm.ThinkingBlock); !ok {
+		t.Errorf("blocks[0] not ThinkingBlock: %T", msgs[0].Blocks[0])
+	}
+	if tb, ok := msgs[0].Blocks[1].(llm.TextBlock); !ok || tb.Text != "answer" {
+		t.Errorf("blocks[1] wrong: %#v", msgs[0].Blocks[1])
+	}
+}
+
+// TestLoadMessagesBlocksFromLegacy verifies the back-compat path:
+// a row inserted directly with legacy columns and an empty blocks
+// column is reconstructed into the typed Blocks form on load.
+func TestLoadMessagesBlocksFromLegacy(t *testing.T) {
+	s, sessID := newStoreWithSession(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Unix()
+
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO messages
+		 (session_id, idx, role, content, reasoning_content, tool_calls,
+		  tool_results, tool_call_id, model,
+		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts, blocks)
+		 VALUES (?, 0, 'assistant', 'hi', 'think', '', '', '', '', 0, 0, 0, 0, ?, '')`,
+		sessID, now); err != nil {
+		t.Fatalf("legacy insert: %v", err)
+	}
+
+	msgs, err := s.LoadMessages(ctx, sessID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("want 1 msg, got %d", len(msgs))
+	}
+	got := msgs[0].Blocks
+	if len(got) != 2 {
+		t.Fatalf("want 2 reconstructed blocks, got %d (%#v)", len(got), got)
+	}
+	if tb, ok := got[0].(llm.ThinkingBlock); !ok || tb.Text != "think" {
+		t.Errorf("blocks[0] = %#v, want ThinkingBlock{think}", got[0])
+	}
+	if tb, ok := got[1].(llm.TextBlock); !ok || tb.Text != "hi" {
+		t.Errorf("blocks[1] = %#v, want TextBlock{hi}", got[1])
+	}
+}
+
+func newStoreWithSession(t *testing.T) (*Store, string) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	sess, err := s.NewSession(context.Background(), "/proj", "m", false)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	return s, sess.ID
 }
 
 func missingColumns(t *testing.T, db *sql.DB, table string, want []string) []string {

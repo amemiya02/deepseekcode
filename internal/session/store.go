@@ -401,12 +401,19 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 
 // LoadMessages returns the message list for a session in idx order.
 // Does NOT replay parents — use Replay for that.
+//
+// Blocks resolution: if the v2 blocks column is non-empty,
+// UnmarshalBlocks restores the typed slice. Otherwise the row is
+// pre-v2 and rebuildBlocksFromLegacy synthesizes blocks from
+// content/reasoning/tool_calls so callers see a uniform Blocks view
+// regardless of when the row was written.
 func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT idx, role, COALESCE(content,''), COALESCE(reasoning_content,''),
 		        COALESCE(tool_calls,''), COALESCE(tool_call_id,''), COALESCE(model,''),
 		        COALESCE(cache_hit_tokens,0), COALESCE(miss_tokens,0),
-		        COALESCE(output_tokens,0), COALESCE(cost_yuan,0), ts
+		        COALESCE(output_tokens,0), COALESCE(cost_yuan,0), ts,
+		        COALESCE(blocks,'')
 		 FROM messages WHERE session_id = ? ORDER BY idx ASC`, sessionID)
 	if err != nil {
 		return nil, err
@@ -417,16 +424,26 @@ func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, 
 		var (
 			m         Message
 			toolCalls string
+			blocksRaw string
 			ts        int64
 		)
 		if err := rows.Scan(&m.Idx, &m.Role, &m.Content, &m.ReasoningContent,
 			&toolCalls, &m.ToolCallID, &m.Model,
 			&m.Usage.PromptCacheHitTokens, &m.Usage.PromptCacheMissTokens,
-			&m.Usage.CompletionTokens, &m.CostYuan, &ts); err != nil {
+			&m.Usage.CompletionTokens, &m.CostYuan, &ts, &blocksRaw); err != nil {
 			return nil, err
 		}
 		if toolCalls != "" {
 			_ = json.Unmarshal([]byte(toolCalls), &m.ToolCalls)
+		}
+		if blocksRaw != "" {
+			blocks, err := llm.UnmarshalBlocks([]byte(blocksRaw))
+			if err != nil {
+				return nil, fmt.Errorf("session=%s idx=%d: unmarshal blocks: %w", sessionID, m.Idx, err)
+			}
+			m.Blocks = blocks
+		} else {
+			m.Blocks = rebuildBlocksFromLegacy(m.Role, m.Content, m.ReasoningContent, toolCalls, m.ToolCallID)
 		}
 		m.Timestamp = time.Unix(ts, 0).UTC()
 		out = append(out, m)

@@ -459,6 +459,7 @@ func (a *App) View() string {
 		BorderForeground(borderStyle.GetForeground()).
 		Padding(0, 1).
 		Width(a.width - 2).
+		MaxHeight(a.input.Height() + 2).
 		Render(a.input.View())
 
 	// Mode-aware hint text.
@@ -521,7 +522,11 @@ func (a *App) layout() {
 		chromeH  = 1
 		dividerH = 1
 	)
-	inputH := 5 // textarea(3) + rounded border(2)
+	// Use the textarea's actual height, not a hardcoded 3 — the
+	// textarea grows when the user types multi-line content, and a
+	// fixed inputH would make the viewport render into the input area
+	// (garbled overlap on scroll).
+	inputH := a.input.Height() + 2 // textarea + rounded border(2)
 	hintH := 1
 	permH := 0
 	if a.permission.Active() {

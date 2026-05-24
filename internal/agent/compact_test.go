@@ -297,6 +297,63 @@ func TestSummarizeMessagesDeterministic(t *testing.T) {
 	}
 }
 
+func TestMergeCompactSummaries(t *testing.T) {
+	t.Run("empty_prev_returns_new", func(t *testing.T) {
+		got := mergeCompactSummaries("", "<summary>\n- messages: 1\n</summary>")
+		if !strings.Contains(got, "messages: 1") {
+			t.Errorf("expected new summary; got %q", got)
+		}
+	})
+
+	t.Run("normal_merge_dedups_tools_and_files", func(t *testing.T) {
+		prev := "<summary>\n" +
+			"- messages: 10 total\n" +
+			"- tools_used: [bash, edit_file]\n" +
+			"- recent_requests:\n" +
+			"- pending_work:\n" +
+			"  - finish A\n" +
+			"- key_files: [a.go, b.go]\n" +
+			"- current_work: prev work\n" +
+			"- timeline:\n" +
+			"</summary>"
+		next := "<summary>\n" +
+			"- messages: 5 total\n" +
+			"- tools_used: [edit_file, grep]\n" +
+			"- recent_requests:\n" +
+			"  - latest request\n" +
+			"- pending_work:\n" +
+			"  - finish B\n" +
+			"- key_files: [b.go, c.go]\n" +
+			"- current_work: new work\n" +
+			"- timeline:\n" +
+			"  [user][1] hi\n" +
+			"</summary>"
+		got := mergeCompactSummaries(prev, next)
+		if !strings.Contains(got, "tools_used: [bash, edit_file, grep]") {
+			t.Errorf("merged tools_used wrong:\n%s", got)
+		}
+		if !strings.Contains(got, "key_files: [a.go, b.go, c.go]") {
+			t.Errorf("merged key_files wrong:\n%s", got)
+		}
+		if !strings.Contains(got, "current_work: new work") {
+			t.Errorf("current_work should be new value:\n%s", got)
+		}
+		if !strings.Contains(got, "messages: 5 total") {
+			t.Errorf("messages count should be new value:\n%s", got)
+		}
+		if !strings.Contains(got, "finish A") || !strings.Contains(got, "finish B") {
+			t.Errorf("merged pending_work should keep both:\n%s", got)
+		}
+	})
+
+	t.Run("garbled_input_falls_back_to_concat", func(t *testing.T) {
+		got := mergeCompactSummaries("totally not a summary", "<summary>\n- messages: 1\n</summary>")
+		if !strings.Contains(got, "totally not a summary") || !strings.Contains(got, "merged with newer summary") {
+			t.Errorf("expected fallback concat; got %q", got)
+		}
+	})
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

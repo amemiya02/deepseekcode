@@ -238,6 +238,65 @@ func TestCompactSessionFullFlow(t *testing.T) {
 	})
 }
 
+func TestSummarizeMessages(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "user", Blocks: []llm.ContentBlock{
+			llm.TextBlock{Text: "Please refactor parser.go and add tests."},
+		}},
+		{Role: "assistant", Blocks: []llm.ContentBlock{
+			llm.ThinkingBlock{Text: "I should also check helpers.go"},
+			llm.TextBlock{Text: "Done editing parser.go. TODO: update README.md next."},
+			llm.ToolUseBlock{ID: "a", Name: "edit_file", Input: json.RawMessage(`{"path":"parser.go"}`)},
+		}},
+		{Role: "tool", Blocks: []llm.ContentBlock{
+			llm.ToolResultBlock{ToolUseID: "a", Content: "wrote 12 lines"},
+		}},
+	}
+	got := summarizeMessages(msgs)
+	for _, want := range []string{
+		"<summary>",
+		"</summary>",
+		"- messages: 3 total",
+		"- tools_used: [edit_file]",
+		"- recent_requests:",
+		"- pending_work:",
+		"TODO",
+		"- key_files: [",
+		"parser.go",
+		"README.md",
+		"helpers.go",
+		"- current_work:",
+		"- timeline:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary missing %q\nfull:\n%s", want, got)
+		}
+	}
+}
+
+func TestSummarizeMessagesEmpty(t *testing.T) {
+	if got := summarizeMessages(nil); got != "" {
+		t.Errorf("nil input should produce empty; got %q", got)
+	}
+}
+
+func TestSummarizeMessagesDeterministic(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "assistant", Blocks: []llm.ContentBlock{
+			llm.ToolUseBlock{ID: "z", Name: "b_tool", Input: json.RawMessage("{}")},
+			llm.ToolUseBlock{ID: "y", Name: "a_tool", Input: json.RawMessage("{}")},
+		}},
+		{Role: "user", Blocks: []llm.ContentBlock{
+			llm.TextBlock{Text: "modify a.go and b.go"},
+		}},
+	}
+	first := summarizeMessages(msgs)
+	second := summarizeMessages(msgs)
+	if first != second {
+		t.Errorf("summary not deterministic:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

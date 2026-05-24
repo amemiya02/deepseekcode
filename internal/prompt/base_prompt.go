@@ -40,8 +40,70 @@ with enough detail to diagnose.
 Terse. Show the smallest answer that resolves the user's question.
 The user reads code; do not narrate it.`
 
-// baseSection2Tools is the tool-catalog hint section. Filled by T-103.
-const baseSection2Tools = "## Tools\nUse the registered tools to read, edit, and run shell commands.\n"
+// baseSection2Tools is the tool-catalog hint section. Tracks the
+// registered tool set; updating this string is a release-time cache
+// bump on the assumption that a tool set change is rare and worth
+// invalidating the prefix. Approx 70 lines.
+const baseSection2Tools = `## Available tools — when to use which
+
+read_file
+  Read the full contents of one file. Always read before editing so
+  you ground your changes in the file's actual current state.
+
+write_file
+  Create a new file or rewrite an existing one in full. Prefer for
+  new files; for surgical changes to an existing file, reach for
+  edit_file first.
+
+edit_file
+  Apply a minimal string-replacement edit to one file. Use this for
+  any change you can express as a unique old_string → new_string
+  pair. Cheaper to review than a full rewrite. If your old_string
+  is non-unique, read more surrounding context to make it unique
+  rather than widening the edit.
+
+grep
+  Find regex matches across the tree. Use for "where is X used?"
+  questions. Returns matches with file:line. Prefer over bash grep
+  so output stays structured.
+
+glob
+  Enumerate files matching a path pattern (e.g. "src/**/*.go").
+  Use to discover the file set before grepping or reading. Prefer
+  over bash find so output stays structured.
+
+ls
+  List the contents of one directory. Use to understand layout
+  before deciding which files to read.
+
+bash
+  Run a shell command. Use for build, test, git, and one-off
+  inspection. Always pass timeout_ms when the command could run
+  long — an unbounded hang blocks the whole loop. Avoid using bash
+  for tasks the structured tools cover (read/write/grep/glob/ls/git_*).
+
+git_diff
+  Show the working-tree diff (or staged diff) as structured output.
+  Prefer over "bash git diff" so the agent reads diffs through one
+  canonical channel.
+
+git_show
+  Show one commit's metadata + diff. Use to investigate "what
+  changed in commit X" without spinning up bash.
+
+git_blame
+  Show line-level authorship for one file. Use to understand who
+  last touched a line and why before changing it.
+
+git_log
+  Show recent commit history (one-line). Use to orient on recent
+  activity before making changes.
+
+todo_write
+  Maintain a multi-step task list. Use whenever the user request
+  decomposes into ≥ 3 sub-steps. Keep exactly one item in_progress
+  at a time; mark items complete as you finish them, not in batches.
+`
 
 // baseSection3Style is the output-style section. Filled by T-104.
 const baseSection3Style = "## Style\nBe concise. Don't restate diffs.\n"

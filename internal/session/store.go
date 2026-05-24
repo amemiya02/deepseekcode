@@ -399,6 +399,90 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 	return nextIdx, nil
 }
 
+// ReplaceWithCompaction atomically collapses messages in [fromIdx,
+// toIdx) into a single synthetic system message containing the
+// summary, then renumbers later messages so idx stays contiguous.
+//
+// Snapshots in this project are filesystem-backed (no SQL table to
+// UPDATE), so step_idx shifting for snapshots lives in
+// snapshots.Manager rather than here — see T-217.
+//
+// Returns the idx of the inserted summary row (== fromIdx). A
+// no-op call (fromIdx == toIdx) returns fromIdx with nil error.
+// toIdx larger than the current message count is clamped to count+1.
+func (s *Store) ReplaceWithCompaction(ctx context.Context, sessionID string, fromIdx, toIdx int, summary string) (int, error) {
+	if fromIdx < 0 || toIdx < fromIdx {
+		return 0, fmt.Errorf("ReplaceWithCompaction: invalid range [%d,%d)", fromIdx, toIdx)
+	}
+	if fromIdx == toIdx {
+		return fromIdx, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var maxIdx sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT MAX(idx) FROM messages WHERE session_id = ?`, sessionID).Scan(&maxIdx); err != nil {
+		return 0, fmt.Errorf("read max idx: %w", err)
+	}
+	if maxIdx.Valid {
+		if upper := int(maxIdx.Int64) + 1; toIdx > upper {
+			toIdx = upper
+		}
+	}
+	if fromIdx == toIdx {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return fromIdx, nil
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM messages WHERE session_id = ? AND idx >= ? AND idx < ?`,
+		sessionID, fromIdx, toIdx); err != nil {
+		return 0, fmt.Errorf("delete range: %w", err)
+	}
+
+	shift := toIdx - fromIdx - 1
+	if shift > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE messages SET idx = idx - ? WHERE session_id = ? AND idx >= ?`,
+			shift, sessionID, toIdx); err != nil {
+			return 0, fmt.Errorf("renumber: %w", err)
+		}
+	}
+
+	blocksJSON, err := llm.MarshalBlocks([]llm.ContentBlock{llm.TextBlock{Text: summary}})
+	if err != nil {
+		return 0, fmt.Errorf("marshal summary blocks: %w", err)
+	}
+	ts := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO messages
+		 (session_id, idx, role, content, reasoning_content, tool_calls,
+		  tool_results, tool_call_id, model,
+		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts, blocks)
+		 VALUES (?, ?, 'system', '', '', '', '', '', '', 0, 0, 0, 0, ?, ?)`,
+		sessionID, fromIdx, ts.Unix(), string(blocksJSON)); err != nil {
+		return 0, fmt.Errorf("insert summary: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE sessions SET compaction_count = compaction_count + 1, compaction_summary = ?, last_used_at = ? WHERE id = ?`,
+		summary, ts.Unix(), sessionID); err != nil {
+		return 0, fmt.Errorf("update session metadata: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return fromIdx, nil
+}
+
 // LoadMessages returns the message list for a session in idx order.
 // Does NOT replay parents — use Replay for that.
 //

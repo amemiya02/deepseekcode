@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -324,6 +325,110 @@ func TestUpgradeV1ToV2Roundtrip(t *testing.T) {
 	}
 	if tb, ok := all[1].Blocks[0].(llm.TextBlock); !ok || tb.Text != "follow-up" {
 		t.Errorf("appended msg blocks[0]: got %#v", all[1].Blocks[0])
+	}
+}
+
+// TestReplaceWithCompactionAtomic seeds a session with 10 messages,
+// compacts [2,7), and asserts the remaining rows form a contiguous
+// 6-message list (0,1,SUMMARY,3,4,5) with the summary at the
+// from-edge and compaction_count incremented.
+func TestReplaceWithCompactionAtomic(t *testing.T) {
+	s, sessID := newStoreWithSession(t)
+	ctx := context.Background()
+
+	for i := 0; i < 10; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		text := strings.Repeat("x", 10) + "-" + string(rune('A'+i))
+		if _, err := s.AppendMessage(ctx, sessID, Message{
+			Role:   role,
+			Blocks: []llm.ContentBlock{llm.TextBlock{Text: text}},
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	got, err := s.ReplaceWithCompaction(ctx, sessID, 2, 7, "SUMMARY")
+	if err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("inserted idx: got %d want 2", got)
+	}
+
+	msgs, err := s.LoadMessages(ctx, sessID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(msgs) != 6 {
+		t.Fatalf("post-compact count: got %d want 6", len(msgs))
+	}
+
+	wantIdxs := []int{0, 1, 2, 3, 4, 5}
+	for i, m := range msgs {
+		if m.Idx != wantIdxs[i] {
+			t.Errorf("msg[%d].Idx = %d, want %d", i, m.Idx, wantIdxs[i])
+		}
+	}
+	if msgs[2].Role != "system" {
+		t.Errorf("msgs[2].Role = %q, want system (summary)", msgs[2].Role)
+	}
+	if tb, ok := msgs[2].Blocks[0].(llm.TextBlock); !ok || tb.Text != "SUMMARY" {
+		t.Errorf("summary blocks[0] = %#v", msgs[2].Blocks[0])
+	}
+
+	var count int
+	if err := s.db.QueryRow(`SELECT compaction_count FROM sessions WHERE id = ?`, sessID).Scan(&count); err != nil {
+		t.Fatalf("read compaction_count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("compaction_count = %d, want 1", count)
+	}
+}
+
+func TestReplaceWithCompactionNoOp(t *testing.T) {
+	s, sessID := newStoreWithSession(t)
+	ctx := context.Background()
+	if _, err := s.AppendMessage(ctx, sessID, Message{
+		Role:   "user",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ReplaceWithCompaction(ctx, sessID, 5, 5, "noop")
+	if err != nil {
+		t.Fatalf("noop compact: %v", err)
+	}
+	if got != 5 {
+		t.Errorf("got %d want 5", got)
+	}
+	msgs, _ := s.LoadMessages(ctx, sessID)
+	if len(msgs) != 1 {
+		t.Errorf("noop should not change msg count; got %d", len(msgs))
+	}
+}
+
+func TestReplaceWithCompactionClampsTo(t *testing.T) {
+	s, sessID := newStoreWithSession(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, err := s.AppendMessage(ctx, sessID, Message{
+			Role:   "user",
+			Blocks: []llm.ContentBlock{llm.TextBlock{Text: "msg"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// toIdx=99 should clamp to 3.
+	if _, err := s.ReplaceWithCompaction(ctx, sessID, 1, 99, "S"); err != nil {
+		t.Fatalf("clamp compact: %v", err)
+	}
+	msgs, _ := s.LoadMessages(ctx, sessID)
+	// Kept: idx 0, then summary at idx 1. (Total 2 messages.)
+	if len(msgs) != 2 {
+		t.Errorf("got %d msgs want 2: %#v", len(msgs), msgs)
 	}
 }
 

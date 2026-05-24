@@ -6,15 +6,14 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
-// DestructivePatterns are the bash invocations that trigger the Duet
-// Pro Validator (see docs/design.md §11.2). They run regardless of the
-// permissions allowlist — even an auto-approved `git push` still gets
-// pro to weigh in.
-//
-// Patterns are RE2 regexes. Users add to the list via
-// [duet].extra_destructive_patterns in config.
+// DestructivePatterns documents the bash invocations that the Duet Pro
+// Validator treats as destructive (see docs/design.md §11.2).
+// These are now handled by tools.ClassifyBash; this list is kept for
+// reference and for the extra-patterns fallback.
 var DestructivePatterns = []string{
 	`^\s*rm(\s|$)`,
 	`^\s*rm\s+-r`,
@@ -33,30 +32,28 @@ var DestructivePatterns = []string{
 	`^\s*docker\s+push`,
 }
 
-// IsDestructiveBash returns true if the command matches any destructive
-// pattern (built-in or user-configured).
+// IsDestructiveBash returns true if ClassifyBash classifies the command as
+// BashDestructive, or if the command matches any user-configured extra
+// patterns.
 func IsDestructiveBash(command string, extra []string) bool {
-	m := defaultMatcher()
-	if len(extra) > 0 {
-		m = newMatcher(append([]string(nil), DestructivePatterns...), extra)
+	if tools.ClassifyBash(command) == tools.BashDestructive {
+		return true
 	}
-	return m.Match(command)
+	if len(extra) > 0 {
+		return extraMatcher(extra).Match(command)
+	}
+	return false
 }
 
 // IsDestructivePath returns true if writing to path should be considered
 // destructive (outside cwd, inside .git, matching secret patterns).
-// Used by the Duet to decide whether a write/edit tool needs pro to
-// weigh in even if standard permissions would auto-allow it.
-//
-// (The standard permissions tier *also* prompts for these paths; the
-// Duet adds Pro validation in addition to the permission prompt.)
 func IsDestructivePath(path, cwd string, secretPatterns []string) bool {
 	if path == "" {
 		return false
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return true // can't tell, be safe
+		return true
 	}
 	if matchesGitOrSecret(abs, secretPatterns) {
 		return true
@@ -113,24 +110,33 @@ type matcher struct {
 }
 
 var (
-	defaultMatcherOnce sync.Once
-	defaultMatcherVal  *matcher
+	extraMatcherCache struct {
+		mu    sync.Mutex
+		cache map[string]*matcher
+	}
 )
 
-func defaultMatcher() *matcher {
-	defaultMatcherOnce.Do(func() {
-		defaultMatcherVal = newMatcher(DestructivePatterns, nil)
-	})
-	return defaultMatcherVal
+func extraMatcher(extra []string) *matcher {
+	key := strings.Join(extra, "\x00")
+	extraMatcherCache.mu.Lock()
+	defer extraMatcherCache.mu.Unlock()
+	if extraMatcherCache.cache == nil {
+		extraMatcherCache.cache = make(map[string]*matcher)
+	}
+	if m, ok := extraMatcherCache.cache[key]; ok {
+		return m
+	}
+	m := newMatcherFromPatterns(extra)
+	extraMatcherCache.cache[key] = m
+	return m
 }
 
-func newMatcher(builtin, extra []string) *matcher {
-	patterns := append(append([]string(nil), builtin...), extra...)
+func newMatcherFromPatterns(patterns []string) *matcher {
 	all := make([]*regexp.Regexp, 0, len(patterns))
 	for _, p := range patterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
-			continue // skip invalid user-supplied patterns silently
+			continue
 		}
 		all = append(all, re)
 	}

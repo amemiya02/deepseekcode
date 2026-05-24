@@ -35,13 +35,14 @@ func TestIsDestructiveBash(t *testing.T) {
 		{"ls -la", false},
 		{"rm foo.txt", true},
 		{"rm -rf node_modules", true},
-		{"git push", true},
-		{"git push origin main", true},
+		{"git push", false},                // safe (not --force)
+		{"git push origin main", false},    // safe
+		{"git push --force", true},         // destructive
 		{"git reset --hard HEAD~3", true},
-		{"curl -X POST https://example.com", true},
+		{"curl -X POST https://example.com", false}, // Unknown, not destructive
 		{"curl https://example.com", false},
 		{"kubectl delete pod foo", true},
-		{"kubectl apply -f deploy.yaml", true},
+		{"kubectl apply -f deploy.yaml", false}, // safe
 		{"terraform apply", true},
 		{"terraform plan", false},
 		{"npm publish", true},
@@ -53,5 +54,21 @@ func TestIsDestructiveBash(t *testing.T) {
 		if got != c.want {
 			t.Errorf("IsDestructiveBash(%q) = %v; want %v", c.in, got, c.want)
 		}
+	}
+}
+
+func TestIsDestructiveBashExtra(t *testing.T) {
+	extra := []string{`^\s*git\s+push(\s|$)`}
+	// git push without --force: ClassifyBash says safe, but extra regex adds it back.
+	if !IsDestructiveBash("git push origin main", extra) {
+		t.Error("extra patterns should override ClassifyBash")
+	}
+	// git push --force: ClassifyBash already says destructive.
+	if !IsDestructiveBash("git push --force", extra) {
+		t.Error("force push should be destructive")
+	}
+	// Normal read command should not match extra pattern.
+	if IsDestructiveBash("git status", extra) {
+		t.Error("git status should not be destructive even with extra patterns")
 	}
 }

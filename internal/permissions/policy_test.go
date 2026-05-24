@@ -155,6 +155,94 @@ func TestPolicyModeOverridesRules(t *testing.T) {
 	}
 }
 
+func TestPolicyBashClassifyIntegration(t *testing.T) {
+	pol := New(ModeDefault, "/tmp", nil, nil, nil)
+
+	tests := []struct {
+		command string
+		want    Decision
+		reason  string
+	}{
+		// BashRead → auto-allow
+		{"git status", Allow, "bash read-only"},
+		{"ls -la", Allow, "bash read-only"},
+		{"cat file.txt", Allow, "bash read-only"},
+		{"go test ./...", Allow, "bash read-only"},
+
+		// BashDestructive → always ask (even without allowlist)
+		{"rm -rf node_modules", Ask, "bash destructive"},
+		{"git push --force", Ask, "bash destructive"},
+		{"git reset --hard HEAD~1", Ask, "bash destructive"},
+
+		// BashSafe → ask (no allowlist entry)
+		{"git add .", Ask, "bash command not in allowlist"},
+		{"mkdir newdir", Ask, "bash command not in allowlist"},
+
+		// BashUnknown → ask
+		{"bash script.sh", Ask, "bash command not in allowlist"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			dec, reason := pol.Decide(Check{
+				Tool: &fakeTool{name: "bash", readOnly: false},
+				Args: json.RawMessage(`{"command":"` + tt.command + `"}`),
+			})
+			if dec != tt.want {
+				t.Errorf("Decide(bash %q) = %v, want %v", tt.command, dec, tt.want)
+			}
+			if !strings.Contains(reason, tt.reason) {
+				t.Errorf("Decide(bash %q) reason = %q, want containing %q", tt.command, reason, tt.reason)
+			}
+		})
+	}
+}
+
+func TestPolicyBashReadAllowsIgnoresAllowlist(t *testing.T) {
+	// BashRead commands should be allowed even with an empty allowlist.
+	pol := New(ModeDefault, "/tmp", nil, []string{}, nil)
+
+	dec, _ := pol.Decide(Check{
+		Tool: &fakeTool{name: "bash", readOnly: false},
+		Args: json.RawMessage(`{"command":"git status"}`),
+	})
+	if dec != Allow {
+		t.Errorf("BashRead should auto-allow with empty allowlist: got %v", dec)
+	}
+}
+
+func TestPolicyBashDestructiveAlwaysAsks(t *testing.T) {
+	// BashDestructive should always ask, even if the allowlist contains the pattern.
+	pol := New(ModeDefault, "/tmp", nil, []string{"rm -rf *"}, nil)
+
+	dec, reason := pol.Decide(Check{
+		Tool: &fakeTool{name: "bash", readOnly: false},
+		Args: json.RawMessage(`{"command":"rm -rf node_modules"}`),
+	})
+	if dec != Ask {
+		t.Errorf("BashDestructive should always ask, even with allowlist: got %v", dec)
+	}
+	if !strings.Contains(reason, "destructive") {
+		t.Errorf("reason should mention destructive: got %q", reason)
+	}
+}
+
+func TestPolicyBashSafeAllowlistWorks(t *testing.T) {
+	// BashSafe commands should be allowed if in the allowlist.
+	pol := New(ModeDefault, "/tmp", nil, []string{"git add *"}, nil)
+
+	dec, reason := pol.Decide(Check{
+		Tool: &fakeTool{name: "bash", readOnly: false},
+		Args: json.RawMessage(`{"command":"git add ."}`),
+	})
+	if dec != Allow {
+		t.Errorf("BashSafe with allowlist match should allow: got %v", dec)
+	}
+	if !strings.Contains(reason, "allowlist") {
+		t.Errorf("reason should mention allowlist: got %q", reason)
+	}
+}
+
 func TestPolicyMinModeForGating(t *testing.T) {
 	// All current tools return ModeDefault, so MinModeFor should never deny.
 	pol := New(ModeDefault, "/tmp", nil, nil, nil)

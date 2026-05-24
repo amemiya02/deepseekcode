@@ -148,7 +148,7 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 		}
 	}
 
-	// Bash: pattern-match against allowlist.
+	// Bash: classify intent, then apply tiered policy.
 	if c.Tool.Name() == "bash" {
 		var args struct {
 			Command string `json:"command"`
@@ -157,13 +157,22 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 		if args.Command == "" {
 			return Ask, "empty bash command"
 		}
-		pat := bashPattern(args.Command)
-		for _, allowed := range p.bashAllowlist {
-			if patternsEqual(allowed, pat) {
-				return Allow, "bash pattern in allowlist"
+		intent := tools.ClassifyBash(args.Command)
+		switch intent {
+		case tools.BashRead:
+			return Allow, "bash read-only command"
+		case tools.BashDestructive:
+			return Ask, "bash destructive command"
+		default:
+			// BashSafe / BashUnknown: check allowlist.
+			pat := bashPattern(args.Command)
+			for _, allowed := range p.bashAllowlist {
+				if patternsEqual(allowed, pat) {
+					return Allow, "bash pattern in allowlist"
+				}
 			}
+			return Ask, "bash command not in allowlist"
 		}
-		return Ask, "bash command not in allowlist"
 	}
 
 	// Unknown tool family — be safe.

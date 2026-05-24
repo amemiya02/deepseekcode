@@ -30,6 +30,7 @@ type Session struct {
 	ParentID          string // empty if root
 	BranchPoint       int    // valid only when ParentID != ""
 	ProjectPath       string
+	WorkspaceFP       string // FNV-1a fingerprint of the canonical project path
 	Model             string
 	DuetEnabled       bool
 	CreatedAt         time.Time
@@ -168,19 +169,24 @@ func (s *Store) backupForV2() error {
 // NewSession inserts a new (root) session and returns its row.
 // Use NewBranch for child sessions.
 func (s *Store) NewSession(ctx context.Context, projectPath, model string, duetEnabled bool) (Session, error) {
+	fp, err := Fingerprint(projectPath)
+	if err != nil {
+		return Session{}, fmt.Errorf("fingerprint: %w", err)
+	}
 	now := time.Now().UTC()
 	sess := Session{
-		ID:           uuid.NewString(),
-		ProjectPath:  projectPath,
-		Model:        model,
-		DuetEnabled:  duetEnabled,
-		CreatedAt:    now,
-		LastUsedAt:   now,
+		ID:          uuid.NewString(),
+		ProjectPath: projectPath,
+		WorkspaceFP: fp,
+		Model:       model,
+		DuetEnabled: duetEnabled,
+		CreatedAt:   now,
+		LastUsedAt:  now,
 	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions(id, parent_id, branch_point, project_path, model, duet_enabled, created_at, last_used_at, summary)
-		 VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, '')`,
-		sess.ID, sess.ProjectPath, sess.Model, boolInt(sess.DuetEnabled),
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO sessions(id, parent_id, branch_point, project_path, workspace_fp, model, duet_enabled, created_at, last_used_at, summary)
+		 VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, '')`,
+		sess.ID, sess.ProjectPath, sess.WorkspaceFP, sess.Model, boolInt(sess.DuetEnabled),
 		sess.CreatedAt.Unix(), sess.LastUsedAt.Unix())
 	if err != nil {
 		return Session{}, fmt.Errorf("insert session: %w", err)
@@ -197,20 +203,21 @@ func (s *Store) NewBranch(ctx context.Context, parentID string, branchPoint int)
 	}
 	now := time.Now().UTC()
 	child := Session{
-		ID:           uuid.NewString(),
-		ParentID:     parent.ID,
-		BranchPoint:  branchPoint,
-		ProjectPath:  parent.ProjectPath,
-		Model:        parent.Model,
-		DuetEnabled:  parent.DuetEnabled,
-		CreatedAt:    now,
-		LastUsedAt:   now,
+		ID:          uuid.NewString(),
+		ParentID:    parent.ID,
+		BranchPoint: branchPoint,
+		ProjectPath: parent.ProjectPath,
+		WorkspaceFP: parent.WorkspaceFP,
+		Model:       parent.Model,
+		DuetEnabled: parent.DuetEnabled,
+		CreatedAt:   now,
+		LastUsedAt:  now,
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO sessions(id, parent_id, branch_point, project_path, model, duet_enabled, created_at, last_used_at, summary)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')`,
+		`INSERT INTO sessions(id, parent_id, branch_point, project_path, workspace_fp, model, duet_enabled, created_at, last_used_at, summary)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
 		child.ID, child.ParentID, child.BranchPoint, child.ProjectPath,
-		child.Model, boolInt(child.DuetEnabled),
+		child.WorkspaceFP, child.Model, boolInt(child.DuetEnabled),
 		child.CreatedAt.Unix(), child.LastUsedAt.Unix())
 	if err != nil {
 		return Session{}, fmt.Errorf("insert branch: %w", err)
@@ -222,7 +229,7 @@ func (s *Store) NewBranch(ctx context.Context, parentID string, branchPoint int)
 func (s *Store) GetSession(ctx context.Context, id string) (Session, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, COALESCE(parent_id, ''), COALESCE(branch_point, 0),
-		        project_path, model, duet_enabled, created_at, last_used_at,
+		        project_path, COALESCE(workspace_fp, ''), model, duet_enabled, created_at, last_used_at,
 		        COALESCE(summary, ''), compaction_count, compaction_summary
 		 FROM sessions WHERE id = ?`, id)
 	var (
@@ -231,7 +238,7 @@ func (s *Store) GetSession(ctx context.Context, id string) (Session, error) {
 		created, used int64
 	)
 	if err := row.Scan(&sess.ID, &sess.ParentID, &sess.BranchPoint,
-		&sess.ProjectPath, &sess.Model, &duet, &created, &used,
+		&sess.ProjectPath, &sess.WorkspaceFP, &sess.Model, &duet, &created, &used,
 		&sess.Summary, &sess.CompactionCount, &sess.CompactionSummary); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Session{}, fmt.Errorf("session %s not found", id)
@@ -252,6 +259,26 @@ func (s *Store) MostRecentInProject(ctx context.Context, projectPath string) (Se
 		projectPath)
 	var id string
 	if err := row.Scan(&id); err != nil {
+		return Session{}, err
+	}
+	return s.GetSession(ctx, id)
+}
+
+// LatestInProject returns the most recently used session whose workspace
+// fingerprint matches projectPath. Unlike MostRecentInProject, this uses
+// the canonical fingerprint so symlinked or renamed paths match.
+func (s *Store) LatestInProject(ctx context.Context, projectPath string) (Session, error) {
+	fp, err := Fingerprint(projectPath)
+	if err != nil {
+		return Session{}, fmt.Errorf("fingerprint: %w", err)
+	}
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id FROM sessions WHERE workspace_fp = ? ORDER BY last_used_at DESC LIMIT 1`, fp)
+	var id string
+	if err := row.Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, fmt.Errorf("no session found for workspace")
+		}
 		return Session{}, err
 	}
 	return s.GetSession(ctx, id)

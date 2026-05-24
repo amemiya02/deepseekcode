@@ -9,13 +9,14 @@ import (
 // statusState is the live status-line state. Updated on every
 // stepFinishMsg and on /models switches.
 type statusState struct {
-	model    string
-	steps    int
-	usage    llm.Usage
-	costYuan float64
-	thinking bool
-	hint     string
-	mode     appMode
+	model           string
+	steps           int
+	compactionCount int
+	usage           llm.Usage
+	costYuan        float64
+	thinking        bool
+	hint            string
+	mode            appMode
 }
 
 // render returns the one-line status string. When in Normal (scroll)
@@ -28,6 +29,9 @@ func (s statusState) render(t Theme) string {
 	}
 	line1 := fmt.Sprintf("%s%s · %d steps · cache %.0f%% · ¥%.4f",
 		modeBadge, t.StatusModel.Render(shortModel(s.model)), s.steps, hit, s.costYuan)
+	if s.compactionCount > 0 {
+		line1 += fmt.Sprintf(" · compacted %d", s.compactionCount)
+	}
 	if s.hint != "" {
 		line1 += t.Hint.Render("  · " + s.hint)
 	}

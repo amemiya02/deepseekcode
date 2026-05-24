@@ -261,6 +261,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		listFn     func() ([]session.Session, error)
 		setModelFn func(string) error
 		notices    []string
+		sess       session.Session
 	)
 
 	store, err := session.Open("")
@@ -271,9 +272,13 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		ctx := context.Background()
 
 		// Resolve session: --new skips resume; -r <id> > -c (last in cwd).
-		var sess session.Session
 		if !newSession {
 			switch {
+			case resumeSes == "latest" || resumeSes == "last":
+				sess, err = store.LatestInProject(ctx, cwd)
+				if err != nil {
+					notices = append(notices, "warning: no latest session for this project, creating new")
+				}
 			case resumeSes != "":
 				sess, err = store.GetSession(ctx, resumeSes)
 				if err != nil {
@@ -295,6 +300,16 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 
 		if sess.ID != "" {
+			// Cross-workspace warning (Phase 8).
+			if sess.WorkspaceFP != "" {
+				cwdFP, _ := session.Fingerprint(cwd)
+				if cwdFP != "" && cwdFP != sess.WorkspaceFP {
+					warn := "warning: session was created in different workspace"
+					fmt.Fprintln(os.Stderr, warn)
+					notices = append(notices, warn)
+				}
+			}
+
 			persister := session.NewPersister(store, snaps, sess.ID)
 			a.Persister = persister
 			sessionID = sess.ID
@@ -334,16 +349,17 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	notices = append(mcpNotices, notices...)
 	app := tui.New(tui.Config{
-		Agent:          a,
-		Model:          cfg.Defaults.Model,
-		Thinking:       cfg.Defaults.Thinking,
-		Theme:          cfg.Defaults.Theme,
-		Cwd:            cwd,
-		SessionID:      sessionID,
-		UndoFn:         undoFn,
-		ListSessions:   listFn,
-		SetModelFn:     setModelFn,
-		StartupNotices: notices,
+		Agent:           a,
+		Model:           cfg.Defaults.Model,
+		Thinking:        cfg.Defaults.Thinking,
+		Theme:           cfg.Defaults.Theme,
+		Cwd:             cwd,
+		SessionID:       sessionID,
+		UndoFn:          undoFn,
+		ListSessions:    listFn,
+		SetModelFn:      setModelFn,
+		StartupNotices:  notices,
+		CompactionCount: sess.CompactionCount,
 	})
 	return app.Run()
 }

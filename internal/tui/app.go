@@ -104,6 +104,10 @@ type Config struct {
 	// resume confirmations, warnings about degraded persistence, etc. —
 	// anything the caller would have written to stderr in CLI mode.
 	StartupNotices []string
+
+	// CompactionCount initialises the status-line compaction counter from
+	// a resumed session's history. Populate from sess.CompactionCount.
+	CompactionCount int
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
@@ -142,8 +146,9 @@ func New(cfg Config) *App {
 			setModel: cfg.SetModelFn,
 		},
 		status: statusState{
-			model:    cfg.Model,
-			thinking: cfg.Thinking,
+			model:           cfg.Model,
+			thinking:        cfg.Thinking,
+			compactionCount: cfg.CompactionCount,
 		},
 	}
 	return app
@@ -359,6 +364,10 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.status.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
 		a.status.costYuan += llm.Cost(a.model, e.Usage)
 		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
+		a.refreshView()
+	case agent.EventCompaction:
+		a.status.compactionCount++
+		a.scrollback.AppendInfo(fmt.Sprintf("compacted %d message(s)", e.RemovedCount))
 		a.refreshView()
 	case agent.EventInfo:
 		a.scrollback.AppendInfo(e.Text)

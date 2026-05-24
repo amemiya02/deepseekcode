@@ -33,6 +33,13 @@ func TestStoreNewAndLoad(t *testing.T) {
 	if got.Model != "deepseek-v4-flash" || got.ProjectPath != "/proj" {
 		t.Fatalf("unexpected session: %+v", got)
 	}
+	wantFP, err := Fingerprint("/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkspaceFP != wantFP {
+		t.Errorf("WorkspaceFP = %q, want %q", got.WorkspaceFP, wantFP)
+	}
 }
 
 func TestStoreAppendAndLoadMessages(t *testing.T) {
@@ -524,4 +531,82 @@ func missingColumns(t *testing.T, db *sql.DB, table string, want []string) []str
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+func TestNewBranchInheritsWorkspaceFP(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	parent, err := store.NewSession(ctx, "/proj", "deepseek-v4-flash", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.WorkspaceFP == "" {
+		t.Fatal("parent.WorkspaceFP should not be empty")
+	}
+
+	// Append a message so branch has a valid branch point.
+	_, err = store.AppendMessage(ctx, parent.ID, Message{
+		Role:   "user",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	child, err := store.NewBranch(ctx, parent.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.WorkspaceFP != parent.WorkspaceFP {
+		t.Errorf("child.WorkspaceFP = %q, want %q", child.WorkspaceFP, parent.WorkspaceFP)
+	}
+}
+
+func TestLatestInProject(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// (a) No sessions → error.
+	_, err = store.LatestInProject(ctx, "/proj")
+	if err == nil {
+		t.Error("expected error when no sessions exist")
+	}
+
+	// (b) Create two sessions, verify the most recent is returned.
+	s1, err := store.NewSession(ctx, "/proj", "deepseek-v4-flash", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	s2, err := store.NewSession(ctx, "/proj", "deepseek-v4-pro", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.LatestInProject(ctx, "/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != s2.ID {
+		t.Errorf("LatestInProject returned %s, want %s (most recent)", got.ID, s2.ID)
+	}
+	_ = s1 // keep s1 alive for later
+
+	// (c) Different project path → error.
+	_, err = store.LatestInProject(ctx, "/other-project")
+	if err == nil {
+		t.Error("expected error for non-matching project")
+	}
 }

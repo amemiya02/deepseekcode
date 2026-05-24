@@ -27,7 +27,7 @@ func TestAgentSystemPromptUsesPromptBuilder(t *testing.T) {
 	defer srv.Close()
 
 	a := New(llm.NewClient("k", srv.URL), tools.New(),
-		permissions.New(permissions.ModeYolo, "", nil, nil), "m")
+		permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
 	a.System = "old-prompt-do-not-use"
 	a.PromptBuilder = &prompt.SystemPromptBuilder{
 		StaticBase: prompt.BasePromptV1,

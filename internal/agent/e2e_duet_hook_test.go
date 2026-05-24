@@ -61,7 +61,7 @@ func TestDuetHookDestructiveDeny(t *testing.T) {
 	reg.Register(echoTool{})
 	reg.Register(dummyBashTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	fake := &fakeDuetClient{approve: false, reasoning: "too dangerous"}
 
@@ -102,7 +102,7 @@ func TestDuetHookDestructiveApprove(t *testing.T) {
 	reg.Register(ct)
 	reg.Register(dummyBashTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	fake := &fakeDuetClient{approve: true, reasoning: "looks safe"}
 
@@ -142,7 +142,7 @@ func TestDuetHookSafePass(t *testing.T) {
 	ct := &countTool{inner: echoTool{}}
 	reg.Register(ct)
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	fake := &fakeDuetClient{approve: true, reasoning: "ok"}
 
@@ -183,7 +183,7 @@ func TestDuetHookSelfValidates(t *testing.T) {
 	reg.Register(ct)
 	reg.Register(dummyBashTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	fake := &fakeDuetClient{approve: true, reasoning: "ok"}
 
@@ -224,7 +224,7 @@ func TestDuetHookFailOpen(t *testing.T) {
 	reg.Register(ct)
 	reg.Register(dummyBashTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	fake := &fakeDuetClient{err: context.DeadlineExceeded}
 
@@ -263,7 +263,7 @@ func TestDuetHookSecretPathDeny(t *testing.T) {
 	reg := tools.New()
 	reg.Register(dummyWriteFileTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), []string{".env"}, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), []string{".env"}, nil, nil)
 
 	fake := &fakeDuetClient{approve: false, reasoning: "secret file"}
 

@@ -49,7 +49,7 @@ func TestE2ECompactAcrossTurns(t *testing.T) {
 	client := llm.NewClient("k", srv.URL)
 	reg := tools.New()
 	reg.Register(echoTool{})
-	a := New(client, reg, permissions.New(permissions.ModeYolo, "", nil, nil), "m")
+	a := New(client, reg, permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
 	a.System = "sys"
 	a.CompactionCfg = CompactionConfig{
 		PreserveRecentMessages: 4,

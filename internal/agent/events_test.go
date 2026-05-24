@@ -14,7 +14,7 @@ import (
 // buffered event channel. Buffered so streaming token bursts don't
 // block the agent goroutine on an idle consumer.
 func TestEventsChannelInitialized(t *testing.T) {
-	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil), "x")
+	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil, nil), "x")
 	ch := a.Events()
 	if ch == nil {
 		t.Fatal("Events() must return a non-nil channel")
@@ -29,7 +29,7 @@ func TestEventsChannelInitialized(t *testing.T) {
 // uses to surface retry notices through the same UI channel as
 // agent-emitted events.
 func TestEmitInfoPushesEvent(t *testing.T) {
-	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil), "x")
+	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil, nil), "x")
 	a.EmitInfo("hello")
 	select {
 	case ev := <-a.Events():
@@ -52,7 +52,7 @@ func TestEmitInfoPushesEvent(t *testing.T) {
 // caption — bypassing the channel for completion used to race past
 // trailing tokens and leave chrome stuck on "writing…".
 func TestRunEmitsEventDoneOnExit(t *testing.T) {
-	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil), "x")
+	a := New(nil, tools.New(), permissions.New(permissions.ModeReadOnly, "", nil, nil, nil), "x")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel: Run's first select fires immediately
 	go func() { _, _ = a.Run(ctx, "") }()

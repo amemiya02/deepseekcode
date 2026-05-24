@@ -52,7 +52,7 @@ func TestAgentPreToolUseDeny(t *testing.T) {
 	echo := &countTool{inner: echoTool{}}
 	reg.Register(echo)
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	r := hooks.NewRunner()
 	r.Register("blocker", func(_ context.Context, in hooks.HookInput) (hooks.HookOutput, error) {
@@ -84,7 +84,7 @@ func TestAgentPostToolUseFires(t *testing.T) {
 	reg := tools.New()
 	reg.Register(echoTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	r := hooks.NewRunner()
 	spy := &spyHook{}
@@ -116,7 +116,7 @@ func TestAgentSessionHooks(t *testing.T) {
 	reg := tools.New()
 	reg.Register(echoTool{})
 
-	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil)
+	pol := permissions.New(permissions.ModeYolo, t.TempDir(), nil, nil, nil)
 
 	r := hooks.NewRunner()
 	spy := &spyHook{}

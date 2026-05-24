@@ -53,7 +53,7 @@ func TestE2EPromptCacheStable(t *testing.T) {
 
 	mk := func() *Agent {
 		a := New(llm.NewClient("k", srv.URL), tools.New(),
-			permissions.New(permissions.ModeYolo, "", nil, nil), "m")
+			permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
 		project := prompt.DiscoverProjectContext(dir)
 		a.PromptBuilder = &prompt.SystemPromptBuilder{
 			StaticBase: prompt.BasePromptV1,

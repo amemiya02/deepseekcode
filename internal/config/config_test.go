@@ -46,6 +46,46 @@ func TestExpandEnv(t *testing.T) {
 	}
 }
 
+func TestConfigLoadRules(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[permissions.rules]
+allow = [{ tool = "read_file", args = ".*" }]
+deny = [{ tool = "bash", args = "rm\\s+-rf" }]
+ask = [{ tool = "write_file", args = ".*secret.*" }]
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Permissions.Rules.Allow) != 1 {
+		t.Fatalf("expected 1 allow rule, got %d", len(cfg.Permissions.Rules.Allow))
+	}
+	if got := cfg.Permissions.Rules.Allow[0].Tool; got != "read_file" {
+		t.Fatalf("allow tool = %q, want read_file", got)
+	}
+	if got := cfg.Permissions.Rules.Allow[0].Args; got != ".*" {
+		t.Fatalf("allow args = %q, want .*", got)
+	}
+	if len(cfg.Permissions.Rules.Deny) != 1 {
+		t.Fatalf("expected 1 deny rule, got %d", len(cfg.Permissions.Rules.Deny))
+	}
+	if got := cfg.Permissions.Rules.Deny[0].Tool; got != "bash" {
+		t.Fatalf("deny tool = %q, want bash", got)
+	}
+	if len(cfg.Permissions.Rules.Ask) != 1 {
+		t.Fatalf("expected 1 ask rule, got %d", len(cfg.Permissions.Rules.Ask))
+	}
+	if got := cfg.Permissions.Rules.Ask[0].Tool; got != "write_file" {
+		t.Fatalf("ask tool = %q, want write_file", got)
+	}
+}
+
 func TestConfigLoadHooks(t *testing.T) {
 	dir := t.TempDir()
 	tomlPath := dir + "/config.toml"

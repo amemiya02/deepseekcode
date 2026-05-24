@@ -72,7 +72,7 @@ func TestE2EBlocksRoundtrip(t *testing.T) {
 	client := llm.NewClient("k", srv.URL)
 	reg := tools.New()
 	reg.Register(echoTool{})
-	pol := permissions.New(permissions.ModeYolo, "", nil, nil)
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
 	a := New(client, reg, pol, "test-model")
 	a.System = "sys"
 	a.Persister = session.NewPersister(store, nil, sess.ID)

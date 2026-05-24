@@ -51,8 +51,20 @@ type DuetConfig struct {
 }
 
 type PermissionsConfig struct {
-	AllowBash          []string `toml:"allow_bash"`
-	SecretPathPatterns []string `toml:"secret_path_patterns"`
+	AllowBash          []string    `toml:"allow_bash"`
+	SecretPathPatterns []string    `toml:"secret_path_patterns"`
+	Rules              RulesConfig `toml:"rules"`
+}
+
+type RulesConfig struct {
+	Allow []RuleItemConfig `toml:"allow"`
+	Deny  []RuleItemConfig `toml:"deny"`
+	Ask   []RuleItemConfig `toml:"ask"`
+}
+
+type RuleItemConfig struct {
+	Tool string `toml:"tool"`
+	Args string `toml:"args"`
 }
 
 type SessionsConfig struct {
@@ -205,6 +217,15 @@ func applyOverlay(base *Config, ov Config) {
 	}
 	if len(ov.Permissions.SecretPathPatterns) > 0 {
 		base.Permissions.SecretPathPatterns = ov.Permissions.SecretPathPatterns
+	}
+	if len(ov.Permissions.Rules.Allow) > 0 {
+		base.Permissions.Rules.Allow = ov.Permissions.Rules.Allow
+	}
+	if len(ov.Permissions.Rules.Deny) > 0 {
+		base.Permissions.Rules.Deny = ov.Permissions.Rules.Deny
+	}
+	if len(ov.Permissions.Rules.Ask) > 0 {
+		base.Permissions.Rules.Ask = ov.Permissions.Rules.Ask
 	}
 
 	if ov.Sessions.TTLDays != 0 {

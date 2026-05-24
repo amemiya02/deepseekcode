@@ -56,7 +56,7 @@ func runFileSafetyAgent(t *testing.T, dir string, toolName string, args map[stri
 	reg := tools.New()
 	tools.RegisterBuiltins(reg, maxReadBytes, maxWriteBytes, dir)
 
-	a := New(llm.NewClient("k", srv.URL), reg, permissions.New(permissions.ModeYolo, dir, nil, nil), "test-model")
+	a := New(llm.NewClient("k", srv.URL), reg, permissions.New(permissions.ModeYolo, dir, nil, nil, nil), "test-model")
 	a.StopWhen = []StopCondition{MaxSteps(2)}
 
 	_, err = a.Run(context.Background(), "test")

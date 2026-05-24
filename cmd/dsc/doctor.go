@@ -37,6 +37,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkGit(),
 		checkInstructions(),
 		checkHooks(cfg),
+		checkRules(cfg),
 		checkMCP(cfg),
 		checkCompaction(),
 		{
@@ -209,6 +210,18 @@ func checkHooks(cfg config.Config) checkResult {
 		return checkResult{"hooks", "ok", "none configured"}
 	}
 	return checkResult{"hooks", "ok", strings.Join(parts, ", ")}
+}
+
+func checkRules(cfg config.Config) checkResult {
+	r := cfg.Permissions.Rules
+	nAllow := len(r.Allow)
+	nDeny := len(r.Deny)
+	nAsk := len(r.Ask)
+	if nAllow+nDeny+nAsk == 0 {
+		return checkResult{"permission rules:", "ok", "none configured"}
+	}
+	return checkResult{"permission rules:", "ok",
+		fmt.Sprintf("%d allow, %d deny, %d ask", nAllow, nDeny, nAsk)}
 }
 
 func checkMCP(cfg config.Config) checkResult {

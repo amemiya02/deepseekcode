@@ -185,7 +185,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		mode = permissions.ModeAskAll
 	}
 	pol := permissions.New(mode, cwd,
-		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash)
+		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
 
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
@@ -384,7 +384,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		mode = permissions.ModeAskAll
 	}
 	pol := permissions.New(mode, cwd,
-		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash)
+		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
 
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
@@ -530,4 +530,35 @@ func indent(s, prefix string) string {
 		lines[i] = prefix + lines[i]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func buildRuleEngine(rc config.RulesConfig) *permissions.RuleEngine {
+	if len(rc.Allow) == 0 && len(rc.Deny) == 0 && len(rc.Ask) == 0 {
+		return nil
+	}
+	conv := func(items []config.RuleItemConfig) []permissions.PermissionRule {
+		var out []permissions.PermissionRule
+		for _, r := range items {
+			out = append(out, permissions.PermissionRule{
+				ToolPattern: r.Tool,
+				ArgsPattern: r.Args,
+			})
+		}
+		return out
+	}
+	engine := &permissions.RuleEngine{
+		Allow: conv(rc.Allow),
+		Deny:  conv(rc.Deny),
+		Ask:   conv(rc.Ask),
+	}
+	for i := range engine.Allow {
+		engine.Allow[i].Decision = "allow"
+	}
+	for i := range engine.Deny {
+		engine.Deny[i].Decision = "deny"
+	}
+	for i := range engine.Ask {
+		engine.Ask[i].Decision = "ask"
+	}
+	return engine
 }

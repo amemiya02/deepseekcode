@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -526,10 +527,15 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	}
 
 	// Permission gate.
-	dec := a.Permissions.Decide(permissions.Check{Tool: tool, Args: rawArgs})
+	dec, reason := a.Permissions.Decide(permissions.Check{Tool: tool, Args: rawArgs})
 	switch dec {
 	case permissions.Deny:
-		return tools.Errf("denied by permissions policy"), nil
+		if strings.HasPrefix(reason, "matched deny rule:") {
+			a.events <- EventInfo{Text: "denied by rule: " + reason}
+			return tools.Errf("denied by rule: %s", reason), nil
+		}
+		a.events <- EventInfo{Text: "denied by permissions policy: " + reason}
+		return tools.Errf("denied by permissions policy: %s", reason), nil
 	case permissions.Ask:
 		// Emit a permission ask carrying its own reply channel, and
 		// park until the consumer answers. Buffered cap=1 so the UI

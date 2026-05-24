@@ -26,15 +26,17 @@ type Store struct {
 
 // Session is a row in the sessions table.
 type Session struct {
-	ID           string
-	ParentID     string // empty if root
-	BranchPoint  int    // valid only when ParentID != ""
-	ProjectPath  string
-	Model        string
-	DuetEnabled  bool
-	CreatedAt    time.Time
-	LastUsedAt   time.Time
-	Summary      string
+	ID                string
+	ParentID          string // empty if root
+	BranchPoint       int    // valid only when ParentID != ""
+	ProjectPath       string
+	Model             string
+	DuetEnabled       bool
+	CreatedAt         time.Time
+	LastUsedAt        time.Time
+	Summary           string
+	CompactionCount   int
+	CompactionSummary string
 }
 
 // Message is a row in the messages table.
@@ -220,15 +222,17 @@ func (s *Store) NewBranch(ctx context.Context, parentID string, branchPoint int)
 func (s *Store) GetSession(ctx context.Context, id string) (Session, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, COALESCE(parent_id, ''), COALESCE(branch_point, 0),
-		        project_path, model, duet_enabled, created_at, last_used_at, COALESCE(summary, '')
+		        project_path, model, duet_enabled, created_at, last_used_at,
+		        COALESCE(summary, ''), compaction_count, compaction_summary
 		 FROM sessions WHERE id = ?`, id)
 	var (
-		sess     Session
-		duet     int
+		sess          Session
+		duet          int
 		created, used int64
 	)
 	if err := row.Scan(&sess.ID, &sess.ParentID, &sess.BranchPoint,
-		&sess.ProjectPath, &sess.Model, &duet, &created, &used, &sess.Summary); err != nil {
+		&sess.ProjectPath, &sess.Model, &duet, &created, &used,
+		&sess.Summary, &sess.CompactionCount, &sess.CompactionSummary); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Session{}, fmt.Errorf("session %s not found", id)
 		}

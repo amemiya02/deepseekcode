@@ -35,6 +35,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkTerminal(),
 		checkGit(),
 		checkInstructions(),
+		checkCompaction(),
 		{
 			Name:   "platform",
 			Status: "ok",
@@ -164,6 +165,29 @@ func checkGit() checkResult {
 		return checkResult{"git", "warn", "found at " + path + " but version check failed"}
 	}
 	return checkResult{"git", "ok", strings.TrimSpace(string(out))}
+}
+
+func checkCompaction() checkResult {
+	data, err := os.ReadFile(filepath.Join(".deepseek", "last_session"))
+	if err != nil {
+		return checkResult{"compaction", "ok", "no recent session (compaction history n/a)"}
+	}
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return checkResult{"compaction", "ok", "no recent session (compaction history n/a)"}
+	}
+	store, err := session.Open("")
+	if err != nil {
+		return checkResult{"compaction", "warn", "store open failed: " + err.Error()}
+	}
+	defer store.Close()
+	sess, err := store.GetSession(context.Background(), id)
+	if err != nil {
+		return checkResult{"compaction", "warn", "session lookup failed: " + err.Error()}
+	}
+	return checkResult{"compaction", "ok",
+		fmt.Sprintf("session compacted %d times; last summary: %d chars",
+			sess.CompactionCount, len(sess.CompactionSummary))}
 }
 
 func checkInstructions() checkResult {

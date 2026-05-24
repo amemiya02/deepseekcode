@@ -144,12 +144,13 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	}()
 
 	if userPrompt != "" {
+		userBlocks := []llm.ContentBlock{llm.TextBlock{Text: userPrompt}}
 		a.Messages = append(a.Messages, llm.Message{
-			Role:    "user",
-			Content: userPrompt,
+			Role:   "user",
+			Blocks: userBlocks,
 		})
 		if a.Persister != nil {
-			_, _ = a.Persister.AppendUserMessage(ctx, userPrompt)
+			_, _ = a.Persister.AppendUserMessage(ctx, userBlocks)
 		}
 	}
 
@@ -284,7 +285,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		Blocks: blocks,
 	})
 	if a.Persister != nil {
-		_, _ = a.Persister.AppendAssistant(context.Background(), text, reasoning, assembledCall, a.Model, usage)
+		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
 	}
 
 	return StepRecord{
@@ -362,7 +363,7 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 			Blocks: []llm.ContentBlock{block},
 		})
 		if a.Persister != nil {
-			_, _ = a.Persister.AppendToolResult(ctx, r.callID, block.Content)
+			_, _ = a.Persister.AppendToolResult(ctx, r.callID, block.Content, block.IsError)
 		}
 	}
 	return nil

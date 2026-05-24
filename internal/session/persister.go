@@ -30,35 +30,38 @@ func NewPersister(store *Store, snaps *snapshots.Manager, sessionID string) *Per
 // SessionID returns the session this persister is bound to.
 func (p *Persister) SessionID() string { return p.sessID }
 
-// AppendUserMessage records a user turn.
-func (p *Persister) AppendUserMessage(ctx context.Context, content string) (int, error) {
+// AppendUserMessage records a user turn from a typed block slice.
+func (p *Persister) AppendUserMessage(ctx context.Context, blocks []llm.ContentBlock) (int, error) {
 	return p.store.AppendMessage(ctx, p.sessID, Message{
 		Role:      "user",
-		Content:   content,
+		Blocks:    blocks,
 		Timestamp: time.Now().UTC(),
 	})
 }
 
-// AppendAssistant records an assistant turn (text + reasoning + tool_calls).
-func (p *Persister) AppendAssistant(ctx context.Context, content, reasoning string, toolCalls []llm.ToolCall, model string, usage llm.Usage) (int, error) {
+// AppendAssistant records an assistant turn from a typed block slice
+// (Thinking → Text → ToolUse in emission order).
+func (p *Persister) AppendAssistant(ctx context.Context, blocks []llm.ContentBlock, model string, usage llm.Usage) (int, error) {
 	return p.store.AppendMessage(ctx, p.sessID, Message{
-		Role:             "assistant",
-		Content:          content,
-		ReasoningContent: reasoning,
-		ToolCalls:        toolCalls,
-		Model:            model,
-		Usage:            usage,
-		Timestamp:        time.Now().UTC(),
+		Role:      "assistant",
+		Blocks:    blocks,
+		Model:     model,
+		Usage:     usage,
+		Timestamp: time.Now().UTC(),
 	})
 }
 
-// AppendToolResult records a tool-result turn.
-func (p *Persister) AppendToolResult(ctx context.Context, toolCallID, content string) (int, error) {
+// AppendToolResult records the result of one tool_use as a single
+// ToolResultBlock-bearing tool message.
+func (p *Persister) AppendToolResult(ctx context.Context, toolUseID string, content string, isError bool) (int, error) {
 	return p.store.AppendMessage(ctx, p.sessID, Message{
-		Role:       "tool",
-		Content:    content,
-		ToolCallID: toolCallID,
-		Timestamp:  time.Now().UTC(),
+		Role: "tool",
+		Blocks: []llm.ContentBlock{llm.ToolResultBlock{
+			ToolUseID: toolUseID,
+			Content:   content,
+			IsError:   isError,
+		}},
+		Timestamp: time.Now().UTC(),
 	})
 }
 

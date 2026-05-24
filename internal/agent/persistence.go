@@ -8,21 +8,24 @@ import (
 )
 
 // Persister abstracts the session/snapshot bookkeeping the agent needs.
-// internal/session.Store and internal/snapshots.Manager satisfy this
-// through the SessionPersister type in cmd/dsc/main.go (or a test
-// double). Keeping the interface here lets the agent stay decoupled.
+// internal/session.Persister and internal/snapshots.Manager satisfy
+// this. Keeping the interface here lets the agent stay decoupled.
 type Persister interface {
 	// SessionID is the session this agent is associated with.
 	SessionID() string
 
-	// AppendUserMessage records a user turn.
-	AppendUserMessage(ctx context.Context, content string) (int, error)
+	// AppendUserMessage records a user turn as a typed block slice
+	// (typically one TextBlock; multimodal extensions later).
+	AppendUserMessage(ctx context.Context, blocks []llm.ContentBlock) (int, error)
 
-	// AppendAssistant records an assistant turn (text + reasoning + tool_calls).
-	AppendAssistant(ctx context.Context, content, reasoning string, toolCalls []llm.ToolCall, model string, usage llm.Usage) (int, error)
+	// AppendAssistant records an assistant turn as a typed block slice
+	// (Thinking, Text, ToolUse — order matches model emission).
+	AppendAssistant(ctx context.Context, blocks []llm.ContentBlock, model string, usage llm.Usage) (int, error)
 
-	// AppendToolResult records a tool-result turn.
-	AppendToolResult(ctx context.Context, toolCallID, content string) (int, error)
+	// AppendToolResult records the result of one tool_use, identified
+	// by toolUseID. isError true marks an infrastructure failure so
+	// renderers can color it.
+	AppendToolResult(ctx context.Context, toolUseID string, content string, isError bool) (int, error)
 
 	// TakeSnapshot snapshots the given paths before a mutating tool runs.
 	// stepIdx is the message index of the assistant turn that contained

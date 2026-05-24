@@ -38,9 +38,15 @@ type Session struct {
 }
 
 // Message is a row in the messages table.
+//
+// Blocks is the v2 canonical content; when non-nil the
+// Content/ReasoningContent/ToolCalls fields are not read. Until
+// T-019 removes them, both representations may coexist on a single
+// in-memory row so legacy paths keep working during migration.
 type Message struct {
 	Idx              int
 	Role             string
+	Blocks           []llm.ContentBlock
 	Content          string
 	ReasoningContent string
 	ToolCalls        []llm.ToolCall
@@ -352,6 +358,14 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 		}
 		toolCallsJSON = string(b)
 	}
+	blocksJSON := ""
+	if len(m.Blocks) > 0 {
+		b, err := llm.MarshalBlocks(m.Blocks)
+		if err != nil {
+			return 0, fmt.Errorf("marshal blocks: %w", err)
+		}
+		blocksJSON = string(b)
+	}
 
 	ts := m.Timestamp
 	if ts.IsZero() {
@@ -366,12 +380,12 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 		`INSERT INTO messages
 		 (session_id, idx, role, content, reasoning_content, tool_calls,
 		  tool_results, tool_call_id, model,
-		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts, blocks)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sessionID, nextIdx, m.Role, m.Content, m.ReasoningContent, toolCallsJSON,
 		"" /* tool_results — reserved */, m.ToolCallID, m.Model,
 		m.Usage.PromptCacheHitTokens, m.Usage.PromptCacheMissTokens, m.Usage.CompletionTokens,
-		cost, ts.Unix())
+		cost, ts.Unix(), blocksJSON)
 	if err != nil {
 		return 0, fmt.Errorf("insert message: %w", err)
 	}

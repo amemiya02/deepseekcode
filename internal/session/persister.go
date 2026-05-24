@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -88,11 +87,8 @@ func (p *Persister) Undo(n int) (int, error) {
 	return p.snaps.Undo(p.sessID, n)
 }
 
-// ReplaceWithCompaction is the Phase 2 entry point for session
-// compaction. The transactional SQL implementation lands in T-208;
-// this stub exists so the agent.Persister interface is callable from
-// every site that needs the final signature, and so a premature
-// caller fails loudly instead of silently.
+// ReplaceWithCompaction forwards to Store.ReplaceWithCompaction
+// scoped to this persister's session.
 func (p *Persister) ReplaceWithCompaction(ctx context.Context, fromIdx, toIdx int, summary string) (int, error) {
-	return 0, errors.New("session: ReplaceWithCompaction not yet implemented (Phase 2 / T-208)")
+	return p.store.ReplaceWithCompaction(ctx, p.sessID, fromIdx, toIdx, summary)
 }

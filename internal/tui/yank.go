@@ -49,4 +49,3 @@ func yankToClipboardCmd(text string) tea.Cmd {
 		return nil
 	}
 }
-

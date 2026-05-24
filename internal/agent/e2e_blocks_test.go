@@ -22,9 +22,9 @@ import (
 // the e2e contract.
 type echoTool struct{}
 
-func (echoTool) Name() string                  { return "echo" }
-func (echoTool) Description() string           { return "echoes a fixed string" }
-func (echoTool) Parameters() json.RawMessage   { return json.RawMessage(`{"type":"object"}`) }
+func (echoTool) Name() string                { return "echo" }
+func (echoTool) Description() string         { return "echoes a fixed string" }
+func (echoTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (echoTool) Execute(_ context.Context, _ json.RawMessage) (tools.Result, error) {
 	return tools.Result{Content: "echoed"}, nil
 }

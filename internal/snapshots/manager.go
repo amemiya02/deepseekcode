@@ -3,7 +3,7 @@
 // Before any tool that mutates files, the agent calls Take(sessionID,
 // stepIdx, paths). Each affected file is copied into:
 //
-//   .deepseek/snapshots/<sessionID>/<stepIdx>/<base64-of-relpath>
+//	.deepseek/snapshots/<sessionID>/<stepIdx>/<base64-of-relpath>
 //
 // /undo restores the most-recent step's snapshots; /undo N restores N
 // steps. Prune trims to the most recent K sessions.

@@ -44,6 +44,7 @@ func (p *PermissionFlow) Tool() string {
 }
 
 // Nav — 2×2 grid keyed as:
+//
 //	0 1
 //	2 3
 func (p *PermissionFlow) MoveUp() {

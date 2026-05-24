@@ -193,4 +193,3 @@ func TestRenderCachesByWidthAndSeq(t *testing.T) {
 		t.Errorf("render missing user text: %q", first)
 	}
 }
-

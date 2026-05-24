@@ -6,7 +6,9 @@ import tea "github.com/charmbracelet/bubbletea"
 //
 // Insert: textarea focused, typing flows through.
 // Normal: viewport focused, j/k/scroll navigation; printable chars
-//   auto-switch back to Insert via Update.
+//
+//	auto-switch back to Insert via Update.
+//
 // Permission: modal — permission card eats all key input until answered.
 // Pager:      modal — pager overlay eats all key input until closed.
 type appMode int

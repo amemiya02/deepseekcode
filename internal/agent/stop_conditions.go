@@ -19,12 +19,12 @@ type StepRecord struct {
 type StopReason int
 
 const (
-	StopUnknown        StopReason = iota
-	StopModelDone                 // finish_reason!=tool_calls and no tool calls
-	StopMaxSteps                  // step cap exceeded
-	StopLoopDetected              // same tool call repeated too many times
-	StopContextCancel             // ctx.Err()
-	StopUserRequested             // explicit cancellation from TUI
+	StopUnknown       StopReason = iota
+	StopModelDone                // finish_reason!=tool_calls and no tool calls
+	StopMaxSteps                 // step cap exceeded
+	StopLoopDetected             // same tool call repeated too many times
+	StopContextCancel            // ctx.Err()
+	StopUserRequested            // explicit cancellation from TUI
 )
 
 func (r StopReason) String() string {

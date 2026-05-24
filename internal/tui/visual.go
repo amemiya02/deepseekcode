@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // visualState tracks the active selection. anchor and cursor are
@@ -251,4 +251,3 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 	}
 	return nil
 }
-

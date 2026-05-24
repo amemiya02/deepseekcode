@@ -15,10 +15,10 @@ type Pricing struct {
 //     trip to a pricing endpoint.
 //   - Updates happen at our cadence, not silently from the API.
 var Prices = map[string]Pricing{
-	"deepseek-v4-flash":  {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},
-	"deepseek-v4-pro":    {InputCacheHit: 0.025, InputCacheMiss: 3.0, Output: 6.0},
-	"deepseek-chat":      {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},  // alias → flash
-	"deepseek-reasoner":  {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},  // alias → flash thinking
+	"deepseek-v4-flash": {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},
+	"deepseek-v4-pro":   {InputCacheHit: 0.025, InputCacheMiss: 3.0, Output: 6.0},
+	"deepseek-chat":     {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0}, // alias → flash
+	"deepseek-reasoner": {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0}, // alias → flash thinking
 }
 
 // Cost returns the ¥ cost of one Usage record under the given model's

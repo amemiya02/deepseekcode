@@ -60,10 +60,10 @@ func (Grep) IsReadOnly() bool { return true }
 
 func (Grep) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
-		Pattern     string `json:"pattern"`
-		Path        string `json:"path"`
-		GlobFilter  string `json:"glob_filter"`
-		CaseInsens  bool   `json:"case_insensitive"`
+		Pattern    string `json:"pattern"`
+		Path       string `json:"path"`
+		GlobFilter string `json:"glob_filter"`
+		CaseInsens bool   `json:"case_insensitive"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return Errf("invalid args: %v", err), nil

@@ -10,9 +10,9 @@ import (
 //
 // Concretely, for a chain:
 //
-//   root          (messages 0..N)
-//    └── child A  (branch_point=5, own messages → effective: root[0..4] + A[0..M])
-//        └── child B  (branch_point=3, own → effective: root[0..4] + A[0..2] + B[...])
+//	root          (messages 0..N)
+//	 └── child A  (branch_point=5, own messages → effective: root[0..4] + A[0..M])
+//	     └── child B  (branch_point=3, own → effective: root[0..4] + A[0..2] + B[...])
 //
 // We never copy messages, so storage stays O(unique) even for deeply
 // branched experiment trees.

@@ -11,7 +11,7 @@ import (
 // GitBlame returns per-line authorship for a file or range. We pass
 // `--line-porcelain` and reformat to one line per source line:
 //
-//   pkg/auth/jwt.go:42  a3f1c2d Alice Bob   2025-09-01  return token, nil
+//	pkg/auth/jwt.go:42  a3f1c2d Alice Bob   2025-09-01  return token, nil
 //
 // This is much easier for the model to consume than git's default
 // blame output, which interleaves metadata blocks between source lines.

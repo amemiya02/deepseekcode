@@ -163,12 +163,12 @@ func TestAdjustBoundaryToolPair(t *testing.T) {
 		{
 			"nested_multi_turn_pushes_past_both",
 			[]llm.Message{
-				use("a"),       // 0
-				text("user"),   // 1
-				use("b"),       // 2
-				result("a"),    // 3
-				text("user"),   // 4
-				result("b"),    // 5
+				use("a"),          // 0
+				text("user"),      // 1
+				use("b"),          // 2
+				result("a"),       // 3
+				text("user"),      // 4
+				result("b"),       // 5
 				text("assistant"), // 6
 			},
 			3, // wants [0,3); but use(b) at idx 2 has result at 5
@@ -177,9 +177,9 @@ func TestAdjustBoundaryToolPair(t *testing.T) {
 		{
 			"orphan_use_pulled_back",
 			[]llm.Message{
-				text("user"), // 0
-				use("a"),     // 1 — orphan: no result anywhere
-				text("user"), // 2
+				text("user"),      // 0
+				use("a"),          // 1 — orphan: no result anywhere
+				text("user"),      // 2
 				text("assistant"), // 3
 			},
 			3,

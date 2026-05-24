@@ -16,9 +16,9 @@ import (
 // goroutines concurrently (database/sql handles its own pooling, but
 // the ID/step counters live in this struct).
 type Persister struct {
-	store    *Store
-	snaps    *snapshots.Manager
-	sessID   string
+	store  *Store
+	snaps  *snapshots.Manager
+	sessID string
 }
 
 // NewPersister returns a Persister wrapping store + snaps for sessionID.

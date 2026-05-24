@@ -195,6 +195,49 @@ func TestAdjustBoundaryToolPair(t *testing.T) {
 	}
 }
 
+func TestCompactSessionFullFlow(t *testing.T) {
+	mk := func(n int) []llm.Message {
+		out := make([]llm.Message, n)
+		for i := range out {
+			out[i] = llm.Message{Role: "user", Blocks: []llm.ContentBlock{
+				llm.TextBlock{Text: strings.Repeat("x", 400)},
+			}}
+		}
+		return out
+	}
+
+	t.Run("no_compact_when_below_threshold", func(t *testing.T) {
+		got := CompactSession(mk(20), CompactionConfig{
+			PreserveRecentMessages: 4, AutoCompactInputTokens: 10_000,
+		})
+		if got.Summary != "" {
+			t.Errorf("expected empty result; got %+v", got)
+		}
+	})
+
+	t.Run("compacts_above_threshold", func(t *testing.T) {
+		msgs := mk(20)
+		got := CompactSession(msgs, CompactionConfig{
+			PreserveRecentMessages: 4, AutoCompactInputTokens: 100,
+		})
+		if got.Summary == "" {
+			t.Fatal("expected compaction; got empty")
+		}
+		if got.FromIdx != 0 || got.ToIdx != 16 {
+			t.Errorf("window: got [%d,%d), want [0,16)", got.FromIdx, got.ToIdx)
+		}
+		if got.RemovedCount != 16 {
+			t.Errorf("RemovedCount: got %d want 16", got.RemovedCount)
+		}
+		if len(got.KeptMessages) != 4 {
+			t.Errorf("KeptMessages len: got %d want 4", len(got.KeptMessages))
+		}
+		if got.SummaryMessage.Role != "system" {
+			t.Errorf("SummaryMessage role: got %q want system", got.SummaryMessage.Role)
+		}
+	})
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

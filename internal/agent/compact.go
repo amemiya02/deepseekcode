@@ -71,6 +71,43 @@ func EstimateTokens(messages []llm.Message) int {
 	return total
 }
 
+// CompactSession runs the full pipeline: ShouldCompact →
+// adjustBoundary → summarize. Returns a CompactionResult with
+// Summary == "" when no compaction was performed (caller must
+// check Summary before mutating its message list).
+//
+// CompactSession does NOT persist — the caller wires the result
+// into Persister.ReplaceWithCompaction (T-209) and replaces its
+// in-memory a.Messages slice.
+func CompactSession(messages []llm.Message, cfg CompactionConfig) CompactionResult {
+	ok, fromIdx, toIdx := ShouldCompact(messages, cfg)
+	if !ok {
+		return CompactionResult{}
+	}
+	toIdx = adjustBoundary(messages, toIdx)
+	if toIdx <= fromIdx {
+		return CompactionResult{}
+	}
+	summary := summarizeMessages(messages[fromIdx:toIdx])
+	if summary == "" {
+		return CompactionResult{}
+	}
+	summaryMsg := llm.Message{
+		Role:   "system",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: summary}},
+	}
+	kept := make([]llm.Message, len(messages)-toIdx)
+	copy(kept, messages[toIdx:])
+	return CompactionResult{
+		Summary:        summary,
+		FromIdx:        fromIdx,
+		ToIdx:          toIdx,
+		RemovedCount:   toIdx - fromIdx,
+		SummaryMessage: summaryMsg,
+		KeptMessages:   kept,
+	}
+}
+
 // adjustBoundary tweaks toIdx so the compaction window doesn't
 // split a tool_use from its matching tool_result. Two-pass:
 //

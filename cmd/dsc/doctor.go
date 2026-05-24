@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
 )
@@ -36,6 +37,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkGit(),
 		checkInstructions(),
 		checkHooks(cfg),
+		checkMCP(cfg),
 		checkCompaction(),
 		{
 			Name:   "platform",
@@ -207,6 +209,35 @@ func checkHooks(cfg config.Config) checkResult {
 		return checkResult{"hooks", "ok", "none configured"}
 	}
 	return checkResult{"hooks", "ok", strings.Join(parts, ", ")}
+}
+
+func checkMCP(cfg config.Config) checkResult {
+	if len(cfg.MCPServers) == 0 {
+		return checkResult{"mcp", "ok", "none configured"}
+	}
+	var parts []string
+	reg := mcp.NewRegistry()
+	for name, srv := range cfg.MCPServers {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := reg.Connect(ctx, name, srv.Command, srv.Args, srv.Env)
+		cancel()
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("mcp[%s]: failed (%v)", name, err))
+		} else {
+			proxies := reg.Servers()
+			for _, p := range proxies {
+				if p.Name == name && p.State == mcp.StateConnected {
+					parts = append(parts, fmt.Sprintf("mcp[%s]: connected (%d tools)", name, len(p.Tools)))
+					break
+				}
+			}
+		}
+	}
+	reg.Shutdown()
+	if len(parts) == 0 {
+		return checkResult{"mcp", "warn", "no servers started"}
+	}
+	return checkResult{"mcp", "ok", strings.Join(parts, ", ")}
 }
 
 func checkInstructions() checkResult {

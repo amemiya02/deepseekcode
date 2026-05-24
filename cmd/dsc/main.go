@@ -28,6 +28,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/logging"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
@@ -147,6 +148,32 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	reg := tools.New()
 	tools.RegisterBuiltins(reg)
+
+	// MCP servers: connect, bridge tools into the registry.
+	mcpReg := mcp.NewRegistry()
+	defer mcpReg.Shutdown()
+	var mcpNotices []string
+	for name, srv := range cfg.MCPServers {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := mcpReg.Connect(ctx, name, srv.Command, srv.Args, srv.Env)
+		cancel()
+		if err != nil {
+			slog.Warn("mcp server failed to start", "name", name, "err", err)
+			mcpNotices = append(mcpNotices, fmt.Sprintf("mcp[%s]: failed — %v", name, err))
+			continue
+		}
+		if srv.TimeoutSeconds > 0 {
+			mcpReg.SetTimeout(name, srv.TimeoutSeconds)
+		}
+	}
+	for _, t := range mcp.BridgeAll(mcpReg) {
+		reg.Register(t)
+	}
+	for _, s := range mcpReg.Servers() {
+		if s.State == mcp.StateConnected {
+			mcpNotices = append(mcpNotices, fmt.Sprintf("mcp: connected to %s (%d tools)", s.Name, len(s.Tools)))
+		}
+	}
 
 	mode := permissions.ModeDefault
 	switch {
@@ -305,6 +332,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 	}
 
+	notices = append(mcpNotices, notices...)
 	app := tui.New(tui.Config{
 		Agent:          a,
 		Model:          cfg.Defaults.Model,

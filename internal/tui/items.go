@@ -104,9 +104,13 @@ func (i chatItem) render(t Theme, width int) string {
 	case itemToolCall:
 		// Claude-Code-style header: ⏺ tool(k1="v1", k2=v2) — tool name
 		// in accent color, args humanized + dimmed in parens.
-		argsMax := width - len(i.tool) - 6
+		mcpTag := ""
+		if strings.HasPrefix(i.tool, "mcp__") {
+			mcpTag = t.HookInfo.Render("[MCP]") + " "
+		}
+		argsMax := width - len(i.tool) - len(mcpTag) - 6
 		args := compactArgs(i.args, argsMax)
-		return t.ToolCall.Render("⏺ "+i.tool) +
+		return mcpTag + t.ToolCall.Render("⏺ "+i.tool) +
 			t.Hint.Render("("+args+")") + "\n"
 	case itemToolResult:
 		// Connector + summary line: "  ⎿ N lines · 42ms" (or "✗ error · ...")

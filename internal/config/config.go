@@ -69,9 +69,10 @@ type HookItemConfig struct {
 }
 
 type MCPServerConfig struct {
-	Command string            `toml:"command"`
-	Args    []string          `toml:"args"`
-	Env     map[string]string `toml:"env"`
+	Command        string            `toml:"command"`
+	Args           []string          `toml:"args"`
+	Env            map[string]string `toml:"env"`
+	TimeoutSeconds int               `toml:"timeout_seconds"`
 }
 
 // Load reads user + project config and overlays them onto defaults.

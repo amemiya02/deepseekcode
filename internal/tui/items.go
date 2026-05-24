@@ -13,6 +13,20 @@ import (
 
 // itemKind enumerates the kinds of items the scrollback renders. New
 // kinds added here should pair with a case in chatItem.render().
+//
+// Mapping to llm.BlockKind (each chatItem represents one rendered
+// block; the scrollback builds items incrementally from stream
+// events rather than from a whole llm.Message, so there is no
+// Message→items conversion path here):
+//
+//	itemUser           ← user-role TextBlock
+//	itemAssistantText  ← assistant-role TextBlock
+//	itemReasoning      ← ThinkingBlock
+//	itemToolCall       ← ToolUseBlock
+//	itemToolResult     ← ToolResultBlock
+//
+// The remaining itemKinds (Duet, Info, StepFinish, Error, Welcome)
+// are TUI-only artifacts with no on-the-wire block counterpart.
 type itemKind int
 
 const (

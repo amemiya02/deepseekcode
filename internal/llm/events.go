@@ -25,10 +25,10 @@ const (
 	// assistant's reasoning_content channel (thinking-mode output).
 	EventReasoningDelta
 
-	// EventToolCallDelta carries a partial tool_call. Index identifies
+	// EventToolUseDelta carries a partial tool_call. Index identifies
 	// which tool_call (multiple may be streamed concurrently). Name and
 	// Arguments fields accumulate across deltas.
-	EventToolCallDelta
+	EventToolUseDelta
 
 	// EventFinish is emitted exactly once at stream end. It carries the
 	// finish reason, full Usage block, and the final assembled
@@ -50,7 +50,7 @@ type Event struct {
 	// EventTextDelta / EventReasoningDelta
 	Text string
 
-	// EventToolCallDelta
+	// EventToolUseDelta
 	ToolCallIndex int
 	ToolCallID    string
 	ToolName      string

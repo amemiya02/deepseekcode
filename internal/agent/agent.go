@@ -258,7 +258,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			}
 			reasoning += ev.Text
 			a.events <- EventReasoningDelta{Text: ev.Text}
-		case llm.EventToolCallDelta:
+		case llm.EventToolUseDelta:
 			// tool-call deltas are aggregated by the client; we don't need
 			// per-delta tracking here. The EventFinish carries the
 			// assembled calls.

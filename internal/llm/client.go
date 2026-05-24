@@ -281,7 +281,7 @@ func (c *Client) readSSE(ctx context.Context, body io.ReadCloser, out chan<- Eve
 					acc.Args.WriteString(tc.Function.Arguments)
 				}
 				if !emit(Event{
-					Type:          EventToolCallDelta,
+					Type:          EventToolUseDelta,
 					ToolCallIndex: idx,
 					ToolCallID:    acc.ID,
 					ToolName:      acc.Name,

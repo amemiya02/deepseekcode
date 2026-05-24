@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,9 +30,12 @@ func TestCacheStableDeterminism(t *testing.T) {
 	}
 }
 
-// TestCacheStableGolden pins the exact SHA-256 of a representative request.
-// If this test breaks after a code change, the change altered wire bytes and
-// must be reviewed for cache-invalidation impact.
+// TestCacheStableGolden pins the exact bytes of a representative request.
+// The golden file lives in testdata/cache_stable.golden.json and is
+// compared byte-for-byte — any serialization change will be caught as a
+// diff. If the change is intentional, regenerate the golden by running:
+//
+//	UPDATE_GOLDEN=1 go test -run TestCacheStableGolden ./internal/llm/
 func TestCacheStableGolden(t *testing.T) {
 	req := buildRepresentativeRequest()
 
@@ -39,13 +45,32 @@ func TestCacheStableGolden(t *testing.T) {
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(b))
 
-	// Record golden by running once and copying the output. The golden
-	// changes only when Request shape, tool definitions, or message
-	// flattening logic changes intentionally.
-	want := goldenHash()
-	if got != want {
-		// Print the actual hash so it can be copied as the new golden.
-		t.Errorf("golden hash mismatch:\n  got:  %s\n  want: %s\n\nIf this is intentional, update goldenHash().", got, want)
+	goldenPath := filepath.Join("testdata", "cache_stable.golden.json")
+
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.MkdirAll("testdata", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(goldenPath, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("updated golden: %s (sha256=%s)", goldenPath, got)
+		return
+	}
+
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden: %v\nRegenerate with: UPDATE_GOLDEN=1 go test -run TestCacheStableGolden ./internal/llm/", err)
+	}
+	wantHash := fmt.Sprintf("%x", sha256.Sum256(want))
+
+	if got != wantHash {
+		t.Errorf("golden drift:\n  got:  %s\n  want: %s\n\nIf intentional, update with: UPDATE_GOLDEN=1 go test -run TestCacheStableGolden ./internal/llm/", got, wantHash)
+	}
+
+	// Also verify byte-identical for maximum diff clarity.
+	if string(b) != string(want) {
+		t.Errorf("golden bytes differ (len got=%d, want=%d)", len(b), len(want))
 	}
 }
 
@@ -66,8 +91,8 @@ func TestCacheStableToolSort(t *testing.T) {
 	}
 	s := string(b)
 	// alpha must appear before zebra in the serialized output.
-	alphaIdx := indexOf(s, `"alpha"`)
-	zebraIdx := indexOf(s, `"zebra"`)
+	alphaIdx := strings.Index(s, `"alpha"`)
+	zebraIdx := strings.Index(s, `"zebra"`)
 	if alphaIdx >= zebraIdx {
 		t.Error("tools not sorted by name: zebra appears before alpha")
 	}
@@ -90,8 +115,8 @@ func TestCacheStableSchemaCanonical(t *testing.T) {
 	}
 	s := string(b)
 	// a_field must appear before z_field in the serialized output.
-	aIdx := indexOf(s, `"a_field"`)
-	zIdx := indexOf(s, `"z_field"`)
+	aIdx := strings.Index(s, `"a_field"`)
+	zIdx := strings.Index(s, `"z_field"`)
 	if aIdx >= zIdx {
 		t.Error("schema keys not canonical-sorted: z_field appears before a_field")
 	}
@@ -122,15 +147,15 @@ func TestCacheStableBlockFlattening(t *testing.T) {
 	s := string(b)
 
 	// Verify reasoning_content appears.
-	if !contains(s, `"reasoning_content":"reasoning"`) {
+	if !strings.Contains(s, `"reasoning_content":"reasoning"`) {
 		t.Error("missing reasoning_content in wire output")
 	}
 	// Verify tool_calls appears.
-	if !contains(s, `"tool_calls"`) {
+	if !strings.Contains(s, `"tool_calls"`) {
 		t.Error("missing tool_calls in wire output")
 	}
 	// Verify tool result with role "tool".
-	if !contains(s, `"role":"tool"`) {
+	if !strings.Contains(s, `"role":"tool"`) {
 		t.Error("missing tool result role in wire output")
 	}
 }
@@ -170,27 +195,4 @@ func buildRepresentativeRequest() Request {
 			}},
 		},
 	}
-}
-
-// goldenHash returns the expected SHA-256 of the representative request.
-// Update this when Request shape or serialization logic changes intentionally.
-func goldenHash() string {
-	// Compute once with: go test ./internal/llm/ -run TestCacheStableGolden -v
-	// and copy the "got" hash from the error message.
-	req := buildRepresentativeRequest()
-	b, _ := req.MarshalCacheStable()
-	return fmt.Sprintf("%x", sha256.Sum256(b))
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-func contains(s, substr string) bool {
-	return indexOf(s, substr) >= 0
 }

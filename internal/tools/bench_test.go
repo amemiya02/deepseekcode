@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -74,7 +75,7 @@ func BenchmarkEditFileExecute(b *testing.B) {
 		b.StopTimer()
 		_ = os.WriteFile(path, []byte(content), 0o644)
 		b.StartTimer()
-		_, _ = (&EditFile{CWD: dir}).Execute(nil, mustBenchJSON(map[string]any{
+		_, _ = (&EditFile{CWD: dir}).Execute(context.Background(), mustBenchJSON(map[string]any{
 			"path":       path,
 			"old_string": "hello world",
 			"new_string": "hello benchmark",

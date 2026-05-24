@@ -242,6 +242,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = m.Height
 		a.layout()
 	case tea.KeyMsg:
+		// Drop SGR mouse-wheel sequences that bubbletea's parser failed
+		// to recognize (happens when fast scrolling straddles its 256-
+		// byte read boundary; see isLeakedMouseSeq for the full story).
+		// Without this filter the orphaned bytes render as garbled text
+		// like "[<65;94;13M" inside the textarea.
+		if isLeakedMouseSeq(m) {
+			return a, nil
+		}
 		// Intercept special keys (overlay nav, ctrl+c, Enter, slash, etc).
 		// If not intercepted, fall through so the textarea sees the key.
 		if cmd, intercepted := a.handleKey(m); intercepted {
@@ -338,11 +346,6 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		cmds = append(cmds, a.ensureTick())
 	case agent.EventToolCallResult:
 		a.scrollback.AppendToolResult(e.CallID, e.Result, e.Dur)
-		a.refreshView()
-	case agent.EventDuet:
-		a.scrollback.AppendDuet(e.CallID, e.Approved, e.Reasoning, e.Dur)
-		a.status.duetActive = true
-		a.status.proCalls++
 		a.refreshView()
 	case agent.EventHookFired:
 		a.scrollback.AppendHookFired(e.HookName, e.Event, e.Decision, e.Reason, e.Dur)
@@ -514,11 +517,8 @@ func (a *App) renderOverlay() string {
 // The chrome row is reserved even when idle so the viewport doesn't
 // jump up and down as streaming state flips on and off.
 func (a *App) layout() {
-	statusH := 1
-	if a.status.duetActive {
-		statusH = 2
-	}
 	const (
+		statusH  = 1
 		chromeH  = 1
 		dividerH = 1
 	)

@@ -192,20 +192,21 @@ func checkCompaction() checkResult {
 }
 
 func checkHooks(cfg config.Config) checkResult {
-	if len(cfg.Hooks) == 0 {
+	var parts []string
+	for _, h := range cfg.Hooks {
+		label := h.Name
+		if label == "" {
+			label = "<inline>"
+		}
+		parts = append(parts, fmt.Sprintf("%s:%s(%s)", h.Event, label, h.Type))
+	}
+	if cfg.Duet.Enabled {
+		parts = append(parts, "PreToolUse:duet(builtin) [default]")
+	}
+	if len(parts) == 0 {
 		return checkResult{"hooks", "ok", "none configured"}
 	}
-	var sub, builtin int
-	for _, h := range cfg.Hooks {
-		switch h.Type {
-		case "subprocess":
-			sub++
-		case "builtin":
-			builtin++
-		}
-	}
-	return checkResult{"hooks", "ok",
-		fmt.Sprintf("%d subprocess, %d builtin", sub, builtin)}
+	return checkResult{"hooks", "ok", strings.Join(parts, ", ")}
 }
 
 func checkInstructions() checkResult {

@@ -57,14 +57,6 @@ type EventToolCallResult struct {
 	Dur    time.Duration
 }
 
-// EventDuet carries a pro-validator decision on a destructive call.
-type EventDuet struct {
-	CallID    string
-	Approved  bool
-	Reasoning string
-	Dur       time.Duration
-}
-
 // EventStepFinish ends one ReAct step. The consumer updates its
 // status counters / cost HUD here.
 type EventStepFinish struct {
@@ -124,7 +116,6 @@ func (EventReasoningEnd) isAgentEvent()   {}
 func (EventTextDelta) isAgentEvent()      {}
 func (EventToolCallStart) isAgentEvent()  {}
 func (EventToolCallResult) isAgentEvent() {}
-func (EventDuet) isAgentEvent()           {}
 func (EventStepFinish) isAgentEvent()     {}
 func (EventInfo) isAgentEvent()           {}
 func (EventPermissionAsk) isAgentEvent()  {}

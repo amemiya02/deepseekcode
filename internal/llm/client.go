@@ -362,12 +362,12 @@ type toolAcc struct {
 
 // streamChunk is the OpenAI-shaped SSE chunk envelope.
 type streamChunk struct {
-	ID      string       `json:"id"`
-	Object  string       `json:"object"`
-	Created int64        `json:"created"`
-	Model   string       `json:"model"`
-	Choices []sseChoice  `json:"choices"`
-	Usage   *Usage       `json:"usage,omitempty"`
+	ID      string      `json:"id"`
+	Object  string      `json:"object"`
+	Created int64       `json:"created"`
+	Model   string      `json:"model"`
+	Choices []sseChoice `json:"choices"`
+	Usage   *Usage      `json:"usage,omitempty"`
 }
 
 type sseChoice struct {
@@ -377,20 +377,102 @@ type sseChoice struct {
 }
 
 type sseDelta struct {
-	Role             string            `json:"role,omitempty"`
-	Content          string            `json:"content,omitempty"`
-	ReasoningContent string            `json:"reasoning_content,omitempty"`
-	ToolCalls        []sseToolCall     `json:"tool_calls,omitempty"`
+	Role             string        `json:"role,omitempty"`
+	Content          string        `json:"content,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []sseToolCall `json:"tool_calls,omitempty"`
 }
 
 type sseToolCall struct {
-	Index    int          `json:"index"`
-	ID       string       `json:"id,omitempty"`
-	Type     string       `json:"type,omitempty"`
-	Function sseFunction  `json:"function"`
+	Index    int         `json:"index"`
+	ID       string      `json:"id,omitempty"`
+	Type     string      `json:"type,omitempty"`
+	Function sseFunction `json:"function"`
 }
 
 type sseFunction struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+// ValidatePro sends a one-shot adjudication request to the pro model.
+// It returns the model's approve/block decision and reasoning. Used by
+// the Duet builtin hook (Phase 4).
+func (c *Client) ValidatePro(ctx context.Context, prompt string) (approve bool, reasoning string, err error) {
+	system := "You are a safety validator. Respond ONLY with JSON: {\"approve\": true|false, \"reasoning\": \"...\"}"
+	req := Request{
+		Model: "deepseek-v4-pro",
+		Messages: []Message{
+			{Role: "system", Blocks: []ContentBlock{TextBlock{Text: system}}},
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: prompt}}},
+		},
+		Stream:         false,
+		Thinking:       nil, // disabled for cost
+		ResponseFormat: &ResponseFmt{Type: "json_object"},
+	}
+
+	body, err := req.MarshalCacheStable()
+	if err != nil {
+		return false, "", fmt.Errorf("marshal validate request: %w", err)
+	}
+
+	url := c.BaseURL + "/v1/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return false, "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return false, "", fmt.Errorf("validate request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return false, "", &APIError{Status: resp.StatusCode, Body: string(buf)}
+	}
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, "", fmt.Errorf("read validate response: %w", err)
+	}
+
+	var cr struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		return false, "malformed validator response", nil
+	}
+	if len(cr.Choices) == 0 {
+		return false, "validator returned empty response", nil
+	}
+
+	content := strings.TrimSpace(cr.Choices[0].Message.Content)
+	if content == "" {
+		return false, "validator returned empty response", nil
+	}
+
+	var dec struct {
+		Approve   bool   `json:"approve"`
+		Reasoning string `json:"reasoning"`
+	}
+	if err := json.Unmarshal([]byte(content), &dec); err != nil {
+		// Try to recover by scanning for the first {...} block.
+		if start := strings.IndexByte(content, '{'); start >= 0 {
+			if end := strings.LastIndexByte(content, '}'); end > start {
+				if err2 := json.Unmarshal([]byte(content[start:end+1]), &dec); err2 == nil {
+					return dec.Approve, dec.Reasoning, nil
+				}
+			}
+		}
+		return false, "malformed validator response", nil
+	}
+	return dec.Approve, dec.Reasoning, nil
 }

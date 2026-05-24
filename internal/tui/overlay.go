@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/session"
 )
@@ -79,7 +78,7 @@ func (o *Overlay) MoveUp() {
 
 // Models / SessionsRows return the picker-specific row slices for
 // rendering. Returned slices are read-only.
-func (o *Overlay) Models() []modelOption  { return o.models }
+func (o *Overlay) Models() []modelOption      { return o.models }
 func (o *Overlay) SessionsRows() []sessionRow { return o.sessionsRows }
 
 // SelectedModelID returns the model id under the cursor, or "" when
@@ -124,8 +123,8 @@ type sessionRow struct {
 }
 
 // renderTape returns the fullscreen /tape view body. Each reasoning
-// block + tool call + duet check renders as one tape entry with model
-// attribution glyph.
+// block + tool call + hook execution renders as one tape entry with
+// model attribution glyph.
 //
 // Cursor is the index of the currently focused tape entry; j/k moves it.
 func renderTape(t Theme, items []chatItem, cursor int, width, height int) string {
@@ -155,7 +154,7 @@ func renderTape(t Theme, items []chatItem, cursor int, width, height int) string
 }
 
 // tapeEntry is the projection of chatItems onto the tape's visible
-// timeline (reasoning blocks, tool calls, duet checks).
+// timeline (reasoning blocks, tool calls, hook executions).
 type tapeEntry struct {
 	kind       itemKind
 	glyph      string // ◇ flash / ◆ pro
@@ -183,28 +182,13 @@ func tapeEntries(items []chatItem) []tapeEntry {
 				label:   fmt.Sprintf("flash  tool_call  %s", it.tool),
 				chatIdx: i,
 			})
-		case itemDuet:
-			verdict := "approved"
-			if !it.approved {
-				verdict = "BLOCKED"
-			}
-			out = append(out, tapeEntry{
-				kind:    it.kind,
-				glyph:   "◆",
-				label:   fmt.Sprintf("pro    validation  %s  %s", it.duration.Round(time.Millisecond), verdict),
-				chatIdx: i,
-			})
 		}
 	}
 	return out
 }
 
 func (e tapeEntry) renderLine(t Theme) string {
-	style := t.ToolCall
-	if e.glyph == "◆" {
-		style = t.DuetApprove
-	}
-	return style.Render(e.glyph) + " " + style.Render(e.label)
+	return t.ToolCall.Render(e.glyph) + " " + t.ToolCall.Render(e.label)
 }
 
 // renderModelsPicker draws the /models picker overlay.

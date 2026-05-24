@@ -25,8 +25,8 @@ import (
 //	itemToolCall       ← ToolUseBlock
 //	itemToolResult     ← ToolResultBlock
 //
-// The remaining itemKinds (Duet, Info, StepFinish, Error, Welcome)
-// are TUI-only artifacts with no on-the-wire block counterpart.
+// The remaining itemKinds (Info, StepFinish, Error, Welcome) are
+// TUI-only artifacts with no on-the-wire block counterpart.
 type itemKind int
 
 const (
@@ -35,7 +35,6 @@ const (
 	itemReasoning
 	itemToolCall
 	itemToolResult
-	itemDuet
 	itemHookFired
 	itemInfo
 	itemStepFinish
@@ -67,10 +66,6 @@ type chatItem struct {
 	args       string
 	result     tools.Result
 	expanded   bool // true when user has expanded a truncated tool result
-
-	// Duet
-	approved      bool
-	duetReasoning string
 
 	// HookFired
 	hookDecision string
@@ -146,16 +141,6 @@ func (i chatItem) render(t Theme, width int) string {
 			rendered += "\n" + t.Hint.Render("    ... press e to expand ...")
 		}
 		return rendered + "\n"
-	case itemDuet:
-		head := "approved"
-		style := t.DuetApprove
-		if !i.approved {
-			head = "BLOCKED"
-			style = t.DuetBlock
-		}
-		line := fmt.Sprintf("◆ pro check (%s): %s — %s",
-			i.duration.Round(time.Millisecond), head, i.duetReasoning)
-		return style.Render(line) + "\n"
 	case itemHookFired:
 		style := t.HookInfo
 		if i.hookDecision == "deny" {

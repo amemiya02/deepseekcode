@@ -162,31 +162,59 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
-	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
 	a.PromptBuilder = newPromptBuilder(cwd)
 
-	// Hooks: configure from TOML and wire into agent.
-	if len(cfg.Hooks) > 0 {
+	// Hooks: assemble configs from TOML, then add the Duet builtin
+	// when enabled. Only create a Runner if there is work for it.
+	var hookConfigs []hooks.HookConfig
+	for _, hi := range cfg.Hooks {
+		hc := hooks.HookConfig{
+			Event:   hooks.HookEvent(hi.Event),
+			Type:    hooks.HookType(hi.Type),
+			Command: hi.Command,
+			Name:    hi.Name,
+		}
+		if hc.Type == "" {
+			hc.Type = hooks.TypeSubprocess
+		}
+		if !validHookEvent(hc.Event) {
+			slog.Warn("skipping hook with unknown event", "event", hi.Event)
+			continue
+		}
+		if hi.Timeout > 0 {
+			hc.Timeout = time.Duration(hi.Timeout) * time.Second
+		}
+		hookConfigs = append(hookConfigs, hc)
+	}
+
+	if cfg.Duet.Enabled {
+		hasDuetPreTool := false
+		for _, hc := range hookConfigs {
+			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
+				hasDuetPreTool = true
+				break
+			}
+		}
+		if !hasDuetPreTool {
+			hookConfigs = append(hookConfigs, hooks.HookConfig{
+				Event: hooks.EventPreToolUse,
+				Type:  hooks.TypeBuiltin,
+				Name:  "duet",
+			})
+		}
+	}
+
+	if len(hookConfigs) > 0 {
 		hookRunner := hooks.NewRunner()
-		var hookConfigs []hooks.HookConfig
-		for _, hi := range cfg.Hooks {
-			hc := hooks.HookConfig{
-				Event:   hooks.HookEvent(hi.Event),
-				Type:    hooks.HookType(hi.Type),
-				Command: hi.Command,
-				Name:    hi.Name,
-			}
-			if hc.Type == "" {
-				hc.Type = hooks.TypeSubprocess
-			}
-			if !validHookEvent(hc.Event) {
-				slog.Warn("skipping hook with unknown event", "event", hi.Event)
-				continue
-			}
-			if hi.Timeout > 0 {
-				hc.Timeout = time.Duration(hi.Timeout) * time.Second
-			}
-			hookConfigs = append(hookConfigs, hc)
+		if cfg.Duet.Enabled {
+			hookRunner.Register("duet", hooks.NewDuetHook(
+				client,
+				cfg.Duet.ExtraDestructive,
+				cwd,
+				cfg.Permissions.SecretPathPatterns,
+				func() string { return a.Model },
+				func() []byte { return a.Transcript() },
+			))
 		}
 		hookRunner.Configure(hookConfigs)
 		a.HookRunner = hookRunner
@@ -196,16 +224,6 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	// chat items instead of stderr writes that would corrupt the TUI.
 	client.OnRetry = func(attempt int, err error) {
 		a.EmitInfo(fmt.Sprintf("retry %d/%d: %v", attempt, client.MaxRetries, err))
-	}
-
-	if cfg.Duet.Enabled {
-		validator := agent.NewProValidator(client, config.ModelPro)
-		if cfg.Duet.ValidatorTimeoutMs > 0 {
-			validator.Timeout = time.Duration(cfg.Duet.ValidatorTimeoutMs) * time.Millisecond
-		}
-		a.Validator = validator
-	} else {
-		a.Validator = nil
 	}
 
 	// Persistence (best effort). Notices are collected and rendered at
@@ -342,11 +360,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
-	a.DuetExtraDestructive = cfg.Duet.ExtraDestructive
 	a.PromptBuilder = newPromptBuilder(cwd)
-	if !cfg.Duet.Enabled {
-		a.Validator = nil
-	}
 
 	// Consumer goroutine: pulls events from the agent's lifetime stream
 	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents
@@ -435,13 +449,6 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 			if len(e.Result.Content) > 0 {
 				fmt.Fprintln(os.Stderr, indent(e.Result.Content, "  "))
 			}
-		case agent.EventDuet:
-			verdict := "approved"
-			if !e.Approved {
-				verdict = "BLOCKED"
-			}
-			fmt.Fprintf(os.Stderr, "\n\033[35m◆ pro check (%s): %s — %s\033[0m\n",
-				e.Dur.Round(time.Millisecond), verdict, e.Reasoning)
 		case agent.EventStepFinish:
 			cost := llm.Cost(model, e.Usage)
 			hit := llm.CacheHitRate(e.Usage)

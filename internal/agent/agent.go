@@ -31,7 +31,6 @@ type Agent struct {
 	Client      *llm.Client
 	Tools       *tools.Registry
 	Permissions *permissions.Policy
-	Validator   DuetValidator // nil = duet disabled
 
 	// events is the agent-lifetime event channel. The consumer
 	// (TUI or CLI) ranges over Events() and type-switches on the
@@ -75,9 +74,6 @@ type Agent struct {
 	// assistant turns, and tool results here.
 	Messages []llm.Message
 
-	// DuetExtraDestructive is the user's extra destructive regex list.
-	DuetExtraDestructive []string
-
 	// StepTimeout, if non-zero, caps the duration of a single step
 	// (one model turn + tool execution). 0 = no per-step limit.
 	StepTimeout time.Duration
@@ -102,7 +98,6 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		Client:        client,
 		Tools:         reg,
 		Permissions:   pol,
-		Validator:     NopValidator{}, // wave-5 replaces
 		events:        make(chan Event, 256),
 		Model:         model,
 		Thinking:      true,
@@ -588,21 +583,6 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		}
 	}
 
-	// Duet validator on destructive operations.
-	if a.Validator != nil && a.isDestructive(call, rawArgs) && !a.duetSelfValidates() {
-		t0 := time.Now()
-		dec, err := a.Validator.Validate(ctx, call.Function.Name, rawArgs, a.transcript())
-		dur := time.Since(t0)
-		if err != nil {
-			a.events <- EventInfo{Text: "pro validation skipped: " + err.Error()}
-		} else {
-			a.events <- EventDuet{CallID: call.ID, Approved: dec.Approve, Reasoning: dec.Reasoning, Dur: dur}
-			if !dec.Approve {
-				return tools.Errf("blocked by pro validator: %s", dec.Reasoning), nil
-			}
-		}
-	}
-
 	t0 := time.Now()
 	res, err := tool.Execute(ctx, rawArgs)
 	dur := time.Since(t0)
@@ -658,32 +638,10 @@ func (a *Agent) firePostHook(ctx context.Context, call llm.ToolCall, rawArgs jso
 	}
 }
 
-// isDestructive returns true if this tool call should be reviewed by
-// the Pro validator. See docs/design.md §11.2.
-func (a *Agent) isDestructive(call llm.ToolCall, args json.RawMessage) bool {
-	if call.Function.Name == "bash" {
-		var ba struct {
-			Command string `json:"command"`
-		}
-		_ = json.Unmarshal(args, &ba)
-		return permissions.IsDestructiveBash(ba.Command, a.DuetExtraDestructive)
-	}
-	cwd := a.Permissions.Cwd
-	return permissions.IsDestructiveToolCall(call.Function.Name, args, cwd, a.Permissions.SecretPathPatterns)
-}
-
-// duetSelfValidates returns true when the user has switched the main-loop
-// model to pro via /models — in which case the Duet validator becomes a
-// silent no-op (pro can't meaningfully validate itself).
-// See docs/design.md §11.7.
-func (a *Agent) duetSelfValidates() bool {
-	return a.Model == "deepseek-v4-pro"
-}
-
-// transcript returns a compact wire-format snapshot of recent messages
-// for the Duet validator. Bounded so we don't blow up pro's context
+// Transcript returns a compact wire-format snapshot of recent messages
+// for the Duet builtin hook. Bounded so we don't blow up pro's context
 // uselessly; for v0.1 we send the last 8 messages.
-func (a *Agent) transcript() []byte {
+func (a *Agent) Transcript() []byte {
 	const tail = 8
 	start := 0
 	if len(a.Messages) > tail {

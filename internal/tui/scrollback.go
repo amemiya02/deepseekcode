@@ -127,20 +127,6 @@ func (s *Scrollback) AppendToolResult(callID string, result tools.Result, dur ti
 	})
 }
 
-// AppendDuet records a pro-validator decision inline with the
-// triggering tool call.
-func (s *Scrollback) AppendDuet(callID string, approved bool, reasoning string, dur time.Duration) {
-	s.EndStreams()
-	s.appendItem(chatItem{
-		kind:          itemDuet,
-		toolCallID:    callID,
-		approved:      approved,
-		duetReasoning: reasoning,
-		duration:      dur,
-		timestamp:     time.Now(),
-	})
-}
-
 // AppendHookFired adds a hook-execution line. Deny decisions are
 // rendered in red; other decisions are informational.
 func (s *Scrollback) AppendHookFired(hookName, event, decision, reason string, dur time.Duration) {

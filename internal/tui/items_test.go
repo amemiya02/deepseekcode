@@ -24,8 +24,6 @@ func TestRenderTrailingNewline(t *testing.T) {
 		{"tool call", chatItem{kind: itemToolCall, tool: "ls", args: "{}"}},
 		{"tool result ok", chatItem{kind: itemToolResult, tool: "ls", result: tools.Result{Content: "out"}}},
 		{"tool result empty", chatItem{kind: itemToolResult, tool: "ls", result: tools.Result{}}},
-		{"duet approve", chatItem{kind: itemDuet, approved: true, duetReasoning: "ok"}},
-		{"duet block", chatItem{kind: itemDuet, approved: false, duetReasoning: "no"}},
 		{"info", chatItem{kind: itemInfo, text: "hi"}},
 		{"step finish", chatItem{kind: itemStepFinish, model: "deepseek-v4-flash"}},
 		{"error", chatItem{kind: itemError, text: "boom"}},
@@ -88,8 +86,8 @@ func TestCompactArgs(t *testing.T) {
 	}{
 		{`{"path":"cmd/dsc/main.go"}`, `path="cmd/dsc/main.go"`},
 		{`{"path":"a","line":3}`, `line=3, path="a"`}, // sorted keys
-		{`{}`, `{}`},                                   // empty → fall back
-		{`not json`, `not json`},                       // bad json → fall back
+		{`{}`, `{}`},             // empty → fall back
+		{`not json`, `not json`}, // bad json → fall back
 	}
 	for _, c := range cases {
 		got := compactArgs(c.in, 200)
@@ -109,7 +107,6 @@ func TestCompactArgsTruncates(t *testing.T) {
 		t.Errorf("expected truncation marker …, got %q", got)
 	}
 }
-
 
 // TestWelcomeRenders sanity-checks that the startup banner contains
 // both the mascot signature and the wordmark when the terminal is

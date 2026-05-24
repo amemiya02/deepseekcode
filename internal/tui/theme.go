@@ -18,9 +18,6 @@ type Theme struct {
 	ToolErr  lipgloss.Style
 	ToolBody lipgloss.Style
 
-	DuetApprove lipgloss.Style
-	DuetBlock   lipgloss.Style
-
 	HookInfo lipgloss.Style
 	HookDeny lipgloss.Style
 
@@ -43,8 +40,7 @@ type Theme struct {
 // DarkTheme returns the default dark theme. Flash voice = cyan,
 // Pro voice = magenta, per design doc §10.5.
 func DarkTheme() Theme {
-	cyan := lipgloss.Color("#5fd7d7")    // flash accent
-	magenta := lipgloss.Color("#d75fd7") // pro accent
+	cyan := lipgloss.Color("#5fd7d7") // flash accent
 	dim := lipgloss.Color("#6c6c6c")
 	red := lipgloss.Color("#ff5f5f")
 	green := lipgloss.Color("#5fd75f")
@@ -61,8 +57,6 @@ func DarkTheme() Theme {
 		ToolOk:         lipgloss.NewStyle().Foreground(green),
 		ToolErr:        lipgloss.NewStyle().Foreground(red),
 		ToolBody:       lipgloss.NewStyle().Foreground(dim),
-		DuetApprove:    lipgloss.NewStyle().Foreground(magenta),
-		DuetBlock:      lipgloss.NewStyle().Foreground(magenta).Bold(true),
 		HookInfo:       lipgloss.NewStyle().Foreground(yellow),
 		HookDeny:       lipgloss.NewStyle().Foreground(red).Bold(true),
 		Status:         lipgloss.NewStyle().Foreground(dim),
@@ -86,7 +80,6 @@ func DarkTheme() Theme {
 // LightTheme returns the light alt. Same semantics, inverted contrast.
 func LightTheme() Theme {
 	cyan := lipgloss.Color("#0087af")
-	magenta := lipgloss.Color("#af00af")
 	dim := lipgloss.Color("#878787")
 	red := lipgloss.Color("#af0000")
 	green := lipgloss.Color("#005f00")
@@ -103,8 +96,6 @@ func LightTheme() Theme {
 		ToolOk:         lipgloss.NewStyle().Foreground(green),
 		ToolErr:        lipgloss.NewStyle().Foreground(red),
 		ToolBody:       lipgloss.NewStyle().Foreground(dim),
-		DuetApprove:    lipgloss.NewStyle().Foreground(magenta),
-		DuetBlock:      lipgloss.NewStyle().Foreground(magenta).Bold(true),
 		HookInfo:       lipgloss.NewStyle().Foreground(yellow),
 		HookDeny:       lipgloss.NewStyle().Foreground(red).Bold(true),
 		Status:         lipgloss.NewStyle().Foreground(dim),

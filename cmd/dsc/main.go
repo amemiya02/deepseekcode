@@ -147,7 +147,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 
 	reg := tools.New()
-	tools.RegisterBuiltins(reg)
+	tools.RegisterBuiltins(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd)
 
 	// MCP servers: connect, bridge tools into the registry.
 	mcpReg := mcp.NewRegistry()
@@ -371,7 +371,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 
 	reg := tools.New()
-	tools.RegisterBuiltins(reg)
+	cwd, _ := os.Getwd()
+	tools.RegisterBuiltins(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd)
 
 	mode := permissions.ModeDefault
 	switch {
@@ -382,7 +383,6 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	case mf.askAll:
 		mode = permissions.ModeAskAll
 	}
-	cwd, _ := os.Getwd()
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash)
 

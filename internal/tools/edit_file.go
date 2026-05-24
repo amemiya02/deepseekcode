@@ -15,7 +15,9 @@ import (
 //
 // This mirrors Claude Code's Edit tool semantics, which is now the de
 // facto standard for agent edits.
-type EditFile struct{}
+type EditFile struct {
+	CWD string // project root for path safety; empty means os.Getwd
+}
 
 func (EditFile) Name() string { return "edit_file" }
 
@@ -64,7 +66,7 @@ func (EditFile) AffectedPaths(args json.RawMessage) []string {
 	return []string{p.Path}
 }
 
-func (EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
+func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
 		Path       string `json:"path"`
 		OldString  string `json:"old_string"`
@@ -83,6 +85,16 @@ func (EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, erro
 	if p.OldString == p.NewString {
 		return Errf("old_string and new_string are identical; nothing to do"), nil
 	}
+
+	cwd := e.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+	checkedPath, err := ResolveAndCheck(p.Path, cwd)
+	if err != nil {
+		return Errf("%v", err), nil
+	}
+	p.Path = checkedPath
 
 	b, err := os.ReadFile(p.Path)
 	if err != nil {

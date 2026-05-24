@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +15,10 @@ import (
 // ReadFile reads a UTF-8 text file and returns it with cat -n style line
 // numbers. Models do better at reasoning about positions when they see
 // numbers next to lines.
-type ReadFile struct{}
+type ReadFile struct {
+	MaxBytes int64  // default 5_242_880 (5 MiB); 0 means use default
+	CWD      string // project root for path safety; empty means os.Getwd
+}
 
 func (ReadFile) Name() string { return "read_file" }
 
@@ -60,7 +64,7 @@ func (ReadFile) AffectedPaths(args json.RawMessage) []string {
 	return []string{p.Path}
 }
 
-func (ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
+func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
 		Path      string `json:"path"`
 		StartLine int    `json:"start_line"`
@@ -73,6 +77,16 @@ func (ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, erro
 		return Errf("path is required"), nil
 	}
 
+	cwd := r.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+	checkedPath, err := ResolveAndCheck(p.Path, cwd)
+	if err != nil {
+		return Errf("%v", err), nil
+	}
+	p.Path = checkedPath
+
 	f, err := os.Open(p.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -82,7 +96,28 @@ func (ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, erro
 	}
 	defer f.Close()
 
-	const maxBytes = 2 * 1024 * 1024 // 2 MiB hard cap; bigger files need a different tool
+	// Binary detection: read up to 8 KB and look for NUL bytes.
+	// Extension-based detection is deliberately avoided — NUL byte is
+	// the only reliable cross-platform signal for binary content.
+	head := make([]byte, 8192)
+	n, _ := io.ReadFull(f, head)
+	if n == 0 {
+		// read nothing at all — edge case for empty files or read errors.
+		// Fall through to the normal scan path.
+	} else if bytes.IndexByte(head[:n], 0) >= 0 {
+		return Errf("binary file (NUL byte detected at or before offset %d). "+
+			"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
+			"or read it with an offset/range.", n, p.Path, p.Path), nil
+	}
+	// Seek back to start so the line scanner sees the full file.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return Result{}, fmt.Errorf("seeking %s: %w", p.Path, err)
+	}
+
+	maxBytes := r.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 5 * 1024 * 1024 // 5 MiB default
+	}
 	stat, err := f.Stat()
 	if err == nil && stat.Size() > maxBytes {
 		return Errf("file too large (%d bytes; cap is %d). Use grep or a narrower start_line/end_line.",

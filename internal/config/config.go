@@ -21,6 +21,7 @@ import (
 type Config struct {
 	API         APIConfig                  `toml:"api"`
 	Defaults    DefaultsConfig             `toml:"defaults"`
+	Tools       ToolsConfig                `toml:"tools"`
 	Duet        DuetConfig                 `toml:"duet"`
 	Permissions PermissionsConfig          `toml:"permissions"`
 	Sessions    SessionsConfig             `toml:"sessions"`
@@ -66,6 +67,11 @@ type HookItemConfig struct {
 	Command string `toml:"command"` // when type == subprocess
 	Name    string `toml:"name"`    // when type == builtin
 	Timeout int    `toml:"timeout_seconds"`
+}
+
+type ToolsConfig struct {
+	MaxReadBytes  int64 `toml:"max_read_bytes"`  // default 5_242_880 (5 MiB)
+	MaxWriteBytes int64 `toml:"max_write_bytes"` // default 5_242_880 (5 MiB)
 }
 
 type MCPServerConfig struct {
@@ -176,6 +182,13 @@ func applyOverlay(base *Config, ov Config) {
 		base.Defaults.Theme = ov.Defaults.Theme
 	}
 	base.Defaults.VimKeybindings = ov.Defaults.VimKeybindings || (base.Defaults.VimKeybindings && !overlayHasKey(ov, "vim_keybindings"))
+
+	if ov.Tools.MaxReadBytes != 0 {
+		base.Tools.MaxReadBytes = ov.Tools.MaxReadBytes
+	}
+	if ov.Tools.MaxWriteBytes != 0 {
+		base.Tools.MaxWriteBytes = ov.Tools.MaxWriteBytes
+	}
 
 	// Duet
 	base.Duet.Enabled = ov.Duet.Enabled || (base.Duet.Enabled && !overlayHasKey(ov, "duet.enabled"))

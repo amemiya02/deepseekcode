@@ -21,6 +21,10 @@ func Default() Config {
 			Theme:          "dark",
 			VimKeybindings: true,
 		},
+		Tools: ToolsConfig{
+			MaxReadBytes:  5 * 1024 * 1024, // 5 MiB
+			MaxWriteBytes: 5 * 1024 * 1024, // 5 MiB
+		},
 		Duet: DuetConfig{
 			Enabled:            true,
 			RetryOnFailure:     true,

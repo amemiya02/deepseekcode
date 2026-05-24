@@ -477,6 +477,7 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 			block.IsError = true
 		} else {
 			block.Content = r.res.Content
+			block.IsError = r.res.IsError
 		}
 		a.Messages = append(a.Messages, llm.Message{
 			Role:   "tool",

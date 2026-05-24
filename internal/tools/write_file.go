@@ -11,7 +11,10 @@ import (
 // WriteFile creates or overwrites a file. Snapshotting is the caller's
 // responsibility — the agent invokes the snapshots manager before each
 // edit/write tool call.
-type WriteFile struct{}
+type WriteFile struct {
+	MaxBytes int64  // default 5_242_880 (5 MiB); 0 means use default
+	CWD      string // project root for path safety; empty means os.Getwd
+}
 
 func (WriteFile) Name() string { return "write_file" }
 
@@ -50,7 +53,7 @@ func (WriteFile) AffectedPaths(args json.RawMessage) []string {
 	return []string{p.Path}
 }
 
-func (WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
+func (w WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -60,6 +63,31 @@ func (WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, err
 	}
 	if p.Path == "" {
 		return Errf("path is required"), nil
+	}
+
+	cwd := w.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+
+	// Refuse to write through a symlink (check raw path).
+	if fi, err := os.Lstat(p.Path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return Errf("refuse to write through symlink: %s. Remove the symlink first or write to the real path directly.", p.Path), nil
+	}
+
+	checkedPath, err := ResolveAndCheck(p.Path, cwd)
+	if err != nil {
+		return Errf("%v", err), nil
+	}
+	p.Path = checkedPath
+
+	maxBytes := w.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = 5 * 1024 * 1024 // 5 MiB default
+	}
+	if int64(len(p.Content)) > maxBytes {
+		return Errf("content too large (%d bytes; cap is %d). Split into smaller writes or use bash.",
+			len(p.Content), maxBytes), nil
 	}
 
 	if dir := filepath.Dir(p.Path); dir != "." && dir != "" {
@@ -89,5 +117,10 @@ func (WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, err
 		return Result{}, fmt.Errorf("rename %s -> %s: %w", tmpName, p.Path, err)
 	}
 
-	return Result{Content: fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path)}, nil
+	content := fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path)
+	if len(p.Content) > 1024*1024 {
+		content += fmt.Sprintf("\nwarning: large write (%d bytes). Consider whether this content could be split or trimmed.",
+			len(p.Content))
+	}
+	return Result{Content: content}, nil
 }

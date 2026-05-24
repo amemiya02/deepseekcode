@@ -19,7 +19,7 @@ func TestEditFileBasic(t *testing.T) {
 		"old_string": "foo bar",
 		"new_string": "baz qux",
 	})
-	res, err := EditFile{}.Execute(context.Background(), args)
+	res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestEditFileRefusesAmbiguous(t *testing.T) {
 		"old_string": "x",
 		"new_string": "y",
 	})
-	res, err := EditFile{}.Execute(context.Background(), args)
+	res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestEditFileReplaceAll(t *testing.T) {
 		"new_string":  "y",
 		"replace_all": true,
 	})
-	res, err := EditFile{}.Execute(context.Background(), args)
+	res, err := (&EditFile{CWD: dir}).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}

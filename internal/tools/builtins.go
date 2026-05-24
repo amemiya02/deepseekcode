@@ -6,15 +6,15 @@ package tools
 //
 // Git tools are registered separately by internal/tools/git so callers
 // can opt out (e.g. the validator pro-side tool list, which is empty).
-func RegisterBuiltins(r *Registry) {
+func RegisterBuiltins(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string) {
+	r.Register(&ReadFile{MaxBytes: maxReadBytes, CWD: cwd})
+	r.Register(&WriteFile{MaxBytes: maxWriteBytes, CWD: cwd})
+	r.Register(&EditFile{CWD: cwd})
 	r.Register(Bash{})
-	r.Register(EditFile{})
 	r.Register(Glob{})
 	r.Register(Grep{})
 	r.Register(Ls{})
-	r.Register(ReadFile{})
 	r.Register(&TodoWrite{})
-	r.Register(WriteFile{})
 
 	// Structured git tools (v0.1 differentiator).
 	r.Register(GitDiff{})

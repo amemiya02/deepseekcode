@@ -35,6 +35,15 @@ type Persister interface {
 
 	// SetActiveModel persists the result of a /models switch.
 	SetActiveModel(ctx context.Context, model string) error
+
+	// ReplaceWithCompaction atomically deletes messages in [fromIdx,
+	// toIdx) and inserts a synthetic summary message at fromIdx,
+	// renumbering subsequent messages to keep idx contiguous. Returns
+	// the idx of the inserted summary. The full transactional
+	// implementation lands in Phase 2 (T-208); for now this method
+	// exists so the rest of the system can compile against the final
+	// interface shape.
+	ReplaceWithCompaction(ctx context.Context, fromIdx, toIdx int, summary string) (int, error)
 }
 
 // AffectedPathsFor returns the static affected paths for a tool call

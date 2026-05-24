@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
@@ -77,6 +78,7 @@ type Agent struct {
 
 	toolCallCount int
 	steps         []StepRecord
+	gitReader     *gitctx.Reader // lazily constructed per cwd
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -231,6 +233,8 @@ func stepContext(parent context.Context, timeout time.Duration) (context.Context
 // runStep streams one model turn and aggregates events into a StepRecord.
 // It assembles the assistant message and appends it to a.Messages.
 func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
+	a.refreshGitContext(ctx)
+
 	req := llm.Request{
 		Model:    a.Model,
 		Messages: a.fullMessages(),
@@ -304,6 +308,33 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		Usage:        usage,
 		ToolCalls:    assembledCall,
 	}, nil
+}
+
+// refreshGitContext repopulates the builder's GitStatus / GitDiff /
+// ActiveBranch fields with a fresh snapshot and rebuilds a.System.
+// No-op when PromptBuilder or its Project is nil. Failures keep the
+// previous values so the prompt never flickers between empty and
+// populated mid-session.
+func (a *Agent) refreshGitContext(ctx context.Context) {
+	if a.PromptBuilder == nil || a.PromptBuilder.Project == nil {
+		return
+	}
+	if a.PromptBuilder.Project.CWD == "" {
+		return
+	}
+	if a.gitReader == nil {
+		a.gitReader = &gitctx.Reader{CWD: a.PromptBuilder.Project.CWD}
+	}
+	snap, err := a.gitReader.Read(ctx)
+	if err != nil {
+		return
+	}
+	a.PromptBuilder.Project.GitStatus = snap.Status
+	a.PromptBuilder.Project.GitDiff = snap.Diff
+	if snap.ActiveBranch != "" {
+		a.PromptBuilder.Project.ActiveBranch = snap.ActiveBranch
+	}
+	a.System = a.PromptBuilder.Build()
 }
 
 // fullMessages returns the wire-format message list with the system

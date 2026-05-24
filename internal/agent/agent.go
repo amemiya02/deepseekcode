@@ -232,6 +232,17 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	}
 }
 
+// ForceCompact runs maybeCompact with a temporarily-lowered token
+// threshold so the user's /compact slash command can fire even when
+// the message list hasn't hit the auto threshold. The preserve
+// count is honored — too-short transcripts still no-op.
+func (a *Agent) ForceCompact(ctx context.Context) {
+	saved := a.CompactionCfg
+	defer func() { a.CompactionCfg = saved }()
+	a.CompactionCfg.AutoCompactInputTokens = 1
+	a.maybeCompact(ctx)
+}
+
 // maybeCompact runs the compaction pipeline and, if it produced a
 // summary, swaps the in-memory message list and persists the
 // collapse. Errors surface via EventInfo so the user sees them

@@ -781,6 +781,13 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			}
 		}
 		a.applyUndo(n)
+	case "/compact":
+		// Force a compaction now, regardless of the auto threshold.
+		// Runs off the UI goroutine so a slow ReplaceWithCompaction
+		// transaction can't freeze the input loop.
+		go a.agent.ForceCompact(context.Background())
+		a.scrollback.AppendInfo("compaction requested")
+		a.refreshView()
 	default:
 		a.scrollback.AppendInfo("unknown command: " + cmd + " (/help for list)")
 		a.refreshView()
@@ -807,6 +814,7 @@ func helpText() string {
 		"  /sessions  list this project's sessions",
 		"  /export    open full scrollback in $PAGER for native mouse copy",
 		"  /undo      revert the last edit step",
+		"  /compact   force-compact the running message list",
 	}, "\n")
 }
 

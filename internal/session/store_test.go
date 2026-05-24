@@ -254,6 +254,79 @@ func TestLoadMessagesBlocksFromLegacy(t *testing.T) {
 	}
 }
 
+// TestUpgradeV1ToV2Roundtrip exercises the end-to-end migration:
+// craft a v1 DB with one legacy-shape message, Open() it (triggers
+// v2 migration), confirm the row reads back as typed Blocks, then
+// append a Blocks-shape row and confirm both coexist correctly.
+func TestUpgradeV1ToV2Roundtrip(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "v1.db")
+
+	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	if _, err := rawDB.Exec(schemaV1); err != nil {
+		t.Fatalf("schema v1: %v", err)
+	}
+	if _, err := rawDB.Exec(`INSERT INTO schema_version(version) VALUES (1)`); err != nil {
+		t.Fatalf("seed version: %v", err)
+	}
+	if _, err := rawDB.Exec(`INSERT INTO sessions(id, project_path, model, duet_enabled, created_at, last_used_at) VALUES ('s1', '/p', 'm', 0, 0, 0)`); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	now := time.Now().UTC().Unix()
+	if _, err := rawDB.Exec(
+		`INSERT INTO messages
+		 (session_id, idx, role, content, reasoning_content, tool_calls,
+		  tool_results, tool_call_id, model,
+		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts)
+		 VALUES ('s1', 0, 'assistant', 'hi', 'plan', '', '', '', '', 0, 0, 0, 0, ?)`, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open with migrate: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	first, err := s.LoadMessages(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load after migrate: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("want 1 msg, got %d", len(first))
+	}
+	if len(first[0].Blocks) != 2 {
+		t.Fatalf("want 2 reconstructed blocks, got %d: %#v", len(first[0].Blocks), first[0].Blocks)
+	}
+	if _, ok := first[0].Blocks[0].(llm.ThinkingBlock); !ok {
+		t.Errorf("blocks[0] type: got %T", first[0].Blocks[0])
+	}
+
+	if _, err := s.AppendMessage(ctx, "s1", Message{
+		Role:   "user",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: "follow-up"}},
+	}); err != nil {
+		t.Fatalf("append v2 row: %v", err)
+	}
+	all, err := s.LoadMessages(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load after append: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("want 2 msgs, got %d", len(all))
+	}
+	if tb, ok := all[1].Blocks[0].(llm.TextBlock); !ok || tb.Text != "follow-up" {
+		t.Errorf("appended msg blocks[0]: got %#v", all[1].Blocks[0])
+	}
+}
+
 func newStoreWithSession(t *testing.T) (*Store, string) {
 	t.Helper()
 	dir := t.TempDir()

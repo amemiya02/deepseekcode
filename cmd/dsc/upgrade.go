@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/version"
 )
@@ -20,7 +20,7 @@ func runUpgrade(args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15e9)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	tag, url, err := version.LatestRelease(ctx)
@@ -100,7 +100,3 @@ func decideUpgrade(current, latest string, m version.Method) (msg, command strin
 	}
 	return msg, command
 }
-
-// runUpgradeWithDecider exists for testability: tests inject a custom
-// LatestRelease function via the real one (httptest override of githubAPIBase).
-var stringsJoin = strings.Join

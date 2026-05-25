@@ -295,6 +295,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.scrollback.AppendUser(m.text)
 		a.refreshView()
 		return a, a.submitPromptCmd(m.text)
+	case spawnExpandedMsg:
+		a.scrollback.AppendUser(m.text)
+		a.refreshView()
+		return a, a.spawnCmd(m.text, m.agent)
+	case spawnResultMsg:
+		a.scrollback.AppendInfo(m.summary)
+		a.refreshView()
 	case redrawMsg:
 		// Coalesced re-render. Streaming deltas don't refresh on
 		// arrival; instead they bump scrollback.Seq() and we check
@@ -964,7 +971,36 @@ func (a *App) lookupCustomCommand(line string) tea.Cmd {
 			return string(data), err
 		}
 		text, _ := commands.Expand(context.Background(), tmpl, args, shellRunner, readFile)
+		if cmd.Agent != "" || cmd.Subtask {
+			return spawnExpandedMsg{text: text, agent: cmd.Agent}
+		}
 		return slashExpandedMsg{text: text}
+	}
+}
+
+// spawnCmd starts a sub-agent spawn in a goroutine. The result is
+// delivered as a spawnResultMsg. If no spawner is configured, the
+// expanded text is submitted to the main agent loop as a fallback.
+func (a *App) spawnCmd(text, agentName string) tea.Cmd {
+	return func() tea.Msg {
+		sp := a.agent.Spawner
+		if sp == nil {
+			// No spawner configured; fall back to main loop.
+			go a.runAgent(text)
+			return runStartMsg{}
+		}
+		go func() {
+			res, _ := sp.Spawn(context.Background(), tools.SpawnRequest{
+				Agent:       agentName,
+				Description: text,
+			})
+			summary := res.Summary
+			if summary == "" {
+				summary = "(subagent returned no summary)"
+			}
+			a.send(spawnResultMsg{summary: summary})
+		}()
+		return runStartMsg{}
 	}
 }
 

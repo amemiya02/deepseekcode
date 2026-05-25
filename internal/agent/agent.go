@@ -90,6 +90,22 @@ type Agent struct {
 	// Warns at 80% via OnInfo. 0 = unlimited.
 	MaxToolCalls int
 
+	// IsSubagent is true when this agent was spawned by a parent
+	// via LoopSpawner. It disables thinking in sub-agents (via
+	// SelectThinking) and may be used to adjust other behaviors.
+	IsSubagent bool
+
+	// Spawner, when non-nil, enables sub-agent dispatch from slash
+	// commands that declare agent: or subtask: true. Set by the
+	// assembly layer (cmd/dsc or TUI) after construction.
+	Spawner tools.Spawner
+
+	// Plan-mode state. inPlan is true while the agent is in plan mode;
+	// savedTools/savedPolicy hold the originals so ExitPlan can restore.
+	inPlan       bool
+	savedTools   *tools.Registry
+	savedPolicy  *permissions.Policy
+
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
@@ -321,7 +337,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 
 	thinking := a.Thinking
 	if a.AutoReasoning {
-		thinking = llm.SelectThinking(false, a.lastUserText(), a.Thinking)
+		thinking = llm.SelectThinking(a.IsSubagent, a.lastUserText(), a.Thinking)
 	}
 
 	req := llm.Request{

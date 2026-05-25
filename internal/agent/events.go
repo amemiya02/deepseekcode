@@ -132,3 +132,19 @@ func (EventQuestionAsk) isAgentEvent()    {}
 func (EventDone) isAgentEvent()           {}
 func (EventCompaction) isAgentEvent()     {}
 func (EventHookFired) isAgentEvent()      {}
+
+// EventSubagentStart signals that a sub-agent spawn has begun.
+type EventSubagentStart struct {
+	Agent       string
+	Description string
+}
+
+// EventSubagentFinish signals that a sub-agent run completed
+// (successfully or not).
+type EventSubagentFinish struct {
+	Agent  string
+	Result SubResult
+}
+
+func (EventSubagentStart) isAgentEvent()  {}
+func (EventSubagentFinish) isAgentEvent() {}

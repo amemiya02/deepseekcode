@@ -28,6 +28,7 @@ const (
 	ModeYolo                 // auto-approve every tool (DANGEROUS)
 	ModeReadOnly             // block all write/edit/bash tools
 	ModeAskAll               // prompt for every tool, ignoring allowlist
+	ModePlan                 // read-only + question/plan_exit whitelist, deny rest
 )
 
 // Decision is the answer Decide() returns.
@@ -100,6 +101,11 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 		return Deny, "blocked by read-only mode"
 	case ModeAskAll:
 		return Ask, "ask-all mode"
+	case ModePlan:
+		if isReadOnly(c.Tool) || c.Tool.Name() == "question" || c.Tool.Name() == "plan_exit" {
+			return Allow, "plan mode: read-only/whitelisted"
+		}
+		return Deny, "blocked by plan mode"
 	}
 
 	// 2. Rule engine (Phase 7) — only active in ModeDefault.
@@ -211,6 +217,41 @@ func isReadOnly(t tools.Tool) bool {
 		return r.IsReadOnly()
 	}
 	return false
+}
+
+// DeriveChild returns a derived policy for sub-agent use: copies
+// cwd/secret/bashAllowlist, shares read-only Rules pointer. Mode is
+// clamped to the safer of parent and requested — sub-agents cannot
+// escalate privilege.
+func (p *Policy) DeriveChild(requested Mode) *Policy {
+	return New(clampMode(p.Mode, requested), p.Cwd, p.SecretPathPatterns, p.BashAllowlist(), p.Rules)
+}
+
+// clampMode returns the safer (lower danger) of a and b.
+func clampMode(a, b Mode) Mode {
+	if danger(a) <= danger(b) {
+		return a
+	}
+	return b
+}
+
+// danger returns a numeric danger level for mode comparison.
+// Lower = safer.
+func danger(m Mode) int {
+	switch m {
+	case ModePlan:
+		return 0
+	case ModeReadOnly:
+		return 0
+	case ModeAskAll:
+		return 1
+	case ModeDefault:
+		return 2
+	case ModeYolo:
+		return 3
+	default:
+		return 0
+	}
 }
 
 func (p *Policy) insideCwd(abs string) bool {

@@ -126,6 +126,19 @@ func (r *Registry) AsLLMTools() []llm.Tool {
 	return out
 }
 
+// Subset returns a new Registry containing only the tools whose names
+// appear in names. Unknown names are silently ignored.
+// names being nil or empty returns an empty Registry (not the full set).
+func (r *Registry) Subset(names []string) *Registry {
+	sub := New()
+	for _, n := range names {
+		if t, ok := r.Get(n); ok {
+			sub.Register(t)
+		}
+	}
+	return sub
+}
+
 // MustParams marshals v to JSON and panics on error. Tools call this
 // from their Parameters() method on a Go struct literal, which can't
 // fail in practice. Keeps each tool definition readable.

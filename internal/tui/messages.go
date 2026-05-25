@@ -51,6 +51,20 @@ type redrawMsg struct{}
 // to Update for AppendUser + submitPromptCmd.
 type slashExpandedMsg struct{ text string }
 
+// spawnResultMsg carries the summary from a sub-agent spawned by a
+// slash command with agent: or subtask: true.
+type spawnResultMsg struct {
+	summary string
+}
+
+// spawnExpandedMsg is like slashExpandedMsg but for commands that
+// declare agent: or subtask: true. The text goes to the spawner
+// instead of the main agent loop.
+type spawnExpandedMsg struct {
+	text  string
+	agent string
+}
+
 // submitPromptCmd starts a new agent Run with userPrompt. The agent
 // goroutine emits agent.Events as work progresses; the App's event
 // pump goroutine wraps each into an agentEventMsg. We return

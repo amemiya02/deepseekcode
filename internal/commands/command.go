@@ -9,9 +9,9 @@ import (
 type Command struct {
 	Name        string // derived from relative path (filled by Load)
 	Description string // frontmatter "description"
-	Agent       string // frontmatter "agent" (parsed, not active — TODO Phase 21)
+	Agent       string // frontmatter "agent" (active)
 	Model       string // frontmatter "model" (active)
-	Subtask     bool   // frontmatter "subtask" (parsed, not active — TODO Phase 21)
+	Subtask     bool   // frontmatter "subtask" (active)
 	Template    string // body after frontmatter (trimmed)
 	Path        string // absolute path (filled by Load)
 }

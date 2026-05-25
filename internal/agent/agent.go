@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -108,9 +109,9 @@ type Agent struct {
 
 	// Plan-mode state. inPlan is true while the agent is in plan mode;
 	// savedTools/savedPolicy hold the originals so ExitPlan can restore.
-	inPlan       bool
-	savedTools   *tools.Registry
-	savedPolicy  *permissions.Policy
+	inPlan      bool
+	savedTools  *tools.Registry
+	savedPolicy *permissions.Policy
 
 	toolCallCount int
 	steps         []StepRecord
@@ -144,7 +145,11 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 	a.bus = NewBus()
 	def := a.bus.Subscribe(256)
 	go func() {
-		defer func() { recover() }()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("agent: unpack goroutine panic: %v", r)
+			}
+		}()
 		for env := range def.C {
 			a.eventsCompat <- env.Event
 		}

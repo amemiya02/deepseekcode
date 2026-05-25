@@ -111,7 +111,7 @@ See `docs/design.md` §3.
 
 ## Status & roadmap
 
-**v0.1 (current)**: 12 built-in tools, tiered permissions + snapshot
+**v0.1 (current)**: 13 built-in tools (incl. `apply_patch`), tiered permissions + snapshot
 rollback, SQLite sessions with branch-by-reference, Reasoning Tape +
 `/tape` fullscreen, `/models` picker, Pro Validator, Cost HUD,
 5-platform cross-compile, Homebrew tap + curl|sh + go install. MCP

@@ -9,6 +9,7 @@ package tools
 func RegisterBuiltins(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string) {
 	r.Register(&ReadFile{MaxBytes: maxReadBytes, CWD: cwd})
 	r.Register(&WriteFile{MaxBytes: maxWriteBytes, CWD: cwd})
+	r.Register(NewApplyPatchTool(cwd, maxWriteBytes))
 	r.Register(&EditFile{CWD: cwd})
 	r.Register(Bash{})
 	r.Register(Glob{})

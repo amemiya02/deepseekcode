@@ -3,6 +3,10 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/session"
 )
@@ -60,6 +65,12 @@ type App struct {
 	status    statusState
 	stepTotal int
 
+	// Slash-command Tab completion state. Non-nil while the user is
+	// cycling through prefix-matching commands.
+	completion      []string // matching command names
+	completionIdx   int      // current index in completion
+	completionInput string   // original input before first Tab
+
 	// Session / snapshot integration. nil when ephemeral. The four
 	// callbacks travel together so we pack them in one struct field
 	// rather than four flat ones.
@@ -67,6 +78,9 @@ type App struct {
 
 	// Wiring back to the tea.Program for callbacks running off the UI loop.
 	send func(tea.Msg)
+
+	// User-defined slash commands loaded from .deepseek/command/*.md.
+	customCmds map[string]commands.Command
 
 	// Notices shown once at startup (resume confirmation, warnings).
 	startupNotices []string
@@ -108,6 +122,9 @@ type Config struct {
 	// CompactionCount initialises the status-line compaction counter from
 	// a resumed session's history. Populate from sess.CompactionCount.
 	CompactionCount int
+
+	// Commands are user-defined slash commands loaded from .deepseek/command/*.md.
+	Commands map[string]commands.Command
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
@@ -138,6 +155,7 @@ func New(cfg Config) *App {
 		chrome:         NewChrome(),
 		overlay:        NewOverlay(),
 		permission:     NewPermissionFlow(),
+		customCmds:     cfg.Commands,
 		startupNotices: cfg.StartupNotices,
 		session: sessionIntegration{
 			id:       cfg.SessionID,
@@ -273,6 +291,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// indicator so the user sees activity during the cold-start gap.
 		a.chrome.BeginThinking()
 		cmds = append(cmds, a.ensureTick())
+	case slashExpandedMsg:
+		a.scrollback.AppendUser(m.text)
+		a.refreshView()
+		return a, a.submitPromptCmd(m.text)
 	case redrawMsg:
 		// Coalesced re-render. Streaming deltas don't refresh on
 		// arrival; instead they bump scrollback.Seq() and we check
@@ -363,6 +385,7 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.status.usage.PromptCacheHitTokens += e.Usage.PromptCacheHitTokens
 		a.status.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
 		a.status.costYuan += llm.Cost(a.model, e.Usage)
+		a.status.costKnown = llm.CostKnown(a.model)
 		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
 		a.refreshView()
 	case agent.EventCompaction:
@@ -491,7 +514,7 @@ func (a *App) View() string {
 		)
 	default:
 		hint = a.theme.Hint.Render(
-			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help",
+			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help" + a.completionHint(),
 		)
 	}
 
@@ -619,19 +642,28 @@ func (a *App) handleKey(km tea.KeyMsg) (tea.Cmd, bool) {
 }
 
 // handleInsertKey handles keys in Insert (typing) mode.
-// Only intercepts Enter (submit), Ctrl+R/T (toggle reasoning), and Esc
-// (enter Normal mode). Everything else falls through to the textarea.
+// Only intercepts Enter (submit), Ctrl+R/T (toggle reasoning), Tab
+// (slash completion), and Esc (enter Normal mode). Everything else
+// falls through to the textarea.
 func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	switch km.String() {
 	case "ctrl+r":
 		a.toggleLastReasoning()
+		a.clearCompletion()
 		return nil, true
 	case "ctrl+t":
 		a.toggleAllReasoning()
+		a.clearCompletion()
 		return nil, true
 	case "esc":
+		a.clearCompletion()
 		_ = a.setMode(modeNormal)
 		return nil, true
+	case "tab":
+		if a.cycleCompletion() {
+			return nil, true
+		}
+		return nil, false // no completion active → let Tab through
 	}
 
 	if km.Type == tea.KeyEnter {
@@ -640,6 +672,7 @@ func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, false
 		}
 		text := strings.TrimSpace(a.input.Value())
+		a.clearCompletion()
 		if text == "" {
 			return nil, true
 		}
@@ -652,7 +685,60 @@ func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
 		return a.submitPromptCmd(text), true
 	}
 
+	// Any other key clears completion state (user is typing).
+	a.clearCompletion()
 	return nil, false
+}
+
+// cycleCompletion advances slash-command Tab completion. Returns true
+// if completion is active (and the input was updated).
+func (a *App) cycleCompletion() bool {
+	if len(a.customCmds) == 0 {
+		return false
+	}
+	if len(a.completion) == 0 {
+		// First Tab: compute candidates from current input.
+		input := a.input.Value()
+		if !strings.HasPrefix(input, "/") {
+			return false
+		}
+		prefix := input // includes the "/"
+		for name := range a.customCmds {
+			candidate := "/" + name
+			if strings.HasPrefix(candidate, prefix) {
+				a.completion = append(a.completion, candidate)
+			}
+		}
+		if len(a.completion) == 0 {
+			return false
+		}
+		// Sort for deterministic cycling.
+		sort.Strings(a.completion)
+		a.completionInput = input
+		a.completionIdx = 0
+	} else {
+		a.completionIdx = (a.completionIdx + 1) % len(a.completion)
+	}
+	a.input.SetValue(a.completion[a.completionIdx])
+	return true
+}
+
+// clearCompletion resets Tab completion state.
+func (a *App) clearCompletion() {
+	if len(a.completion) == 0 {
+		return
+	}
+	a.completion = nil
+	a.completionIdx = 0
+	a.completionInput = ""
+}
+
+// completionHint returns a hint string for active completion, or "".
+func (a *App) completionHint() string {
+	if len(a.completion) <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("  Tab: %d more matches", len(a.completion)-1)
 }
 
 // handleNormalKey handles keys in Normal (scroll) mode.
@@ -806,10 +892,62 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		a.scrollback.AppendInfo("compaction requested")
 		a.refreshView()
 	default:
+		if cmd := a.lookupCustomCommand(line); cmd != nil {
+			return cmd
+		}
 		a.scrollback.AppendInfo("unknown command: " + cmd + " (/help for list)")
 		a.refreshView()
 	}
 	return nil
+}
+
+// lookupCustomCommand checks if the slash line matches a user-defined
+// command. If so, it returns a tea.Cmd that expands the template off
+// the UI goroutine (safe for !`cmd` shell injection). Returns nil if
+// no match.
+func (a *App) lookupCustomCommand(line string) tea.Cmd {
+	sp := strings.IndexByte(line, ' ')
+	var name, argline string
+	if sp < 0 {
+		name = strings.TrimPrefix(line, "/")
+	} else {
+		name = strings.TrimPrefix(line[:sp], "/")
+		argline = line[sp+1:]
+	}
+	cmd, ok := a.customCmds[name]
+	if !ok {
+		return nil
+	}
+	args := commands.Tokenize(argline)
+	if cmd.Model != "" {
+		a.agent.Model = cmd.Model
+		a.model = cmd.Model
+		a.status.model = cmd.Model
+		a.scrollback.AppendInfo("model → " + cmd.Model + " (via /" + name + ")")
+	}
+	tmpl := cmd.Template
+	return func() tea.Msg {
+		readFile := func(path string) (string, error) {
+			data, err := os.ReadFile(path)
+			return string(data), err
+		}
+		text, _ := commands.Expand(context.Background(), tmpl, args, shellRunner, readFile)
+		return slashExpandedMsg{text: text}
+	}
+}
+
+// shellRunner executes a shell command with a 10s timeout. Stderr is
+// discarded to avoid polluting the TUI's alt-screen.
+func shellRunner(ctx context.Context, cmd string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, "bash", "-c", cmd)
+	c.Stderr = io.Discard
+	out, err := c.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(out), "\n"), nil
 }
 
 func helpText() string {

@@ -14,6 +14,7 @@ type statusState struct {
 	compactionCount int
 	usage           llm.Usage
 	costYuan        float64
+	costKnown       bool
 	thinking        bool
 	hint            string
 	mode            appMode
@@ -27,8 +28,12 @@ func (s statusState) render(t Theme) string {
 	if s.mode == modeNormal {
 		modeBadge = t.Hint.Render("NORMAL ") + "· "
 	}
-	line1 := fmt.Sprintf("%s%s · %d steps · cache %.0f%% · ¥%.4f",
-		modeBadge, t.StatusModel.Render(shortModel(s.model)), s.steps, hit, s.costYuan)
+	costStr := "¥?"
+	if s.costKnown {
+		costStr = fmt.Sprintf("¥%.4f", s.costYuan)
+	}
+	line1 := fmt.Sprintf("%s%s · %d steps · cache %.0f%% · %s",
+		modeBadge, t.StatusModel.Render(shortModel(s.model)), s.steps, hit, costStr)
 	if s.compactionCount > 0 {
 		line1 += fmt.Sprintf(" · compacted %d", s.compactionCount)
 	}

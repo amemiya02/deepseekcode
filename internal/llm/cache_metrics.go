@@ -4,6 +4,7 @@ package llm
 // published at https://api-docs.deepseek.com/zh-cn/quick_start/pricing
 // and locked at design-doc time (2026-05). When DeepSeek changes
 // pricing, update this table.
+// 永久价说明与官方源核对见 docs/pricing.md。
 type Pricing struct {
 	InputCacheHit  float64 // ¥ / 1M tokens
 	InputCacheMiss float64
@@ -33,6 +34,13 @@ func Cost(model string, u Usage) float64 {
 	out := float64(u.CompletionTokens)
 	const million = 1_000_000.0
 	return (hits*p.InputCacheHit + misses*p.InputCacheMiss + out*p.Output) / million
+}
+
+// CostKnown reports whether model has a pricing entry (i.e., Cost returning
+// 0 means "truly free" rather than "unknown model").
+func CostKnown(model string) bool {
+	_, ok := Prices[model]
+	return ok
 }
 
 // CacheHitRate returns the cache-hit fraction in [0,1] over input tokens.

@@ -39,6 +39,53 @@ func TestCostUnknownModel(t *testing.T) {
 	}
 }
 
+func TestPricesGolden(t *testing.T) {
+	// Pin all 12 pricing values to prevent accidental drift.
+	expected := map[string]Pricing{
+		"deepseek-v4-flash": {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},
+		"deepseek-v4-pro":   {InputCacheHit: 0.025, InputCacheMiss: 3.0, Output: 6.0},
+		"deepseek-chat":     {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},
+		"deepseek-reasoner": {InputCacheHit: 0.02, InputCacheMiss: 1.0, Output: 2.0},
+	}
+
+	if len(Prices) != 4 {
+		t.Fatalf("len(Prices) = %d, want 4 (add audit entry if intentional)", len(Prices))
+	}
+
+	for model, want := range expected {
+		got, ok := Prices[model]
+		if !ok {
+			t.Fatalf("Prices[%q] missing", model)
+		}
+		if got.InputCacheHit != want.InputCacheHit {
+			t.Errorf("Prices[%q].InputCacheHit = %v, want %v", model, got.InputCacheHit, want.InputCacheHit)
+		}
+		if got.InputCacheMiss != want.InputCacheMiss {
+			t.Errorf("Prices[%q].InputCacheMiss = %v, want %v", model, got.InputCacheMiss, want.InputCacheMiss)
+		}
+		if got.Output != want.Output {
+			t.Errorf("Prices[%q].Output = %v, want %v", model, got.Output, want.Output)
+		}
+	}
+}
+
+func TestCostUnknownModelReturnsZero(t *testing.T) {
+	u := Usage{PromptCacheHitTokens: 100, PromptCacheMissTokens: 100, CompletionTokens: 100}
+	for _, model := range []string{"deepseek-ai/deepseek-v4-pro", "gpt-4o", ""} {
+		if got := Cost(model, u); got != 0 {
+			t.Errorf("Cost(%q, ...) = %v, want 0", model, got)
+		}
+	}
+}
+
+func TestCostCacheHitPath(t *testing.T) {
+	// Verify cache-hit-only billing: 1M hit tokens at 0.025/1M = 0.025
+	got := Cost("deepseek-v4-pro", Usage{PromptCacheHitTokens: 1_000_000})
+	if got != 0.025 {
+		t.Errorf("Cost(pro, 1M hits) = %v, want 0.025", got)
+	}
+}
+
 func TestCacheHitRate(t *testing.T) {
 	cases := []struct {
 		hit, miss int
@@ -56,6 +103,26 @@ func TestCacheHitRate(t *testing.T) {
 		})
 		if math.Abs(got-c.want) > 1e-9 {
 			t.Errorf("hit=%d miss=%d → %v want %v", c.hit, c.miss, got, c.want)
+		}
+	}
+}
+
+func TestCostKnown(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"deepseek-v4-pro", true},
+		{"deepseek-v4-flash", true},
+		{"deepseek-chat", true},
+		{"deepseek-reasoner", true},
+		{"deepseek-ai/deepseek-v4-pro", false},
+		{"gpt-4o", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := CostKnown(c.model); got != c.want {
+			t.Errorf("CostKnown(%q) = %v, want %v", c.model, got, c.want)
 		}
 	}
 }

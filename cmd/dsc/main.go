@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -372,6 +373,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 
 	notices = append(mcpNotices, notices...)
+	home, _ := os.UserHomeDir()
+	customCmds, _ := commands.Load(cwd, home)
 	app := tui.New(tui.Config{
 		Agent:           a,
 		Model:           cfg.Defaults.Model,
@@ -382,6 +385,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		UndoFn:          undoFn,
 		ListSessions:    listFn,
 		SetModelFn:      setModelFn,
+		Commands:        customCmds,
 		StartupNotices:  notices,
 		CompactionCount: sess.CompactionCount,
 	})
@@ -526,10 +530,14 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 		case agent.EventStepFinish:
 			cost := llm.Cost(model, e.Usage)
 			hit := llm.CacheHitRate(e.Usage)
+			costStr := "¥?"
+			if llm.CostKnown(model) {
+				costStr = fmt.Sprintf("¥%.4f", cost)
+			}
 			fmt.Fprintf(os.Stderr,
-				"\n\033[2m[step done: %s · in=%d out=%d cache=%.0f%% ¥%.4f · %s]\033[0m\n",
+				"\n\033[2m[step done: %s · in=%d out=%d cache=%.0f%% %s · %s]\033[0m\n",
 				e.Reason, e.Usage.PromptTokens, e.Usage.CompletionTokens,
-				hit*100, cost, time.Since(startStep).Round(time.Millisecond))
+				hit*100, costStr, time.Since(startStep).Round(time.Millisecond))
 		case agent.EventInfo:
 			fmt.Fprintf(os.Stderr, "\n\033[2m[info] %s\033[0m\n", e.Text)
 		case agent.EventPermissionAsk:

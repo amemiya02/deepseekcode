@@ -106,6 +106,7 @@ See `docs/design.md` §3.
 - [Two-Model Duet](docs/duet.md) — second headline feature
 - [Hooks](docs/hooks.md)
 - [MCP](docs/mcp.md)
+- [Custom Slash Commands](docs/commands.md)
 
 ## Status & roadmap
 

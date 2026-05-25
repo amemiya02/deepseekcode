@@ -160,8 +160,12 @@ func (i chatItem) render(t Theme, width int) string {
 	case itemStepFinish:
 		cost := llm.Cost(i.model, i.usage)
 		hit := llm.CacheHitRate(i.usage)
-		label := fmt.Sprintf("[step done: %s · in=%d out=%d cache=%.0f%% ¥%.4f]",
-			i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens, hit*100, cost)
+		costStr := "¥?"
+		if llm.CostKnown(i.model) {
+			costStr = fmt.Sprintf("¥%.4f", cost)
+		}
+		label := fmt.Sprintf("[step done: %s · in=%d out=%d cache=%.0f%% %s]",
+			i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens, hit*100, costStr)
 		return t.Status.Render(label) + "\n"
 	case itemError:
 		return t.Error.Render("error: "+i.text) + "\n"

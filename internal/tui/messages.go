@@ -45,6 +45,12 @@ type runStartMsg struct{}
 // scroll input.
 type redrawMsg struct{}
 
+// slashExpandedMsg carries the expanded template text from an async
+// shell injection. The tea.Cmd closure runs Expand (which may block
+// on !`cmd`) off the UI goroutine, then delivers this message back
+// to Update for AppendUser + submitPromptCmd.
+type slashExpandedMsg struct{ text string }
+
 // submitPromptCmd starts a new agent Run with userPrompt. The agent
 // goroutine emits agent.Events as work progresses; the App's event
 // pump goroutine wraps each into an agentEventMsg. We return

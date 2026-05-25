@@ -143,6 +143,7 @@ func New(cfg Config) *App {
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
+	vp.SetHorizontalStep(0) // disable horizontal scroll: scrollback is up/down only
 
 	app := &App{
 		agent:          cfg.Agent,

@@ -37,6 +37,7 @@ func (a *App) openPager(title, content string) {
 	}
 	vp := viewport.New(viewport.WithWidth(a.width), viewport.WithHeight(h))
 	vp.MouseWheelEnabled = true
+	vp.SetHorizontalStep(0) // disable horizontal scroll: pager is up/down only
 	vp.SetContent(content)
 	a.pager = &pagerState{
 		title:   title,

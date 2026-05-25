@@ -110,6 +110,15 @@ type EventHookFired struct {
 	Dur      time.Duration
 }
 
+// EventQuestionAsk requests the user answer one or more questions.
+// The consumer MUST send a QuestionResponse on Reply — the agent
+// goroutine blocks on the receive. Reply is buffered (cap 1) so the
+// consumer can send without serialization concerns.
+type EventQuestionAsk struct {
+	Questions []tools.Question
+	Reply     chan<- tools.QuestionResponse
+}
+
 func (EventReasoningStart) isAgentEvent() {}
 func (EventReasoningDelta) isAgentEvent() {}
 func (EventReasoningEnd) isAgentEvent()   {}
@@ -119,6 +128,7 @@ func (EventToolCallResult) isAgentEvent() {}
 func (EventStepFinish) isAgentEvent()     {}
 func (EventInfo) isAgentEvent()           {}
 func (EventPermissionAsk) isAgentEvent()  {}
+func (EventQuestionAsk) isAgentEvent()    {}
 func (EventDone) isAgentEvent()           {}
 func (EventCompaction) isAgentEvent()     {}
 func (EventHookFired) isAgentEvent()      {}

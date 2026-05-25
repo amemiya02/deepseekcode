@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -215,6 +216,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	reg.Register(tools.NewQuestionTool(a))
 	a.Thinking = cfg.Defaults.Thinking
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
@@ -455,6 +457,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	reg.Register(tools.NewQuestionTool(a))
 	a.Thinking = cfg.Defaults.Thinking
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
@@ -578,6 +581,67 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 				resp = agent.PermissionResponse{Allow: false}
 			}
 			e.Reply <- resp
+		case agent.EventQuestionAsk:
+			answers := make([][]string, len(e.Questions))
+			for i, q := range e.Questions {
+				fmt.Fprintf(os.Stderr, "\n\033[33m? %s\033[0m", q.Header)
+				if q.Question != "" {
+					fmt.Fprintf(os.Stderr, " — %s", q.Question)
+				}
+				fmt.Fprintln(os.Stderr)
+				if len(q.Options) == 0 {
+					fmt.Fprintln(os.Stderr, "  (no options — press Enter to skip)")
+					rd := bufio.NewReader(os.Stdin)
+					rd.ReadString('\n')
+					answers[i] = nil
+					continue
+				}
+				for j, opt := range q.Options {
+					desc := ""
+					if opt.Description != "" {
+						desc = " — " + opt.Description
+					}
+					fmt.Fprintf(os.Stderr, "  %d) %s%s\n", j+1, opt.Label, desc)
+				}
+				if q.Multiple {
+					fmt.Fprintf(os.Stderr, "  (comma-separated numbers, e.g. 1,3) > ")
+				} else {
+					fmt.Fprintf(os.Stderr, "  > ")
+				}
+				rd := bufio.NewReader(os.Stdin)
+				line, err := rd.ReadString('\n')
+				if err != nil {
+					// EOF or read error — return empty answer.
+					answers[i] = nil
+					continue
+				}
+				line = strings.TrimSpace(line)
+				if line == "" {
+					answers[i] = nil
+					continue
+				}
+				if q.Multiple {
+					parts := strings.Split(line, ",")
+					var labels []string
+					for _, p := range parts {
+						p = strings.TrimSpace(p)
+						idx, err := strconv.Atoi(p)
+						if err != nil || idx < 1 || idx > len(q.Options) {
+							continue
+						}
+						labels = append(labels, q.Options[idx-1].Label)
+					}
+					answers[i] = labels
+				} else {
+					idx, err := strconv.Atoi(line)
+					if err != nil || idx < 1 || idx > len(q.Options) {
+						answers[i] = nil
+						continue
+					}
+					answers[i] = []string{q.Options[idx-1].Label}
+				}
+			}
+			e.Reply <- tools.QuestionResponse{Answers: answers}
 		}
 	}
 }

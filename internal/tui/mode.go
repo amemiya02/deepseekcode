@@ -18,7 +18,8 @@ const (
 	modeNormal
 	modePermission
 	modePager
-	modeVisual // Vim-style line-range selection in the scrollback
+	modeVisual   // Vim-style line-range selection in the scrollback
+	modeQuestion // Modal question card with selectable options
 )
 
 // setMode is the single source of truth for mode transitions. It keeps
@@ -36,7 +37,7 @@ func (a *App) setMode(next appMode) tea.Cmd {
 	switch next {
 	case modeInsert:
 		return a.input.Focus()
-	case modeNormal, modePermission, modePager, modeVisual:
+	case modeNormal, modePermission, modePager, modeVisual, modeQuestion:
 		a.input.Blur()
 	}
 	return nil

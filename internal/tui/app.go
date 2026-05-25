@@ -20,6 +20,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
 // App is the root Bubble Tea Model.
@@ -51,6 +52,7 @@ type App struct {
 	chrome     *Chrome         // live activity band + redraw ticker flag
 	overlay    *Overlay        // modal pickers (tape / models / sessions)
 	permission *PermissionFlow // modal permission card
+	question   *QuestionFlow   // modal question card
 
 	// Pager overlay (modal; takes the body band when non-nil).
 	pager *pagerState
@@ -155,6 +157,7 @@ func New(cfg Config) *App {
 		chrome:         NewChrome(),
 		overlay:        NewOverlay(),
 		permission:     NewPermissionFlow(),
+		question:       NewQuestionFlow(),
 		customCmds:     cfg.Commands,
 		startupNotices: cfg.StartupNotices,
 		session: sessionIntegration{
@@ -256,6 +259,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.mode == modePermission {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			return a, a.handlePermissionKey(km)
+		}
+	}
+	if a.mode == modeQuestion {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			return a, a.handleQuestionKey(km)
 		}
 	}
 
@@ -401,6 +409,10 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		// Re-layout so the hidden input box gives its rows back to the
 		// viewport — the permission card is the active surface now.
 		a.layout()
+	case agent.EventQuestionAsk:
+		a.question.Open(e)
+		cmds = append(cmds, a.setMode(modeQuestion))
+		a.layout()
 	case agent.EventDone:
 		// Terminator for this Run. Arrives AFTER every other event from
 		// this turn because Run defers the emit. Reset chrome here so
@@ -471,6 +483,10 @@ func (a *App) View() string {
 	if a.permission.Active() {
 		permView = a.permission.Render(a.theme, a.width)
 	}
+	var questionView string
+	if a.question.Active() {
+		questionView = a.question.Render(a.theme, a.width)
+	}
 
 	status := a.status.render(a.theme)
 	divider := a.theme.Hint.Render(strings.Repeat("─", a.width))
@@ -481,6 +497,10 @@ func (a *App) View() string {
 	// above the status line.
 	if permView != "" {
 		parts := []string{body, chrome, permView, divider, status}
+		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	}
+	if questionView != "" {
+		parts := []string{body, chrome, questionView, divider, status}
 		return lipgloss.JoinVertical(lipgloss.Left, parts...)
 	}
 
@@ -1022,6 +1042,48 @@ func decisionLabel(r agent.PermissionResponse) string {
 		return "always-allowed"
 	}
 	return "allowed"
+}
+
+// handleQuestionKey processes a single keystroke while the question
+// modal is up.
+func (a *App) handleQuestionKey(km tea.KeyMsg) tea.Cmd {
+	if !a.question.Active() {
+		return nil
+	}
+	qu := a.question.current()
+	switch strings.ToLower(km.String()) {
+	case "up", "k":
+		a.question.MoveDelta(-1)
+		return nil
+	case "down", "j":
+		a.question.MoveDelta(1)
+		return nil
+	case " ":
+		if qu.Multiple {
+			a.question.Toggle()
+		}
+		return nil
+	case "enter":
+		done, resp, reply := a.question.Next()
+		if !done {
+			return nil
+		}
+		focusCmd := a.setMode(modeInsert)
+		a.layout()
+		a.refreshView()
+		go func() { reply <- resp }()
+		return focusCmd
+	case "esc":
+		reply := a.question.Cancel()
+		focusCmd := a.setMode(modeInsert)
+		a.layout()
+		a.refreshView()
+		if reply != nil {
+			go func() { reply <- tools.QuestionResponse{} }()
+		}
+		return focusCmd
+	}
+	return nil
 }
 
 // toggleLastReasoning expands/collapses the most recent reasoning block.

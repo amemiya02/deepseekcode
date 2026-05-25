@@ -686,3 +686,18 @@ func validateToolArgs(t tools.Tool, args json.RawMessage) error {
 	}
 	return nil
 }
+
+// AskQuestion implements tools.Questioner. It emits an EventQuestionAsk
+// and blocks until the consumer replies or ctx is cancelled.
+func (a *Agent) AskQuestion(ctx context.Context, req tools.QuestionRequest) (tools.QuestionResponse, error) {
+	reply := make(chan tools.QuestionResponse, 1)
+	a.events <- EventQuestionAsk{Questions: req.Questions, Reply: reply}
+	select {
+	case resp := <-reply:
+		return resp, nil
+	case <-ctx.Done():
+		return tools.QuestionResponse{}, ctx.Err()
+	}
+}
+
+var _ tools.Questioner = (*Agent)(nil)

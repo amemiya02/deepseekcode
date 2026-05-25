@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -108,17 +110,116 @@ func TestCompactArgsTruncates(t *testing.T) {
 	}
 }
 
+func TestToolCard(t *testing.T) {
+	th := DarkTheme()
+
+	t.Run("tool call renders card header", func(t *testing.T) {
+		item := chatItem{kind: itemToolCall, tool: "bash", args: `{"command":"echo hi"}`}
+		out := item.render(th, 80)
+		if !strings.Contains(out, BarThick) {
+			t.Errorf("expected bar thick in output, got %q", out)
+		}
+		if !strings.Contains(out, IconToolPending) {
+			t.Errorf("expected pending icon in output, got %q", out)
+		}
+		if !strings.Contains(out, "bash") {
+			t.Errorf("expected tool name in output, got %q", out)
+		}
+	})
+
+	t.Run("tool result success renders card", func(t *testing.T) {
+		item := chatItem{
+			kind:     itemToolResult,
+			tool:     "bash",
+			args:     `{"command":"echo hi"}`,
+			result:   tools.Result{Content: "hello\nworld"},
+			duration: 1200 * time.Millisecond,
+		}
+		out := item.render(th, 80)
+		if !strings.Contains(out, BarThick) {
+			t.Errorf("expected bar thick in output, got %q", out)
+		}
+		if !strings.Contains(out, IconToolOk) {
+			t.Errorf("expected ok icon in output, got %q", out)
+		}
+		if !strings.Contains(out, "bash") {
+			t.Errorf("expected tool name in output, got %q", out)
+		}
+		if !strings.Contains(out, "1.2s") {
+			t.Errorf("expected duration in output, got %q", out)
+		}
+	})
+
+	t.Run("tool result error renders card", func(t *testing.T) {
+		item := chatItem{
+			kind:     itemToolResult,
+			tool:     "bash",
+			args:     `{"command":"fail"}`,
+			result:   tools.Result{Content: "error msg", IsError: true},
+			duration: 100 * time.Millisecond,
+		}
+		out := item.render(th, 80)
+		if !strings.Contains(out, IconToolErr) {
+			t.Errorf("expected error icon in output, got %q", out)
+		}
+	})
+
+	t.Run("folded body shows truncation hint", func(t *testing.T) {
+		// Create content with more than 10 lines.
+		lines := make([]string, 20)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line %d", i)
+		}
+		item := chatItem{
+			kind:     itemToolResult,
+			tool:     "bash",
+			args:     "{}",
+			result:   tools.Result{Content: strings.Join(lines, "\n")},
+			duration: 100 * time.Millisecond,
+			expanded: false,
+		}
+		out := item.render(th, 80)
+		if !strings.Contains(out, "press e to expand") {
+			t.Errorf("expected truncation hint in folded output, got %q", out)
+		}
+	})
+
+	t.Run("expanded body shows all lines", func(t *testing.T) {
+		lines := []string{"a", "b", "c"}
+		item := chatItem{
+			kind:     itemToolResult,
+			tool:     "bash",
+			args:     "{}",
+			result:   tools.Result{Content: strings.Join(lines, "\n")},
+			duration: 100 * time.Millisecond,
+			expanded: true,
+		}
+		out := item.render(th, 80)
+		if strings.Contains(out, "press e to expand") {
+			t.Errorf("expanded output should not have truncation hint, got %q", out)
+		}
+		// All body lines should be present.
+		plain := stripANSI(out)
+		for _, line := range lines {
+			if !strings.Contains(plain, line) {
+				t.Errorf("expected line %q in expanded output, got %q", line, plain)
+			}
+		}
+	})
+}
+
 // TestWelcomeRenders sanity-checks that the startup banner contains
 // both the mascot signature and the wordmark when the terminal is
 // wide enough.
 func TestWelcomeRenders(t *testing.T) {
 	out := renderWelcome(DarkTheme(), 100)
-	// Spot-check the wordmark block-font (top row) and the tagline.
-	if !strings.Contains(out, "____") {
-		t.Errorf("expected wordmark block characters in welcome; got %q", out)
+	plain := stripANSI(out)
+	// Spot-check the letterform wordmark and the tagline.
+	if !strings.Contains(plain, "█") {
+		t.Errorf("expected letterform block characters in welcome; got %q", plain)
 	}
-	if !strings.Contains(out, "DeepSeek") {
-		t.Errorf("expected 'DeepSeek' tagline in welcome; got %q", out)
+	if !strings.Contains(plain, "DeepSeek") {
+		t.Errorf("expected 'DeepSeek' tagline in welcome; got %q", plain)
 	}
 }
 
@@ -131,6 +232,31 @@ func TestWelcomeNarrowFallback(t *testing.T) {
 	}
 	if !strings.Contains(out, "deepseekcode") {
 		t.Errorf("narrow fallback missing name; got %q", out)
+	}
+}
+
+func TestToolCardHighlight(t *testing.T) {
+	th := DarkTheme()
+	item := chatItem{
+		kind:     itemToolResult,
+		tool:     "bash",
+		args:     `{"command":"echo hi"}`,
+		result:   tools.Result{Content: "echo hello\necho world"},
+		duration: 100 * time.Millisecond,
+		expanded: true,
+	}
+	out := item.render(th, 80)
+	// The bash body should be syntax-highlighted, producing ANSI codes
+	// beyond what plain CardBody would emit. At minimum the highlight
+	// output differs from CardBody rendering of the same text.
+	plainBody := th.CardBody.Render("echo hello")
+	if strings.Contains(out, plainBody) {
+		// CardBody single-color rendering appeared verbatim — highlight
+		// was NOT applied. This is the failure the review flagged.
+		t.Error("tool card body rendered as plain CardBody without syntax highlighting")
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Error("expected ANSI highlight sequences in tool card body")
 	}
 }
 

@@ -11,7 +11,11 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"time"
+
+	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 )
 
 // chromePhase enumerates what the agent is currently doing so the
@@ -40,6 +44,7 @@ type Chrome struct {
 	startedAt  time.Time
 	tokens     int
 	frame      int
+	ramp       []color.Color // gradient ramp, lazily initialized
 
 	tickActive bool
 }
@@ -129,11 +134,65 @@ func (c *Chrome) Render(t Theme, showNewBelow bool) string {
 	default:
 		caption = fmt.Sprintf("working… %.1fs", elapsed)
 	}
-	return "  " + t.StatusModel.Render(c.spinner()) + " " +
+	return "  " + t.StatusModel.Render(c.spinner(t)) + " " +
 		t.AssistantText.Render(caption) + "  " +
 		t.Hint.Render("[^C cancel]")
 }
 
-func (c *Chrome) spinner() string {
-	return spinnerFrames[c.frame%len(spinnerFrames)]
+func (c *Chrome) spinner(t Theme) string {
+	c.ensureRamp(t)
+	ch := spinnerFrames[c.frame%len(spinnerFrames)]
+	if len(c.ramp) == 0 {
+		return ch
+	}
+	return lipgloss.NewStyle().
+		Foreground(c.ramp[c.frame%len(c.ramp)]).
+		Render(ch)
+}
+
+func (c *Chrome) ensureRamp(t Theme) {
+	if c.ramp != nil {
+		return
+	}
+	c.ramp = makeGradientRamp(16, t.BrandDeep, t.BrandLight, t.BrandDeep)
+}
+
+// makeGradientRamp returns a slice of colors blended between the given
+// stops using HCL interpolation.
+func makeGradientRamp(size int, stops ...color.Color) []color.Color {
+	if len(stops) < 2 {
+		return nil
+	}
+	points := make([]colorful.Color, len(stops))
+	for i, k := range stops {
+		points[i], _ = colorful.MakeColor(k)
+	}
+	numSegments := len(stops) - 1
+	if numSegments == 0 {
+		return nil
+	}
+	blended := make([]color.Color, 0, size)
+	segmentSizes := make([]int, numSegments)
+	baseSize := size / numSegments
+	remainder := size % numSegments
+	for i := range numSegments {
+		segmentSizes[i] = baseSize
+		if i < remainder {
+			segmentSizes[i]++
+		}
+	}
+	for i := range numSegments {
+		c1 := points[i]
+		c2 := points[i+1]
+		segmentSize := segmentSizes[i]
+		for j := range segmentSize {
+			if segmentSize == 0 {
+				continue
+			}
+			t := float64(j) / float64(segmentSize)
+			c := c1.BlendHcl(c2, t)
+			blended = append(blended, c)
+		}
+	}
+	return blended
 }

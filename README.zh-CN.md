@@ -106,6 +106,13 @@ SQLite（`modernc.org/sqlite`，无 CGO），让 `--continue` / `--resume` /
 - [自定义 Slash 命令](docs/commands.md)
 - [技能](docs/skills.md) — 跨工具 SKILL.md 发现
 
+## 外观
+
+DeepSeek Ocean —— 深蓝→浅蓝渐变视觉体系。启动画面包含鲸鱼吉祥物和
+逐字符渐变着色的 `DEEPSEEKCODE` 字标。工具调用渲染为品牌蓝左边条卡片。
+Spinner 使用 HCL 渐变流动效果。代码块通过 chroma 语法高亮。
+详见 [TUI 主题](docs/tui-theme.md)。
+
 ## 状态与路线图
 
 **v0.1（当前）**：14 个内建工具（含 `apply_patch`、`question`）、分层权限 + 快照回滚、带按引用分叉的

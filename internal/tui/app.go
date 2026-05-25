@@ -516,7 +516,8 @@ func (a *App) View() tea.View {
 	}
 
 	// Choose input border style based on mode.
-	borderStyle := a.theme.InputBorder
+	// Insert mode uses brand blue; Normal/Visual uses dim.
+	borderStyle := lipgloss.NewStyle().Foreground(a.theme.BrandDeep)
 	if a.mode != modeInsert {
 		borderStyle = a.theme.InputBorderDim
 	}

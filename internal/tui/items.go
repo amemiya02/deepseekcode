@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -102,49 +104,75 @@ func (i chatItem) render(t Theme, width int) string {
 			t.Reasoning.Render(indent(body, "  ")) + "\n" +
 			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens)) + "\n"
 	case itemToolCall:
-		// Claude-Code-style header: ⏺ tool(k1="v1", k2=v2) — tool name
-		// in accent color, args humanized + dimmed in parens.
+		// Card header: ▌ ● toolName  args (pending state)
+		prefix := t.CardBar.Render(BarThick + " ")
 		mcpTag := ""
 		if strings.HasPrefix(i.tool, "mcp__") {
-			mcpTag = t.HookInfo.Render("[MCP]") + " "
+			mcpTag = "[MCP] "
 		}
-		argsMax := width - len(i.tool) - len(mcpTag) - 6
+		argsMax := width - len(i.tool) - len(mcpTag) - 8
 		args := compactArgs(i.args, argsMax)
-		return mcpTag + t.ToolCall.Render("⏺ "+i.tool) +
-			t.Hint.Render("("+args+")") + "\n"
+		return prefix + t.ToolCall.Render(IconToolPending+" "+mcpTag+i.tool) +
+			t.Hint.Render("  "+args) + "\n"
 	case itemToolResult:
-		// Connector + summary line: "  ⎿ N lines · 42ms" (or "✗ error · ...")
+		// Card: header line with status + duration, then body lines.
+		prefix := t.CardBar.Render(BarThick + " ")
+		indent := t.CardBar.Render(BarThick) + "  "
+
 		dur := i.duration.Round(time.Millisecond).String()
-		var summary string
-		if i.result.IsError {
-			summary = t.ToolErr.Render("✗ error · " + dur)
-		} else {
-			n := lineCount(i.result.Content)
-			switch {
-			case n == 0:
-				summary = t.ToolOk.Render("✓ " + dur)
-			case n == 1:
-				summary = t.ToolOk.Render("✓ 1 line · " + dur)
-			default:
-				summary = t.ToolOk.Render(fmt.Sprintf("✓ %d lines · %s", n, dur))
-			}
+		mcpTag := ""
+		if strings.HasPrefix(i.tool, "mcp__") {
+			mcpTag = "[MCP] "
 		}
-		head := "  " + t.Hint.Render("⎿ ") + summary + "\n"
+
+		// Header line with status icon + tool name + args + duration.
+		var statusIcon string
+		var statusStyle lipgloss.Style
+		if i.result.IsError {
+			statusIcon = IconToolErr
+			statusStyle = t.ToolErr
+		} else {
+			statusIcon = IconToolOk
+			statusStyle = t.ToolOk
+		}
+		argsMax := width - len(i.tool) - len(mcpTag) - len(dur) - 10
+		args := compactArgs(i.args, argsMax)
+		header := prefix +
+			statusStyle.Render(statusIcon+" "+mcpTag+i.tool) +
+			t.CardHeader.Render("  "+args) +
+			"  " + statusStyle.Render(dur) + "\n"
 
 		body := i.result.Content
 		if body == "" {
-			return head
+			return header
 		}
-		// Body indented 4 cols to align under the ⎿ connector.
-		if i.expanded {
-			return head + t.ToolBody.Render(indent(body, "    ")) + "\n"
+
+		// Body lines with card bar prefix.
+		const maxBodyLines = 10
+		lang := highlightLang(i.tool, i.args)
+		bodyLines := strings.Split(body, "\n")
+		if lang != "" {
+			highlighted := Highlight(t, body, lang)
+			bodyLines = strings.Split(highlighted, "\n")
 		}
-		truncated := truncate(body, 30, width-4)
-		rendered := head + t.ToolBody.Render(indent(truncated, "    "))
-		if lineCount(body) > 30 {
-			rendered += "\n" + t.Hint.Render("    ... press e to expand ...")
+		if !i.expanded && len(bodyLines) > maxBodyLines {
+			// Folded: show first maxBodyLines + truncation hint.
+			var b strings.Builder
+			b.WriteString(header)
+			for _, line := range bodyLines[:maxBodyLines] {
+				b.WriteString(indent + t.CardBody.Render(line) + "\n")
+			}
+			remaining := len(bodyLines) - maxBodyLines
+			b.WriteString(indent + t.Hint.Render(fmt.Sprintf("… %d more lines, press e to expand", remaining)) + "\n")
+			return b.String()
 		}
-		return rendered + "\n"
+		// Expanded or short body.
+		var b strings.Builder
+		b.WriteString(header)
+		for _, line := range bodyLines {
+			b.WriteString(indent + t.CardBody.Render(line) + "\n")
+		}
+		return b.String()
 	case itemHookFired:
 		style := t.HookInfo
 		if i.hookDecision == "deny" {
@@ -222,6 +250,29 @@ func compactArgs(args string, max int) string {
 		s = string(runes[:max-1]) + "…"
 	}
 	return s
+}
+
+// highlightLang returns a chroma language identifier for the given tool
+// name and arguments, or "" if no syntax highlighting applies.
+func highlightLang(tool, args string) string {
+	switch tool {
+	case "bash":
+		return "bash"
+	case "edit_file", "apply_patch":
+		return "diff"
+	case "write_file":
+		var m map[string]any
+		if json.Unmarshal([]byte(args), &m) == nil {
+			if p, ok := m["path"].(string); ok {
+				if idx := strings.LastIndex(p, "."); idx >= 0 {
+					return p[idx+1:]
+				}
+			}
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 // lineCount counts effective lines (ignores trailing blank line).

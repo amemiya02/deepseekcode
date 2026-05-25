@@ -110,6 +110,14 @@ See `docs/design.md` §3.
 - [Custom Slash Commands](docs/commands.md)
 - [Skills](docs/skills.md) — cross-tool SKILL.md discovery
 
+## Appearance
+
+DeepSeek Ocean — a deep blue → light blue gradient visual identity.
+The startup banner features a whale mascot and `DEEPSEEKCODE` wordmark
+with per-character gradient coloring. Tool calls render as left-sidebar
+cards with brand-blue bars. The spinner flows with an HCL gradient.
+Syntax highlighting via chroma. See [TUI Theme](docs/tui-theme.md).
+
 ## Status & roadmap
 
 **v0.1 (current)**: 14 built-in tools (incl. `apply_patch`, `question`), tiered permissions + snapshot

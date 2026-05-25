@@ -107,19 +107,22 @@ func (s *Scrollback) AppendToolCall(callID, tool, args string) {
 }
 
 // AppendToolResult records the matching result for callID. Walks
-// items backward to recover the tool name from the prior toolCall.
+// items backward to recover the tool name and args from the prior
+// toolCall.
 func (s *Scrollback) AppendToolResult(callID string, result tools.Result, dur time.Duration) {
 	s.EndStreams()
-	var tool string
+	var tool, args string
 	for i := len(s.items) - 1; i >= 0; i-- {
 		if s.items[i].kind == itemToolCall && s.items[i].toolCallID == callID {
 			tool = s.items[i].tool
+			args = s.items[i].args
 			break
 		}
 	}
 	s.appendItem(chatItem{
 		kind:       itemToolResult,
 		tool:       tool,
+		args:       args,
 		toolCallID: callID,
 		result:     result,
 		duration:   dur,

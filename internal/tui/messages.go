@@ -16,7 +16,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 )

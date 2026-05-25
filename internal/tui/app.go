@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/commands"
@@ -141,7 +141,7 @@ func New(cfg Config) *App {
 	ta.CharLimit = 0
 	ta.Focus()
 
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
 
 	app := &App{
@@ -195,7 +195,7 @@ func New(cfg Config) *App {
 // the full session in $PAGER (default `less -R`) which owns the TTY
 // completely while running.
 func (a *App) Run() error {
-	prog := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	prog := tea.NewProgram(a)
 	a.send = prog.Send
 	// Spawn the agent-event pump. Reads the agent's lifetime event
 	// stream, wraps each event into a single agentEventMsg, and hands
@@ -257,12 +257,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// eat all key input until dismissed. Handled here at the top so the
 	// per-mode switch below stays simple.
 	if a.mode == modePermission {
-		if km, ok := msg.(tea.KeyMsg); ok {
+		if km, ok := msg.(tea.KeyPressMsg); ok {
 			return a, a.handlePermissionKey(km)
 		}
 	}
 	if a.mode == modeQuestion {
-		if km, ok := msg.(tea.KeyMsg); ok {
+		if km, ok := msg.(tea.KeyPressMsg); ok {
 			return a, a.handleQuestionKey(km)
 		}
 	}
@@ -272,15 +272,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = m.Width
 		a.height = m.Height
 		a.layout()
-	case tea.KeyMsg:
-		// Drop SGR mouse-wheel sequences that bubbletea's parser failed
-		// to recognize (happens when fast scrolling straddles its 256-
-		// byte read boundary; see isLeakedMouseSeq for the full story).
-		// Without this filter the orphaned bytes render as garbled text
-		// like "[<65;94;13M" inside the textarea.
-		if isLeakedMouseSeq(m) {
-			return a, nil
-		}
+	case tea.KeyPressMsg:
 		// Intercept special keys (overlay nav, ctrl+c, Enter, slash, etc).
 		// If not intercepted, fall through so the textarea sees the key.
 		if cmd, intercepted := a.handleKey(m); intercepted {
@@ -319,13 +311,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentEventMsg:
 		cmds = append(cmds, a.dispatchAgentEvent(m.Event)...)
-	case tea.MouseMsg:
-		// Mouse drives visual selection (click-drag-release) and
-		// wheel-scrolls the viewport. handleMouse only intercepts
-		// left-button events; wheel falls through to vp.Update below.
-		if cmd := a.handleMouse(m); cmd != nil {
+	case tea.MouseClickMsg:
+		if cmd := a.handleMouse(m.Mouse(), mouseActionPress); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case tea.MouseMotionMsg:
+		if cmd := a.handleMouse(m.Mouse(), mouseActionMotion); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case tea.MouseReleaseMsg:
+		if cmd := a.handleMouse(m.Mouse(), mouseActionRelease); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case tea.MouseWheelMsg:
+		// Wheel events go to viewport via vp.Update below.
 	}
 
 	// Forward to sub-models. Mouse events are routed to the viewport only
@@ -338,7 +337,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// keystrokes reach the textarea would re-introduce the routing bug
 	// where 'j'/'k' showed up as literal text after a /clear.
 	var c tea.Cmd
-	if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+	if !isV2MouseMsg(msg) {
 		if a.mode == modeInsert {
 			a.input, c = a.input.Update(msg)
 			cmds = append(cmds, c)
@@ -456,13 +455,19 @@ func (a *App) ensureTick() tea.Cmd {
 }
 
 // View renders the whole UI.
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
-		return "starting…"
+		return tea.View{Content: "starting…", AltScreen: true, MouseMode: tea.MouseModeCellMotion}
+	}
+
+	// Cursor: only visible in insert mode with no overlay/modal.
+	var cur *tea.Cursor
+	if a.mode == modeInsert && !a.overlay.IsOpen() && !a.permission.Active() && !a.question.Active() {
+		cur = a.input.Cursor()
 	}
 
 	if a.overlay.IsOpen() {
-		return a.renderOverlay()
+		return tea.View{Content: a.renderOverlay(), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Pager is a modal body replacement: it takes the entire body band
@@ -471,7 +476,7 @@ func (a *App) View() string {
 	// after they dismiss with q.
 	var body string
 	if a.pager != nil {
-		body = a.pager.render(a.theme, a.width, a.vp.Height)
+		body = a.pager.render(a.theme, a.width, a.vp.Height())
 	} else {
 		body = a.vp.View()
 	}
@@ -503,11 +508,11 @@ func (a *App) View() string {
 	// above the status line.
 	if permView != "" {
 		parts := []string{body, chrome, permView, divider, status}
-		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 	if questionView != "" {
 		parts := []string{body, chrome, questionView, divider, status}
-		return lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Choose input border style based on mode.
@@ -545,7 +550,7 @@ func (a *App) View() string {
 	}
 
 	parts := []string{body, chrome, divider, status, inputBox, hint}
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 }
 
 // renderOverlay renders the active fullscreen overlay (tape, models,
@@ -601,8 +606,8 @@ func (a *App) layout() {
 	if bodyH < 5 {
 		bodyH = 5
 	}
-	a.vp.Width = a.width
-	a.vp.Height = bodyH
+	a.vp.SetWidth(a.width)
+	a.vp.SetHeight(bodyH)
 	// Textarea content width = total width − 2 border cols − 2 padding cols.
 	a.input.SetWidth(a.width - 4)
 	a.refreshView()
@@ -629,7 +634,7 @@ func (a *App) refreshView() {
 // handleKey dispatches a keypress based on the current mode.
 // Returns (cmd, intercepted) — when intercepted is false, the caller
 // falls through so the textarea receives the key.
-func (a *App) handleKey(km tea.KeyMsg) (tea.Cmd, bool) {
+func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	// Overlays consume nearly all keys until ESC.
 	if a.overlay.IsOpen() {
 		return a.handleOverlayKey(km), true
@@ -671,7 +676,7 @@ func (a *App) handleKey(km tea.KeyMsg) (tea.Cmd, bool) {
 // Only intercepts Enter (submit), Ctrl+R/T (toggle reasoning), Tab
 // (slash completion), and Esc (enter Normal mode). Everything else
 // falls through to the textarea.
-func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
+func (a *App) handleInsertKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch km.String() {
 	case "ctrl+r":
 		a.toggleLastReasoning()
@@ -692,9 +697,9 @@ func (a *App) handleInsertKey(km tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, false // no completion active → let Tab through
 	}
 
-	if km.Type == tea.KeyEnter {
+	if km.String() == "enter" {
 		// Plain Enter submits; Shift+Enter / Alt+Enter inserts a newline.
-		if km.Alt || hasShiftEnter(km) {
+		if km.Mod&tea.ModAlt != 0 || hasShiftEnter(km) {
 			return nil, false
 		}
 		text := strings.TrimSpace(a.input.Value())
@@ -773,19 +778,19 @@ func (a *App) completionHint() string {
 // 'e' expands the last collapsed tool result.
 // 'p' opens the pager for the last tool result.
 // Printable characters auto-switch to Insert (handled in Update).
-func (a *App) handleNormalKey(km tea.KeyMsg) (tea.Cmd, bool) {
+func (a *App) handleNormalKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch km.String() {
 	case "j", "down":
-		a.vp.LineDown(1)
+		a.vp.ScrollDown(1)
 		return nil, true
 	case "k", "up":
-		a.vp.LineUp(1)
+		a.vp.ScrollUp(1)
 		return nil, true
 	case "ctrl+u":
-		a.vp.HalfViewUp()
+		a.vp.HalfPageUp()
 		return nil, true
 	case "ctrl+d":
-		a.vp.HalfViewDown()
+		a.vp.HalfPageDown()
 		return nil, true
 	case "g":
 		a.vp.GotoTop()
@@ -853,7 +858,7 @@ func (a *App) openLastResultPager() {
 // hasShiftEnter detects "shift+enter" across bubbletea's key-string
 // variants. Terminals report it inconsistently, so we just look for the
 // "shift" substring.
-func hasShiftEnter(km tea.KeyMsg) bool {
+func hasShiftEnter(km tea.KeyPressMsg) bool {
 	return strings.Contains(strings.ToLower(km.String()), "shift")
 }
 
@@ -1002,7 +1007,7 @@ func helpText() string {
 // handlePermissionKey processes a single keystroke while the permission
 // modal is up. Nav keys move the focus within the 2×2 grid; resolution
 // keys (y/s/a/n/enter) commit a decision via PermissionFlow.Resolve.
-func (a *App) handlePermissionKey(km tea.KeyMsg) tea.Cmd {
+func (a *App) handlePermissionKey(km tea.KeyPressMsg) tea.Cmd {
 	if !a.permission.Active() {
 		return nil
 	}
@@ -1052,7 +1057,7 @@ func decisionLabel(r agent.PermissionResponse) string {
 
 // handleQuestionKey processes a single keystroke while the question
 // modal is up.
-func (a *App) handleQuestionKey(km tea.KeyMsg) tea.Cmd {
+func (a *App) handleQuestionKey(km tea.KeyPressMsg) tea.Cmd {
 	if !a.question.Active() {
 		return nil
 	}
@@ -1106,7 +1111,7 @@ func (a *App) toggleAllReasoning() {
 }
 
 // handleOverlayKey processes keys in tape/models/sessions overlay mode.
-func (a *App) handleOverlayKey(km tea.KeyMsg) tea.Cmd {
+func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 	switch km.String() {
 	case "esc", "q":
 		a.overlay.Close()

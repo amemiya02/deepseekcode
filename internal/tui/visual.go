@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"regexp"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // visualState tracks the active selection. anchor and cursor are
@@ -80,7 +80,7 @@ func applyVisualHighlightLines(lines []string, vis visualState) []string {
 // viewport. Caller is responsible for ensuring we're transitioning
 // from Normal mode.
 func (a *App) enterVisual() tea.Cmd {
-	a.scrollback.BeginSelection(a.vp.YOffset)
+	a.scrollback.BeginSelection(a.vp.YOffset())
 	cmd := a.setMode(modeVisual)
 	a.refreshView()
 	return cmd
@@ -97,7 +97,7 @@ func (a *App) exitVisual() tea.Cmd {
 
 // handleVisualKey dispatches keys while in Visual mode. Always
 // intercepts — visual mode is modal.
-func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
+func (a *App) handleVisualKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch km.String() {
 	case "esc", "q":
 		return a.exitVisual(), true
@@ -106,9 +106,9 @@ func (a *App) handleVisualKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	case "k", "up":
 		a.moveCursor(-1)
 	case "ctrl+d":
-		a.moveCursor(a.vp.Height / 2)
+		a.moveCursor(a.vp.Height() / 2)
 	case "ctrl+u":
-		a.moveCursor(-a.vp.Height / 2)
+		a.moveCursor(-a.vp.Height() / 2)
 	case "g":
 		a.scrollback.ExtendSelection(0)
 		a.vp.GotoTop()
@@ -141,12 +141,12 @@ func (a *App) moveCursor(delta int) {
 	cursor = a.scrollback.SelectionCursor()
 	// Keep cursor inside the viewport window. YOffset is the top
 	// visible line; YOffset+Height-1 is the bottom visible line.
-	top := a.vp.YOffset
-	bottom := top + a.vp.Height - 1
+	top := a.vp.YOffset()
+	bottom := top + a.vp.Height() - 1
 	if cursor < top {
 		a.vp.SetYOffset(cursor)
 	} else if cursor > bottom {
-		a.vp.SetYOffset(cursor - a.vp.Height + 1)
+		a.vp.SetYOffset(cursor - a.vp.Height() + 1)
 	}
 	a.refreshView()
 }
@@ -186,7 +186,24 @@ func (a *App) yankVisualSelection() tea.Cmd {
 //
 // Returns the tea.Cmd to execute (nil for press/drag, the yank cmd
 // for release).
-func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
+type mouseAction int
+
+const (
+	mouseActionPress mouseAction = iota
+	mouseActionMotion
+	mouseActionRelease
+)
+
+// isV2MouseMsg reports whether msg is one of the four v2 mouse message types.
+func isV2MouseMsg(msg tea.Msg) bool {
+	switch msg.(type) {
+	case tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, tea.MouseWheelMsg:
+		return true
+	}
+	return false
+}
+
+func (a *App) handleMouse(m tea.Mouse, action mouseAction) tea.Cmd {
 	// Modal modes ignore selection mouse: the permission card has its
 	// own focus model; the pager handles its own scroll.
 	if a.mode == modePermission || a.mode == modePager {
@@ -195,14 +212,14 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 
 	// Wheel events go straight to the viewport via vp.Update below;
 	// only the left button drives selection.
-	if m.Button != tea.MouseButtonLeft {
+	if m.Button != tea.MouseLeft {
 		return nil
 	}
 
 	// The viewport occupies screen rows [0, vp.Height-1]. Anything
 	// outside that band is chrome / permission / status / input — not
 	// selectable.
-	if m.Y < 0 || m.Y >= a.vp.Height {
+	if m.Y < 0 || m.Y >= a.vp.Height() {
 		return nil
 	}
 
@@ -210,16 +227,17 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 	// fullLines entry per visual row, which holds because chatItem
 	// rendering pre-wraps content to width.
 	lines := a.scrollback.FullLines()
-	line := a.vp.YOffset + m.Y
+	line := a.vp.YOffset() + m.Y
 
-	switch m.Action {
-	case tea.MouseActionPress:
+	// Dispatch by message type: click=start, motion=extend, release=end.
+	switch action {
+	case mouseActionPress:
 		a.scrollback.BeginSelection(line)
 		cmd := a.setMode(modeVisual)
 		a.refreshView()
 		return cmd
 
-	case tea.MouseActionMotion:
+	case mouseActionMotion:
 		if !a.scrollback.SelectionActive() {
 			return nil
 		}
@@ -228,16 +246,16 @@ func (a *App) handleMouse(m tea.MouseMsg) tea.Cmd {
 		// edge. One row of slack on each side avoids juddering as
 		// the cursor crosses the boundary.
 		const edge = 0
-		if m.Y <= edge && a.vp.YOffset > 0 {
-			a.vp.SetYOffset(a.vp.YOffset - 1)
-		} else if m.Y >= a.vp.Height-1-edge &&
-			a.vp.YOffset+a.vp.Height < len(lines) {
-			a.vp.SetYOffset(a.vp.YOffset + 1)
+		if m.Y <= edge && a.vp.YOffset() > 0 {
+			a.vp.SetYOffset(a.vp.YOffset() - 1)
+		} else if m.Y >= a.vp.Height()-1-edge &&
+			a.vp.YOffset()+a.vp.Height() < len(lines) {
+			a.vp.SetYOffset(a.vp.YOffset() + 1)
 		}
 		a.refreshView()
 		return nil
 
-	case tea.MouseActionRelease:
+	case mouseActionRelease:
 		if !a.scrollback.SelectionActive() {
 			return nil
 		}

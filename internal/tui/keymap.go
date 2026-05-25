@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // keymap centralizes keybindings so the help overlay can list them.
 type keymap struct {

@@ -13,9 +13,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 )
@@ -35,7 +35,7 @@ func (a *App) openPager(title, content string) {
 	if h < 5 {
 		h = 5
 	}
-	vp := viewport.New(a.width, h)
+	vp := viewport.New(viewport.WithWidth(a.width), viewport.WithHeight(h))
 	vp.MouseWheelEnabled = true
 	vp.SetContent(content)
 	a.pager = &pagerState{
@@ -55,12 +55,12 @@ func (a *App) closePager() tea.Cmd {
 // render draws the pager: a one-line title bar plus the viewport body.
 // Sized to (width, height) so the caller controls the overall budget.
 func (p *pagerState) render(t Theme, width, height int) string {
-	p.vp.Width = width
+	p.vp.SetWidth(width)
 	bodyH := height - 1
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	p.vp.Height = bodyH
+	p.vp.SetHeight(bodyH)
 	titleBar := t.StatusModel.Render(" pager · "+p.title) +
 		t.Hint.Render("  · j/k scroll · G/gg jump · q close")
 	return lipgloss.JoinVertical(lipgloss.Left, titleBar, p.vp.View())
@@ -122,7 +122,7 @@ func (a *App) openExternalPager() tea.Cmd {
 
 // handlePagerKey processes a keystroke while the pager overlay is up.
 // Always intercepts — the pager is modal.
-func (a *App) handlePagerKey(km tea.KeyMsg) (tea.Cmd, bool) {
+func (a *App) handlePagerKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	if a.pager == nil {
 		return nil, false
 	}
@@ -130,17 +130,17 @@ func (a *App) handlePagerKey(km tea.KeyMsg) (tea.Cmd, bool) {
 	case "esc", "q":
 		return a.closePager(), true
 	case "j", "down":
-		a.pager.vp.LineDown(1)
+		a.pager.vp.ScrollDown(1)
 	case "k", "up":
-		a.pager.vp.LineUp(1)
+		a.pager.vp.ScrollUp(1)
 	case "g":
 		a.pager.vp.GotoTop()
 	case "G":
 		a.pager.vp.GotoBottom()
 	case "ctrl+d", "pgdown":
-		a.pager.vp.HalfViewDown()
+		a.pager.vp.HalfPageDown()
 	case "ctrl+u", "pgup":
-		a.pager.vp.HalfViewUp()
+		a.pager.vp.HalfPageUp()
 	}
 	return nil, true
 }

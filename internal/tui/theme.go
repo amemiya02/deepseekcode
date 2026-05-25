@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Theme holds the lipgloss styles used across the TUI. We ship a dark
 // theme as default and a light alt. Theme is selected at startup from

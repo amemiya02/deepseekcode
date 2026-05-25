@@ -18,10 +18,8 @@ func NewApplyPatchTool(cwd string, maxWriteBytes int64) *ApplyPatchTool {
 }
 
 func (*ApplyPatchTool) Name() string { return "apply_patch" }
-
 func (*ApplyPatchTool) Description() string {
-	return "Apply a multi-hunk patch in *** Begin Patch / *** End Patch format. " +
-		"Supports Add, Update (fuzzy-matched), Delete, Move. Prefer over multiple edit_file."
+	return "Apply a multi-hunk patch in *** Begin Patch / *** End Patch envelope. Supports Add, Update (fuzzy-matched), Delete, Move."
 }
 
 func (*ApplyPatchTool) Parameters() json.RawMessage {
@@ -79,8 +77,7 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, args json.RawMessage) (Res
 		cwd = "."
 	}
 	// Phase 1: resolve all paths; reject entire patch if any escapes cwd.
-	type rp struct{ ap, am string }
-	rs := make([]rp, len(hunks))
+	rs := make([]struct{ ap, am string }, len(hunks))
 	for i, h := range hunks {
 		ap, err := ResolveAndCheck(filepath.Join(cwd, h.Path), cwd)
 		if err != nil {
@@ -93,72 +90,68 @@ func (t *ApplyPatchTool) Execute(ctx context.Context, args json.RawMessage) (Res
 				return Errf("hunk %d move %q: %v", i+1, h.MovePath, err), nil
 			}
 		}
-		rs[i] = rp{ap, am}
+		rs[i] = struct{ ap, am string }{ap, am}
 	}
 	// Phase 2: apply hunks (all paths pre-validated).
 	var applied []string
 	for i, h := range hunks {
-		rp := rs[i]
-		var path, herr string
-		switch h.Op {
-		case "add":
-			if _, err := os.Stat(rp.ap); err == nil {
-				herr = fmt.Sprintf("add %q exists; use update", rp.ap)
-			} else if int64(len(h.Contents)) > t.maxWriteBytes {
-				herr = fmt.Sprintf("add %q: too large (%d B)", rp.ap, len(h.Contents))
-			} else {
-				os.MkdirAll(filepath.Dir(rp.ap), 0o755)
-				if err := atomicWriteFile(rp.ap, []byte(h.Contents)); err != nil {
-					herr = fmt.Sprintf("write %s: %v", rp.ap, err)
-				} else {
-					path = rp.ap
-				}
-			}
-		case "delete":
-			if err := os.Remove(rp.ap); err != nil && !os.IsNotExist(err) {
-				herr = fmt.Sprintf("delete %q: %v", rp.ap, err)
-			} else {
-				path = rp.ap
-			}
-		case "update":
-			orig, err := os.ReadFile(rp.ap)
-			if err != nil {
-				herr = fmt.Sprintf("update %q: %v", rp.ap, err)
-				break
-			}
-			nw, err := DeriveNewContents(rp.ap, h.Chunks, string(orig))
-			if err != nil {
-				herr = fmt.Sprintf("%v", err)
-				break
-			}
-			if int64(len(nw)) > t.maxWriteBytes {
-				herr = fmt.Sprintf("update %q: result too large (%d B)", rp.ap, len(nw))
-				break
-			}
-			tgt := rp.ap
-			if rp.am != "" {
-				if _, err := os.Stat(rp.am); err == nil {
-					herr = fmt.Sprintf("move target %q exists", rp.am)
-					break
-				}
-				tgt = rp.am
-				os.MkdirAll(filepath.Dir(tgt), 0o755)
-			}
-			if err := atomicWriteFile(tgt, []byte(nw)); err != nil {
-				herr = fmt.Sprintf("write %s: %v", tgt, err)
-			} else {
-				if rp.am != "" {
-					_ = os.Remove(rp.ap)
-				}
-				path = tgt
-			}
-		}
-		if herr != "" {
-			return Errf("%s", herr), nil
+		path, herr := t.applyHunk(h, rs[i].ap, rs[i].am)
+		if herr != nil {
+			return Errf("%s", herr.Error()), nil
 		}
 		if path != "" {
 			applied = append(applied, path)
 		}
 	}
 	return Result{Content: fmt.Sprintf("applied %d hunks: %v", len(applied), applied)}, nil
+}
+
+func (t *ApplyPatchTool) applyHunk(h Hunk, absPath, absMove string) (string, error) {
+	switch h.Op {
+	case "add":
+		if _, err := os.Stat(absPath); err == nil {
+			return "", fmt.Errorf("add %q exists; use update", absPath)
+		}
+		if int64(len(h.Contents)) > t.maxWriteBytes {
+			return "", fmt.Errorf("add %q: too large (%d B)", absPath, len(h.Contents))
+		}
+		os.MkdirAll(filepath.Dir(absPath), 0o755)
+		if err := atomicWriteFile(absPath, []byte(h.Contents)); err != nil {
+			return "", fmt.Errorf("write %s: %v", absPath, err)
+		}
+		return absPath, nil
+	case "delete":
+		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("delete %q: %v", absPath, err)
+		}
+		return absPath, nil
+	case "update":
+		orig, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", fmt.Errorf("update %q: %v", absPath, err)
+		}
+		nw, err := DeriveNewContents(absPath, h.Chunks, string(orig))
+		if err != nil {
+			return "", err
+		}
+		if int64(len(nw)) > t.maxWriteBytes {
+			return "", fmt.Errorf("update %q: result too large (%d B)", absPath, len(nw))
+		}
+		tgt := absPath
+		if absMove != "" {
+			if _, err := os.Stat(absMove); err == nil {
+				return "", fmt.Errorf("move target %q exists", absMove)
+			}
+			tgt = absMove
+			os.MkdirAll(filepath.Dir(tgt), 0o755)
+		}
+		if err := atomicWriteFile(tgt, []byte(nw)); err != nil {
+			return "", fmt.Errorf("write %s: %v", tgt, err)
+		}
+		if absMove != "" {
+			_ = os.Remove(absPath)
+		}
+		return tgt, nil
+	}
+	return "", nil
 }

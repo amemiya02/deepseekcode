@@ -106,6 +106,7 @@ operations in a single tool call:
  context line
 -removed line
 +added line
+*** End of File                      (optional EOF anchor)
 *** Delete File: path/old.go
 *** End Patch
 ```

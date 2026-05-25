@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
 	"github.com/muesli/reflow/wordwrap"
 )
 

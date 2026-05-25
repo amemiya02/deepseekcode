@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/tools"

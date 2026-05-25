@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // osc52MaxBytes mirrors the de-facto cap implemented by most

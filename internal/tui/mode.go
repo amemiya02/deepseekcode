@@ -1,6 +1,6 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // appMode controls which sub-component receives keyboard input.
 //
@@ -46,7 +46,7 @@ func (a *App) setMode(next appMode) tea.Cmd {
 // isPrintableKey returns true for keys that represent a character the
 // user would expect to appear in the text input (letters, digits,
 // punctuation, space). Used in Normal mode to auto-switch to Insert.
-func isPrintableKey(km tea.KeyMsg) bool {
+func isPrintableKey(km tea.KeyPressMsg) bool {
 	s := km.String()
 	if len(s) != 1 {
 		return false

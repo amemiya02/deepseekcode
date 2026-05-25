@@ -103,6 +103,7 @@ SQLite（`modernc.org/sqlite`，无 CGO），让 `--continue` / `--resume` /
 - [Hooks](docs/hooks.md)
 - [MCP](docs/mcp.md)
 - [自定义 Slash 命令](docs/commands.md)
+- [技能](docs/skills.md) — 跨工具 SKILL.md 发现
 
 ## 状态与路线图
 

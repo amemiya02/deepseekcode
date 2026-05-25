@@ -107,6 +107,7 @@ See `docs/design.md` §3.
 - [Hooks](docs/hooks.md)
 - [MCP](docs/mcp.md)
 - [Custom Slash Commands](docs/commands.md)
+- [Skills](docs/skills.md) — cross-tool SKILL.md discovery
 
 ## Status & roadmap
 

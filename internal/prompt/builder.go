@@ -41,6 +41,11 @@ type SystemPromptBuilder struct {
 	// (DEEPSEEK.md, AGENTS.md, .deepseek/instructions.md). Session-once.
 	Instructions []InstructionFile
 
+	// Skills is the session-once list of discovered SKILL.md files.
+	// Rendered into the static prefix (before the dynamic boundary)
+	// so it stays cache-stable. nil or empty → no ## Skills section.
+	Skills []Skill
+
 	// Project carries the dynamic per-turn context (git status, date,
 	// os). nil disables the dynamic suffix entirely.
 	Project *ProjectContext
@@ -90,6 +95,7 @@ func (b *SystemPromptBuilder) Build() string {
 			fmt.Fprintf(&out, "\n[%s]\n%s\n", f.Path, f.Content)
 		}
 	}
+	out.WriteString(RenderSkillsBlock(b.Skills))
 	out.WriteString(DynamicContextBoundary)
 	if b.Project != nil {
 		out.WriteString(renderProject(*b.Project))
@@ -132,6 +138,48 @@ func renderProject(p ProjectContext) string {
 		if !strings.HasSuffix(p.GitDiff, "\n") {
 			b.WriteByte('\n')
 		}
+	}
+	return b.String()
+}
+
+const maxSkillsBlockChars = 4000
+
+// RenderSkillsBlock generates the "## Skills" section for the system prompt.
+// Empty slice returns "". Each skill is one line:
+//
+//   - {name}: {description} (file: {path})
+//
+// Description is truncated to 200 chars. Total block capped at ~4000 chars;
+// overflow appends "... (N more skills omitted)".
+func RenderSkillsBlock(skills []Skill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Skills\n")
+	b.WriteString("(Use read_file on the file path to open a skill's full instructions when needed)\n")
+	total := 0
+	omitted := 0
+	for _, s := range skills {
+		desc := s.Description
+		if r := []rune(desc); len(r) > 200 {
+			desc = string(r[:200]) + "..."
+		}
+		var line string
+		if desc != "" {
+			line = fmt.Sprintf("- %s: %s (file: %s)\n", s.Name, desc, s.Path)
+		} else {
+			line = fmt.Sprintf("- %s (file: %s)\n", s.Name, s.Path)
+		}
+		if total+len(line) > maxSkillsBlockChars {
+			omitted++
+			continue
+		}
+		b.WriteString(line)
+		total += len(line)
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "... (%d more skills omitted)\n", omitted)
 	}
 	return b.String()
 }

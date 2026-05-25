@@ -211,10 +211,12 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
-
+	// Load skills once; shared between prompt builder and command table.
+	home4skills, _ := os.UserHomeDir()
+	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
-	a.PromptBuilder = newPromptBuilder(cwd)
+	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
 	// Hooks: assemble configs from TOML, then add the Duet builtin
 	// when enabled. Only create a Runner if there is work for it.
@@ -375,6 +377,20 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	notices = append(mcpNotices, notices...)
 	home, _ := os.UserHomeDir()
 	customCmds, _ := commands.Load(cwd, home)
+
+	// Promote skills as slash commands (user commands take priority).
+	for _, sk := range skills {
+		if _, taken := customCmds[sk.Name]; taken {
+			continue // user command takes priority
+		}
+		customCmds[sk.Name] = commands.Command{
+			Name:        sk.Name,
+			Description: sk.Description,
+			Template:    sk.Body,
+			Path:        sk.Path,
+		}
+	}
+
 	app := tui.New(tui.Config{
 		Agent:           a,
 		Model:           cfg.Defaults.Model,
@@ -435,10 +451,12 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
-
+	// Load skills once; shared between prompt builder and command table.
+	home4skills, _ := os.UserHomeDir()
+	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	a.Thinking = cfg.Defaults.Thinking
-	a.PromptBuilder = newPromptBuilder(cwd)
+	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
 	// Consumer goroutine: pulls events from the agent's lifetime stream
 	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents
@@ -467,7 +485,7 @@ var validHookEvents = map[hooks.HookEvent]bool{
 
 func validHookEvent(e hooks.HookEvent) bool { return validHookEvents[e] }
 
-func newPromptBuilder(cwd string) *promptpkg.SystemPromptBuilder {
+func newPromptBuilder(cwd string, skills []promptpkg.Skill) *promptpkg.SystemPromptBuilder {
 	if cwd == "" {
 		return nil
 	}
@@ -477,6 +495,7 @@ func newPromptBuilder(cwd string) *promptpkg.SystemPromptBuilder {
 	return &promptpkg.SystemPromptBuilder{
 		StaticBase:   promptpkg.BasePromptV1,
 		Instructions: files,
+		Skills:       skills,
 		Project:      &project,
 	}
 }

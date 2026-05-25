@@ -55,6 +55,8 @@ type Agent struct {
 	// with the last user message text to decide thinking on/off.
 	AutoReasoning bool
 
+	prefixMon *llm.PrefixMonitor
+
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
 
@@ -107,6 +109,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		events:        make(chan Event, 256),
 		Model:         model,
 		Thinking:      true,
+		prefixMon:     llm.NewPrefixMonitor(),
 		System:        DefaultSystemPrompt,
 		MaxToolCalls:  200,
 		CompactionCfg: DefaultCompactionConfig(),
@@ -326,6 +329,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		Messages: a.fullMessages(),
 		Tools:    a.Tools.AsLLMTools(),
 		Thinking: llm.ThinkingEnabled(thinking),
+	}
+
+	staticSys := a.System
+	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
+		staticSys = a.System[:i]
+	}
+	if changed, which := a.prefixMon.Check(staticSys, req.Tools); changed {
+		a.events <- EventInfo{Text: "prefix cache invalidated: " + which}
 	}
 
 	events, err := a.Client.Stream(ctx, req)

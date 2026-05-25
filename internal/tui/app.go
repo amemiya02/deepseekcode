@@ -402,6 +402,12 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 	case agent.EventInfo:
 		a.scrollback.AppendInfo(e.Text)
+		// NOTE: reuses the generic hint slot; if other features write
+		// hint, drift chip gets overwritten. Consider a dedicated field
+		// if this becomes a conflict.
+		if strings.HasPrefix(e.Text, "prefix cache invalidated: ") {
+			a.status.hint = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
+		}
 		a.refreshView()
 	case agent.EventPermissionAsk:
 		a.permission.Open(e)

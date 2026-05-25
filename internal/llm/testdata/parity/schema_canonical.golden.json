@@ -1,0 +1,1 @@
+{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"canonical schema"}],"stream":true,"tools":[{"type":"function","function":{"name":"scrambled","description":"d","parameters":{"properties":{"a":{"properties":{"b":{"type":"boolean"},"y":{"type":"number"}},"type":"object"},"z":{"type":"string"}},"required":["b"],"type":"object"}}}]}

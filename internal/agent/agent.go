@@ -33,12 +33,18 @@ type Agent struct {
 	Tools       *tools.Registry
 	Permissions *permissions.Policy
 
-	// events is the agent-lifetime event channel. The consumer
-	// (TUI or CLI) ranges over Events() and type-switches on the
-	// concrete Event type. Buffered so streaming token bursts don't
-	// block the model goroutine; capacity matched to ~4 seconds of
-	// fast SSE token rate.
-	events chan Event
+	// eventsCompat is the agent-lifetime event channel for the Events()
+	// compatibility wrapper. The consumer (TUI or CLI) ranges over
+	// Events() and type-switches on the concrete Event type. Buffered so
+	// streaming token bursts don't block the model goroutine; capacity
+	// matched to ~4 seconds of fast SSE token rate.
+	eventsCompat chan Event
+
+	// bus is the multi-consumer fan-out hub. The agent publishes all
+	// events through the bus; Events() returns a compatibility channel
+	// that unwraps EventEnvelope back to bare Event. Additional
+	// consumers subscribe via Bus().Subscribe.
+	bus *Bus
 
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
@@ -122,7 +128,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		Client:        client,
 		Tools:         reg,
 		Permissions:   pol,
-		events:        make(chan Event, 256),
+		eventsCompat:  make(chan Event, 256),
 		Model:         model,
 		Thinking:      true,
 		prefixMon:     llm.NewPrefixMonitor(),
@@ -135,6 +141,15 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		},
 	}
 
+	a.bus = NewBus()
+	def := a.bus.Subscribe(256)
+	go func() {
+		defer func() { recover() }()
+		for env := range def.C {
+			a.eventsCompat <- env.Event
+		}
+	}()
+
 	return a
 }
 
@@ -143,13 +158,19 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 // The channel is never closed by the agent — multiple Run calls share
 // it. Consumers should select against their own ctx.Done() to exit
 // cleanly during shutdown.
-func (a *Agent) Events() <-chan Event { return a.events }
+func (a *Agent) Events() <-chan Event { return a.eventsCompat }
+
+// Bus returns the agent's event bus. Additional consumers (loggers,
+// parity recorders, future daemons) subscribe via Bus().Subscribe
+// to receive versioned EventEnvelope values. The primary consumer
+// (TUI/CLI) should continue using Events() for backward compatibility.
+func (a *Agent) Bus() *Bus { return a.bus }
 
 // EmitInfo pushes an out-of-band notice onto the event stream. Used by
 // adjacent components (e.g. llm.Client.OnRetry) that don't otherwise
 // hold the event channel but want to surface user-visible status.
 func (a *Agent) EmitInfo(msg string) {
-	a.events <- EventInfo{Text: msg}
+	a.bus.Publish(EventInfo{Text: msg})
 }
 
 // DefaultSystemPrompt is the cache-stable system prompt. It must not
@@ -182,7 +203,7 @@ Behavioral rules:
 // and leave the UI's chrome stuck on "writing…" — never do that.
 func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, err error) {
 	defer func() {
-		a.events <- EventDone{Reason: reason, Err: err}
+		a.bus.Publish(EventDone{Reason: reason, Err: err})
 	}()
 
 	defer func() {
@@ -241,7 +262,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		if err != nil {
 			stepCancel()
 			if a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded) {
-				a.events <- EventInfo{Text: fmt.Sprintf("step timed out after %s", a.StepTimeout)}
+				a.bus.Publish(EventInfo{Text: fmt.Sprintf("step timed out after %s", a.StepTimeout)})
 				return StopUnknown, nil
 			}
 			return StopUnknown, err
@@ -257,14 +278,14 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		for _, sc := range a.StopWhen {
 			if stop, reason := sc(a.steps); stop {
 				stepCancel()
-				a.events <- EventStepFinish{Reason: reason, Usage: step.Usage}
+				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage})
 				return reason, nil
 			}
 		}
 
 		if !hasTools {
 			stepCancel()
-			a.events <- EventStepFinish{Reason: StopModelDone, Usage: step.Usage}
+			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage})
 			return StopModelDone, nil
 		}
 
@@ -275,7 +296,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		if toolErr != nil {
 			return StopUnknown, toolErr
 		}
-		a.events <- EventStepFinish{Reason: StopUnknown, Usage: step.Usage}
+		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage})
 
 		// Compaction check runs between turns (the next iteration's
 		// runStep will rebuild the wire request). A failure here is
@@ -307,17 +328,17 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	}
 	if a.Persister != nil {
 		if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
-			a.events <- EventInfo{Text: "compaction persistence failed: " + err.Error()}
+			a.bus.Publish(EventInfo{Text: "compaction persistence failed: " + err.Error()})
 			return
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
-	a.events <- EventCompaction{
+	a.bus.Publish(EventCompaction{
 		FromIdx:      res.FromIdx,
 		ToIdx:        res.ToIdx,
 		Summary:      res.Summary,
 		RemovedCount: res.RemovedCount,
-	}
+	})
 }
 
 // stepContext returns (ctx, cancel) for one step. When timeout is zero
@@ -352,7 +373,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		staticSys = a.System[:i]
 	}
 	if changed, which := a.prefixMon.Check(staticSys, req.Tools); changed {
-		a.events <- EventInfo{Text: "prefix cache invalidated: " + which}
+		a.bus.Publish(EventInfo{Text: "prefix cache invalidated: " + which})
 	}
 
 	events, err := a.Client.Stream(ctx, req)
@@ -375,24 +396,24 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		case llm.EventTextDelta:
 			text += ev.Text
 			if inReasoning {
-				a.events <- EventReasoningEnd{}
+				a.bus.Publish(EventReasoningEnd{})
 				inReasoning = false
 			}
-			a.events <- EventTextDelta{Text: ev.Text}
+			a.bus.Publish(EventTextDelta{Text: ev.Text})
 		case llm.EventReasoningDelta:
 			if !inReasoning {
-				a.events <- EventReasoningStart{}
+				a.bus.Publish(EventReasoningStart{})
 				inReasoning = true
 			}
 			reasoning += ev.Text
-			a.events <- EventReasoningDelta{Text: ev.Text}
+			a.bus.Publish(EventReasoningDelta{Text: ev.Text})
 		case llm.EventToolUseDelta:
 			// tool-call deltas are aggregated by the client; we don't need
 			// per-delta tracking here. The EventFinish carries the
 			// assembled calls.
 		case llm.EventFinish:
 			if inReasoning {
-				a.events <- EventReasoningEnd{}
+				a.bus.Publish(EventReasoningEnd{})
 				inReasoning = false
 			}
 			finish = ev.FinishReason
@@ -533,7 +554,7 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 // will see, plus an infrastructure error (which the caller serializes
 // into a tool-result message rather than aborting the loop).
 func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result, error) {
-	a.events <- EventToolCallStart{Call: call}
+	a.bus.Publish(EventToolCallStart{Call: call})
 
 	// Tool-call rate limit. Warning fires exactly once when crossing 80%
 	// of the cap; the hard cap blocks any call beyond MaxToolCalls.
@@ -541,7 +562,7 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	if a.MaxToolCalls > 0 {
 		threshold := int(float64(a.MaxToolCalls) * 0.8)
 		if threshold > 0 && a.toolCallCount == threshold {
-			a.events <- EventInfo{Text: fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls)}
+			a.bus.Publish(EventInfo{Text: fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls)})
 		}
 		if a.toolCallCount > a.MaxToolCalls {
 			return tools.Errf("tool call limit reached (%d/%d)", a.toolCallCount, a.MaxToolCalls), nil
@@ -568,20 +589,20 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	switch dec {
 	case permissions.Deny:
 		if strings.HasPrefix(reason, "matched deny rule:") {
-			a.events <- EventInfo{Text: "denied by rule: " + reason}
+			a.bus.Publish(EventInfo{Text: "denied by rule: " + reason})
 			return tools.Errf("denied by rule: %s", reason), nil
 		}
-		a.events <- EventInfo{Text: "denied by permissions policy: " + reason}
+		a.bus.Publish(EventInfo{Text: "denied by permissions policy: " + reason})
 		return tools.Errf("denied by permissions policy: %s", reason), nil
 	case permissions.Ask:
 		// Emit a permission ask carrying its own reply channel, and
 		// park until the consumer answers. Buffered cap=1 so the UI
 		// can send without waiting on us to receive.
 		reply := make(chan PermissionResponse, 1)
-		a.events <- EventPermissionAsk{
+		a.bus.Publish(EventPermissionAsk{
 			Check: permissions.Check{Tool: tool, Args: rawArgs},
 			Reply: reply,
-		}
+		})
 		var resp PermissionResponse
 		select {
 		case resp = <-reply:
@@ -615,13 +636,13 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		}
 		t0 := time.Now()
 		out, _ := a.HookRunner.Run(ctx, hooks.EventPreToolUse, hookIn)
-		a.events <- EventHookFired{
+		a.bus.Publish(EventHookFired{
 			HookName: "PreToolUse",
 			Event:    string(hooks.EventPreToolUse),
 			Decision: out.Decision,
 			Reason:   out.Reason,
 			Dur:      time.Since(t0),
-		}
+		})
 		if out.Decision == "deny" {
 			return tools.Errf("blocked by hook: %s", out.Reason), nil
 		}
@@ -630,7 +651,7 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	t0 := time.Now()
 	res, err := tool.Execute(ctx, rawArgs)
 	dur := time.Since(t0)
-	a.events <- EventToolCallResult{CallID: call.ID, Result: res, Dur: dur}
+	a.bus.Publish(EventToolCallResult{CallID: call.ID, Result: res, Dur: dur})
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -673,13 +694,13 @@ func (a *Agent) firePostHook(ctx context.Context, call llm.ToolCall, rawArgs jso
 	}
 	t0 := time.Now()
 	out, _ := a.HookRunner.Run(ctx, hookEvent, hookIn)
-	a.events <- EventHookFired{
+	a.bus.Publish(EventHookFired{
 		HookName: "PostToolUse",
 		Event:    string(hookEvent),
 		Decision: out.Decision,
 		Reason:   out.Reason,
 		Dur:      time.Since(t0),
-	}
+	})
 }
 
 // Transcript returns a compact wire-format snapshot of recent messages
@@ -744,7 +765,7 @@ func (a *Agent) lastUserText() string {
 // and blocks until the consumer replies or ctx is cancelled.
 func (a *Agent) AskQuestion(ctx context.Context, req tools.QuestionRequest) (tools.QuestionResponse, error) {
 	reply := make(chan tools.QuestionResponse, 1)
-	a.events <- EventQuestionAsk{Questions: req.Questions, Reply: reply}
+	a.bus.Publish(EventQuestionAsk{Questions: req.Questions, Reply: reply})
 	select {
 	case resp := <-reply:
 		return resp, nil

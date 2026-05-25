@@ -36,7 +36,7 @@ func (a *Agent) EnterPlan(_ context.Context) error {
 	)
 	a.inPlan = true
 
-	a.events <- EventInfo{Text: "entered plan mode — only read-only tools are available until plan_exit"}
+	a.bus.Publish(EventInfo{Text: "entered plan mode — only read-only tools are available until plan_exit"})
 	return nil
 }
 
@@ -55,7 +55,7 @@ func (a *Agent) ExitPlan(_ context.Context, plan string) error {
 	a.savedTools = nil
 	a.savedPolicy = nil
 
-	a.events <- EventInfo{Text: "exited plan mode — full tool access restored"}
+	a.bus.Publish(EventInfo{Text: "exited plan mode — full tool access restored"})
 	return nil
 }
 

@@ -30,8 +30,7 @@ func planTestAgent(t *testing.T) (*Agent, func()) {
 		close(done)
 	}()
 	return a, func() {
-		close(a.events)
-		<-done
+		a.bus.Close()
 	}
 }
 

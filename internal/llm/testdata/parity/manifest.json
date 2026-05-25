@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "representative",
+      "sha256": "22733eff83e06a70b907dd003981ec6b1af68ebeaa5d6479142dbc77c79348ed"
+    },
+    {
+      "name": "plain_text",
+      "sha256": "d308f05be4b421533882eeab9b5acbfddfa79da67cc51ca36f4361f6dcf9b20c"
+    },
+    {
+      "name": "tool_sort",
+      "sha256": "8bd02f1e051ad46f8dacf37edf297a1f77d5fadf5b9d51790d29464a522c915f"
+    },
+    {
+      "name": "schema_canonical",
+      "sha256": "edf80d82a3d8cc15d67b537f5062378a1c3f36d59b6e63bb4f7e61b6d2c0f12d"
+    },
+    {
+      "name": "thinking_roundtrip",
+      "sha256": "e395821025b950960670e1136308fec778d002660b8fda14a5897f52f3b122bf"
+    },
+    {
+      "name": "tool_roundtrip",
+      "sha256": "4c24404238620f9cf85ed144d86989a5ed491012847f1b44df36f1bd1279260b"
+    }
+  ]
+}

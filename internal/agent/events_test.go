@@ -19,8 +19,8 @@ func TestEventsChannelInitialized(t *testing.T) {
 	if ch == nil {
 		t.Fatal("Events() must return a non-nil channel")
 	}
-	if cap(a.events) < 1 {
-		t.Errorf("events channel should be buffered (cap > 0); got %d", cap(a.events))
+	if cap(a.eventsCompat) < 1 {
+		t.Errorf("events channel should be buffered (cap > 0); got %d", cap(a.eventsCompat))
 	}
 }
 
@@ -40,8 +40,8 @@ func TestEmitInfoPushesEvent(t *testing.T) {
 		if info.Text != "hello" {
 			t.Errorf("EventInfo.Text mismatch: got %q", info.Text)
 		}
-	default:
-		t.Fatal("EmitInfo should push an event synchronously")
+	case <-time.After(time.Second):
+		t.Fatal("EmitInfo did not push an event")
 	}
 }
 

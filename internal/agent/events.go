@@ -30,6 +30,20 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
+// EventProtocolVersion is the current envelope version. Increment when
+// the EventEnvelope shape changes in a backward-incompatible way.
+const EventProtocolVersion = 1
+
+// EventEnvelope wraps an Event with versioning, sequence number, and
+// timestamp for multi-consumer fan-out on the Bus. It does NOT implement
+// Event itself — it is a container, not an event.
+type EventEnvelope struct {
+	Version int       // = EventProtocolVersion
+	Seq     uint64    // monotonic, assigned by Bus
+	At      time.Time // publish moment
+	Event   Event     // the concrete event
+}
+
 // Event is the sealed interface implemented by every event the agent
 // emits. Type-switch on the concrete type at the consumer.
 type Event interface{ isAgentEvent() }

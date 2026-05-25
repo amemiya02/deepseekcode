@@ -1,0 +1,1 @@
+{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"explain"},{"role":"assistant","content":"answer","reasoning_content":"step by step"}],"stream":true,"thinking":{"type":"enabled"}}

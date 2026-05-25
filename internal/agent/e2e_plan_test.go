@@ -93,9 +93,8 @@ func TestSpawnPlanSubagentDirectly(t *testing.T) {
 		t.Error("child server received no requests")
 	}
 
-	// Close parent events to drain goroutine.
-	close(parent.events)
-	<-done
+	// Shut down the bus so the unpack goroutine exits.
+	parent.bus.Close()
 }
 
 func TestPlanSubagentRegistryFiltered(t *testing.T) {

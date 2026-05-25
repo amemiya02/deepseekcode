@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
@@ -382,8 +383,8 @@ func TestAgentMaybeCompactTriggers(t *testing.T) {
 		if _, ok := ev.(EventCompaction); !ok {
 			t.Errorf("expected EventCompaction, got %T", ev)
 		}
-	default:
-		t.Error("no event emitted")
+	case <-time.After(time.Second):
+		t.Error("no event emitted within timeout")
 	}
 }
 

@@ -95,7 +95,7 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		}
 	}()
 
-	s.Parent.events <- EventSubagentStart{Agent: req.Agent, Description: req.Description}
+	s.Parent.bus.Publish(EventSubagentStart{Agent: req.Agent, Description: req.Description})
 
 	_, err := child.Run(ctx, req.Description)
 
@@ -111,14 +111,14 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		result.Summary = "subagent failed: " + err.Error()
 	}
 
-	s.Parent.events <- EventSubagentFinish{
+	s.Parent.bus.Publish(EventSubagentFinish{
 		Agent: req.Agent,
 		Result: SubResult{
 			Summary:    result.Summary,
 			StepCount:  result.StepCount,
 			TokenCount: result.TokenCount,
 		},
-	}
+	})
 
 	return result, nil
 }

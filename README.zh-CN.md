@@ -54,6 +54,7 @@ dsc -p "解释一下 pkg/auth 的实现"   # 单次提示 → 输出到 stdout�
 dsc --read-only                    # 安全探索模式（禁止任何写操作）
 dsc --yolo -p "跑一下测试"         # 自动放行所有工具调用（用于 CI / 自动化）
 dsc init                           # 生成 DEEPSEEK.md + .deepseek/config.toml
+dsc upgrade                        # 检查更新
 ```
 
 在 TUI 内：

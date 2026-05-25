@@ -67,6 +67,12 @@ func run() error {
 		return nil
 	}
 
+	// Subcommand: dsc upgrade. Checks for updates and prints (or applies)
+	// the upgrade command for the detected install method.
+	if len(os.Args) > 1 && os.Args[1] == "upgrade" {
+		return runUpgrade(os.Args[2:])
+	}
+
 	var (
 		showVersion bool
 		yolo        bool

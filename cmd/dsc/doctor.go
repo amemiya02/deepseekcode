@@ -16,6 +16,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/version"
 )
 
 type checkResult struct {
@@ -43,6 +44,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkLSP(),
 		checkCompaction(),
 		checkConfigValidation(cfg),
+		checkUpdate(),
 		{
 			Name:   "platform",
 			Status: "ok",
@@ -302,4 +304,17 @@ func checkConfigValidation(cfg config.Config) checkResult {
 		details = append(details, e.Error())
 	}
 	return checkResult{"config validation", "fail", strings.Join(details, "; ")}
+}
+
+func checkUpdate() checkResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tag, _, err := version.LatestRelease(ctx)
+	if err != nil {
+		return checkResult{"update", "ok", "update check skipped (" + err.Error() + ")"}
+	}
+	if version.CompareVersions(version.Version, tag) >= 0 {
+		return checkResult{"update", "ok", "up to date (" + version.Version + ")"}
+	}
+	return checkResult{"update", "ok", fmt.Sprintf("current %s, latest %s (run: dsc upgrade)", version.Version, tag)}
 }

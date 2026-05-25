@@ -88,6 +88,16 @@ dsc -p "explain the auth flow in pkg/auth"
 See [config.md](config.md) for permanent configuration via
 `~/.deepseek/config.toml`.
 
+## Upgrade
+
+```sh
+dsc upgrade            # check for updates + print upgrade command
+dsc upgrade --apply    # execute the upgrade directly
+```
+
+See [upgrade.md](upgrade.md) for details on install-method detection
+and the safety default (print-only without `--apply`).
+
 ## Uninstall
 
 ```sh

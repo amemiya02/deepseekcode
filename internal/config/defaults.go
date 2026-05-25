@@ -20,6 +20,7 @@ func Default() Config {
 			Thinking:       true,
 			Theme:          "dark",
 			VimKeybindings: true,
+			AutoReasoning:  false,
 		},
 		Tools: ToolsConfig{
 			MaxReadBytes:  5 * 1024 * 1024, // 5 MiB

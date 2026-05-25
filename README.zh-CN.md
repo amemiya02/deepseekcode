@@ -109,7 +109,8 @@ SQLite（`modernc.org/sqlite`，无 CGO），让 `--continue` / `--resume` /
 
 **v0.1（当前）**：14 个内建工具（含 `apply_patch`、`question`）、分层权限 + 快照回滚、带按引用分叉的
 SQLite 会话、Reasoning Tape + `/tape` 全屏、`/models` 选择器、Pro
-Validator、Cost HUD、五平台交叉编译、Homebrew tap + curl|sh + go install。
+Validator、Cost HUD、`auto_reasoning`（逐 turn thinking 选择器，opt-in）、
+五平台交叉编译、Homebrew tap + curl|sh + go install。
 MCP 推迟。子 Agent 推迟（已预留 Spawner 接口骨架）。
 
 **v0.2**：子 Agent · 进程沙箱（bubblewrap / sandbox-exec）· `web_fetch` ·

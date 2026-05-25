@@ -218,6 +218,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	reg.Register(tools.NewQuestionTool(a))
 	a.Thinking = cfg.Defaults.Thinking
+	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
 	// Hooks: assemble configs from TOML, then add the Duet builtin
@@ -459,6 +460,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	reg.Register(tools.NewQuestionTool(a))
 	a.Thinking = cfg.Defaults.Thinking
+	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
 	// Consumer goroutine: pulls events from the agent's lifetime stream

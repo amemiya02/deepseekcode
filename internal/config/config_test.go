@@ -46,6 +46,32 @@ func TestExpandEnv(t *testing.T) {
 	}
 }
 
+func TestDefaultAutoReasoning(t *testing.T) {
+	cfg := Default()
+	if cfg.Defaults.AutoReasoning {
+		t.Error("AutoReasoning should default false")
+	}
+}
+
+func TestOverlayAutoReasoning(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[defaults]
+auto_reasoning = true
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Defaults.AutoReasoning {
+		t.Error("project auto_reasoning=true should set AutoReasoning to true")
+	}
+}
+
 func TestConfigLoadRules(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.toml"

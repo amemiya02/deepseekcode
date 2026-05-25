@@ -50,6 +50,11 @@ type Agent struct {
 	Model    string
 	Thinking bool
 
+	// AutoReasoning enables per-turn thinking selection via
+	// llm.SelectThinking. When true, runStep calls SelectThinking
+	// with the last user message text to decide thinking on/off.
+	AutoReasoning bool
+
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
 
@@ -311,11 +316,16 @@ func stepContext(parent context.Context, timeout time.Duration) (context.Context
 func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.refreshGitContext(ctx)
 
+	thinking := a.Thinking
+	if a.AutoReasoning {
+		thinking = llm.SelectThinking(false, a.lastUserText(), a.Thinking)
+	}
+
 	req := llm.Request{
 		Model:    a.Model,
 		Messages: a.fullMessages(),
 		Tools:    a.Tools.AsLLMTools(),
-		Thinking: llm.ThinkingEnabled(a.Thinking),
+		Thinking: llm.ThinkingEnabled(thinking),
 	}
 
 	events, err := a.Client.Stream(ctx, req)
@@ -685,6 +695,22 @@ func validateToolArgs(t tools.Tool, args json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// lastUserText returns the text of the most recent user message.
+// Used by SelectThinking to decide per-turn thinking mode.
+// Returns "" if there are no user messages.
+func (a *Agent) lastUserText() string {
+	for i := len(a.Messages) - 1; i >= 0; i-- {
+		if a.Messages[i].Role == "user" {
+			for _, b := range a.Messages[i].Blocks {
+				if tb, ok := b.(llm.TextBlock); ok {
+					return tb.Text
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // AskQuestion implements tools.Questioner. It emits an EventQuestionAsk

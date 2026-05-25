@@ -149,6 +149,20 @@ Run inside the TUI:
 | `thinking` | bool | `true` | Enable reasoning/thinking mode |
 | `theme` | string | `"dark"` | TUI theme |
 | `vim_keybindings` | bool | `true` | Enable Vim key bindings |
+| `auto_reasoning` | bool | `false` | Per-turn thinking selection based on message keywords (opt-in) |
+
+When `auto_reasoning` is enabled, the agent inspects the user's most
+recent message each turn and decides whether to enable thinking:
+
+- **High-effort keywords** (thinking ON): `debug`, `error`, `调试`,
+  `错误`, `报错`, `出错`, `崩溃`, `調試`, `錯誤`, `デバッグ`, `エラー`, `バグ`
+- **Low-effort keywords** (thinking OFF): `search`, `lookup`, `搜索`,
+  `查找`, `查询`, `検索`
+- **No match**: uses the `thinking` default value
+
+Matching is case-insensitive for ASCII; CJK matched verbatim. High
+keywords take priority over low. Note: `bug` alone does NOT trigger
+high-effort (only `debug` / `error` and the CJK equivalents do).
 
 ### `[tools]`
 

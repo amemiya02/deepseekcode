@@ -41,6 +41,11 @@ type DefaultsConfig struct {
 	Thinking       bool   `toml:"thinking"`
 	Theme          string `toml:"theme"`
 	VimKeybindings bool   `toml:"vim_keybindings"`
+	// AutoReasoning enables per-turn thinking selection based on the
+	// user's last message. When true, SelectThinking decides whether
+	// to enable/disable thinking each turn using keyword heuristics.
+	// Default: false (opt-in).
+	AutoReasoning bool `toml:"auto_reasoning"`
 }
 
 type DuetConfig struct {
@@ -194,6 +199,11 @@ func applyOverlay(base *Config, ov Config) {
 		base.Defaults.Theme = ov.Defaults.Theme
 	}
 	base.Defaults.VimKeybindings = ov.Defaults.VimKeybindings || (base.Defaults.VimKeybindings && !overlayHasKey(ov, "vim_keybindings"))
+	// AutoReasoning defaults to false; opt-in semantics: either source
+	// setting it to true is sufficient (OR merge). No need for the
+	// overlayHasKey dance that Thinking/VimKeybindings require (those
+	// default true and need "false means explicit disable" logic).
+	base.Defaults.AutoReasoning = ov.Defaults.AutoReasoning || base.Defaults.AutoReasoning
 
 	if ov.Tools.MaxReadBytes != 0 {
 		base.Tools.MaxReadBytes = ov.Tools.MaxReadBytes

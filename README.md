@@ -114,6 +114,7 @@ See `docs/design.md` §3.
 **v0.1 (current)**: 14 built-in tools (incl. `apply_patch`, `question`), tiered permissions + snapshot
 rollback, SQLite sessions with branch-by-reference, Reasoning Tape +
 `/tape` fullscreen, `/models` picker, Pro Validator, Cost HUD,
+`auto_reasoning` (per-turn thinking selector, opt-in),
 5-platform cross-compile, Homebrew tap + curl|sh + go install. MCP
 deferred. Subagents deferred (Spawner interface stub reserved).
 

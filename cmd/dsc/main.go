@@ -35,6 +35,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
+	sandboxpkg "github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -44,6 +45,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__sandbox_run" {
+		if err := sandboxpkg.RunSandboxedChild(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "dsc:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "dsc:", err)
 		os.Exit(1)
@@ -172,7 +180,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 
 	reg := tools.New()
-	tools.RegisterBuiltins(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd)
+	sb, sbProfile := sandboxFromConfig(cfg)
+	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
 
 	// MCP servers: connect, bridge tools into the registry.
 	mcpReg := mcp.NewRegistry()
@@ -226,7 +235,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
-	reg.Register(tools.NewBackgroundBashTool(a))
+	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
 
 	// Web tools (fetch + search)
@@ -456,6 +465,18 @@ type modeFlags struct {
 	yolo, readOnly, askAll bool
 }
 
+func sandboxFromConfig(cfg config.Config) (sandboxpkg.Sandbox, sandboxpkg.Profile) {
+	profile := sandboxpkg.Profile{
+		AllowReadPaths:  append([]string(nil), cfg.Sandbox.AllowReadPaths...),
+		AllowWritePaths: append([]string(nil), cfg.Sandbox.AllowWritePaths...),
+		AllowNetwork:    cfg.Sandbox.AllowNetwork,
+	}
+	if !cfg.Sandbox.Enabled {
+		return nil, profile
+	}
+	return sandboxpkg.Detect(), profile
+}
+
 // runOneShot wires the agent end-to-end and runs a single turn against
 // the model with stdout-streaming callbacks. Permission prompts read
 // from stdin so this mode is usable in a real terminal.
@@ -476,7 +497,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	reg := tools.New()
 	cwd, _ := os.Getwd()
-	tools.RegisterBuiltins(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd)
+	sb, sbProfile := sandboxFromConfig(cfg)
+	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
 
 	// LSP: one-shot also gets the lsp tool; servers shut down after the turn.
 	lspReg := lsp.NewRegistry()
@@ -501,7 +523,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
-	reg.Register(tools.NewBackgroundBashTool(a))
+	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
 
 	// Web tools (fetch + search)

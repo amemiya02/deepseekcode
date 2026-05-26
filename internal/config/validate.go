@@ -115,6 +115,23 @@ func ValidateStrict(c *Config) []ValidationError {
 		})
 	}
 
+	for i, path := range c.Sandbox.AllowReadPaths {
+		if path == "" {
+			errs = append(errs, ValidationError{
+				Path:    "sandbox.allow_read_paths[" + itoa(i) + "]",
+				Message: "must not be empty",
+			})
+		}
+	}
+	for i, path := range c.Sandbox.AllowWritePaths {
+		if path == "" {
+			errs = append(errs, ValidationError{
+				Path:    "sandbox.allow_write_paths[" + itoa(i) + "]",
+				Message: "must not be empty",
+			})
+		}
+	}
+
 	return errs
 }
 

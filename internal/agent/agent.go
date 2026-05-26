@@ -17,6 +17,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -790,7 +791,7 @@ var _ tools.Questioner = (*Agent)(nil)
 
 // StartBashJob implements tools.JobController. It starts a background bash
 // job and returns immediately with the job ID.
-func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int) (string, error) {
+func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int, sb sandbox.Sandbox, profile sandbox.Profile) (string, error) {
 	if a.Jobs == nil {
 		return "", fmt.Errorf("no job registry configured")
 	}
@@ -825,17 +826,23 @@ func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, t
 
 		if usePTY {
 			// Use PTY runner - pass job directly as OutputAppender
-			_, exitCode, execErr = tools.RunPTYForJob(jobCtx, command, time.Duration(timeoutMs)*time.Millisecond, job)
+			_, exitCode, execErr = tools.RunPTYForJobWithSandbox(jobCtx, command, time.Duration(timeoutMs)*time.Millisecond, job, sb, profile)
 		} else {
 			// Use regular bash runner
-			exitCode, execErr = runBashCommand(jobCtx, command, timeoutMs, job)
+			exitCode, execErr = runBashCommand(jobCtx, command, timeoutMs, job, sb, profile)
 		}
 
 		if execErr != nil {
 			if jobCtx.Err() == context.Canceled {
 				a.Jobs.Finish(job.ID, JobCanceled, "canceled by agent shutdown")
 			} else {
-				a.Jobs.Finish(job.ID, JobFailed, fmt.Sprintf("error: %v", execErr))
+				summary := fmt.Sprintf("error: %v", execErr)
+				if tail, _, _ := job.Tail(10_000); tail != "" {
+					if blocked, body := tools.ClassifySandboxBlocked(sb, tail); blocked {
+						summary = body
+					}
+				}
+				a.Jobs.Finish(job.ID, JobFailed, summary)
 			}
 			return
 		}
@@ -846,6 +853,13 @@ func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, t
 		}
 
 		summary := fmt.Sprintf("exit %d", exitCode)
+		if exitCode != 0 {
+			if tail, _, _ := job.Tail(10_000); tail != "" {
+				if blocked, body := tools.ClassifySandboxBlocked(sb, tail); blocked {
+					summary = body
+				}
+			}
+		}
 		a.Jobs.Finish(job.ID, state, summary)
 	}()
 
@@ -864,7 +878,7 @@ func (w jobWriter) Write(p []byte) (int, error) {
 
 // runBashCommand runs a shell command and streams output to the job.
 // Returns exit code and error.
-func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job) (int, error) {
+func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job, sb sandbox.Sandbox, profile sandbox.Profile) (int, error) {
 	shell := "/bin/sh"
 	if s := os.Getenv("SHELL"); s != "" {
 		shell = s
@@ -884,6 +898,17 @@ func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job
 	// Use a single writer to merge stdout/stderr
 	cmd.Stdout = jobWriter{job: job}
 	cmd.Stderr = jobWriter{job: job}
+
+	if sb != nil {
+		switch {
+		case !sb.Available():
+			job.AppendOutput([]byte("(sandbox unavailable; running unsandboxed)\n"))
+		default:
+			if err := sb.Wrap(ctx, profile, cmd); err != nil {
+				job.AppendOutput([]byte("(sandbox unavailable; running unsandboxed: " + err.Error() + ")\n"))
+			}
+		}
+	}
 
 	if err := cmd.Start(); err != nil {
 		return -1, err

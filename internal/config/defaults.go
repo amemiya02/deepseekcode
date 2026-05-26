@@ -58,5 +58,11 @@ func Default() Config {
 			Enabled:        true,
 			SearchProvider: "duckduckgo",
 		},
+		Sandbox: SandboxConfig{
+			Enabled:         false,
+			AllowReadPaths:  []string{"/usr", "/System", "/Library"},
+			AllowWritePaths: nil,
+			AllowNetwork:    false,
+		},
 	}
 }

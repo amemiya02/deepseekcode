@@ -1,5 +1,7 @@
 package tools
 
+import "github.com/amemiya02/deepseekcode/internal/sandbox"
+
 // RegisterBuiltins installs the v0.1 core built-in tools into a fresh
 // Registry. Tools are added in alphabetical order out of habit; the
 // registry sorts on AsLLMTools regardless.
@@ -7,12 +9,16 @@ package tools
 // Git tools are registered separately by internal/tools/git so callers
 // can opt out (e.g. the validator pro-side tool list, which is empty).
 func RegisterBuiltins(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string) {
+	RegisterBuiltinsWithSandbox(r, maxReadBytes, maxWriteBytes, cwd, nil, sandbox.Profile{})
+}
+
+func RegisterBuiltinsWithSandbox(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string, sb sandbox.Sandbox, profile sandbox.Profile) {
 	r.Register(&ReadFile{MaxBytes: maxReadBytes, CWD: cwd})
 	r.Register(&WriteFile{MaxBytes: maxWriteBytes, CWD: cwd})
 	r.Register(NewApplyPatchTool(cwd, maxWriteBytes))
 	r.Register(&EditFile{CWD: cwd})
-	r.Register(Bash{})
-	r.Register(BashPTY{})
+	r.Register(&Bash{Sandbox: sb, SandboxProfile: profile, CWD: cwd})
+	r.Register(&BashPTY{Sandbox: sb, SandboxProfile: profile, CWD: cwd})
 	r.Register(Glob{})
 	r.Register(Grep{})
 	r.Register(Ls{})

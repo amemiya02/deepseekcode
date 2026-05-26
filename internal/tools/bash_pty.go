@@ -6,11 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 // BashPTY runs a shell command inside a pseudo-terminal (PTY).
 // Use when a command requires a TTY (interactive prompts disabled, color/curses output).
-type BashPTY struct{}
+type BashPTY struct {
+	Sandbox        sandbox.Sandbox
+	SandboxProfile sandbox.Profile
+	CWD            string
+}
 
 func (BashPTY) Name() string { return "bash_pty" }
 
@@ -41,7 +47,7 @@ func (BashPTY) Parameters() json.RawMessage {
 // AffectedPaths returns nil — bash_pty effects are unknown statically.
 func (BashPTY) AffectedPaths(args json.RawMessage) []string { return nil }
 
-func (BashPTY) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
+func (b BashPTY) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
 		Command   string `json:"command"`
 		TimeoutMs int    `json:"timeout_ms"`
@@ -58,7 +64,8 @@ func (BashPTY) Execute(ctx context.Context, args json.RawMessage) (Result, error
 
 	timeout := time.Duration(p.TimeoutMs) * time.Millisecond
 	start := time.Now()
-	output, exitCode, err := runPTY(ctx, p.Command, timeout)
+	profile := sandboxProfileWithCWD(b.SandboxProfile, b.CWD)
+	output, exitCode, err := runPTYWithSandbox(ctx, p.Command, timeout, b.Sandbox, profile)
 	dur := time.Since(start)
 
 	// Handle PTY unsupported (Windows)
@@ -83,8 +90,12 @@ func (BashPTY) Execute(ctx context.Context, args json.RawMessage) (Result, error
 		}, nil
 	}
 
+	blocked, body := classifyBlocked(b.Sandbox, output)
+	if blocked {
+		return Result{Content: body, IsError: true}, nil
+	}
 	return Result{
-		Content: fmt.Sprintf("exit status %d (in %s)\n%s", exitCode, dur.Round(time.Millisecond), output),
+		Content: fmt.Sprintf("exit status %d (in %s)\n%s", exitCode, dur.Round(time.Millisecond), body),
 		IsError: true,
 	}, nil
 }

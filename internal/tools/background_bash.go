@@ -4,22 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 // JobController is the narrow interface tools use to start background
 // jobs. Implemented by *agent.Agent.
 type JobController interface {
-	StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int) (jobID string, err error)
+	StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int, sb sandbox.Sandbox, profile sandbox.Profile) (jobID string, err error)
 }
 
 // BackgroundBashTool runs a shell command in the background and returns immediately.
 type BackgroundBashTool struct {
-	c JobController
+	c              JobController
+	Sandbox        sandbox.Sandbox
+	SandboxProfile sandbox.Profile
+	CWD            string
 }
 
 // NewBackgroundBashTool creates a BackgroundBashTool backed by the given controller.
 func NewBackgroundBashTool(c JobController) *BackgroundBashTool {
 	return &BackgroundBashTool{c: c}
+}
+
+// NewBackgroundBashToolWithSandbox creates a background bash tool that passes
+// sandbox settings to the job controller before the child process starts.
+func NewBackgroundBashToolWithSandbox(c JobController, sb sandbox.Sandbox, profile sandbox.Profile, cwd string) *BackgroundBashTool {
+	return &BackgroundBashTool{c: c, Sandbox: sb, SandboxProfile: profile, CWD: cwd}
 }
 
 func (*BackgroundBashTool) Name() string { return "background_bash" }
@@ -61,7 +72,8 @@ func (t *BackgroundBashTool) Execute(ctx context.Context, args json.RawMessage) 
 		p.TimeoutMs = 600000 // 10 minutes default
 	}
 
-	jobID, err := t.c.StartBashJob(ctx, p.Command, p.PTY, p.TimeoutMs)
+	profile := sandboxProfileWithCWD(t.SandboxProfile, t.CWD)
+	jobID, err := t.c.StartBashJob(ctx, p.Command, p.PTY, p.TimeoutMs, t.Sandbox, profile)
 	if err != nil {
 		return Errf("failed to start background job: %v", err), nil
 	}

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/creack/pty"
 )
 
@@ -28,6 +29,10 @@ type OutputAppender interface {
 // a single buffer, and returns the trimmed/truncated output. ctx cancels
 // the child; timeout caps the total duration.
 func runPTY(ctx context.Context, command string, timeout time.Duration) (output string, exitCode int, err error) {
+	return runPTYWithSandbox(ctx, command, timeout, nil, sandbox.Profile{})
+}
+
+func runPTYWithSandbox(ctx context.Context, command string, timeout time.Duration, sb sandbox.Sandbox, profile sandbox.Profile) (output string, exitCode int, err error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -42,6 +47,7 @@ func runPTY(ctx context.Context, command string, timeout time.Duration) (output 
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Env = append(os.Environ(), "TERM=dumb")
+	notice := wrapWithSandbox(ctx, sb, profile, cmd)
 
 	// Start PTY
 	ptmx, err := pty.Start(cmd)
@@ -84,7 +90,7 @@ func runPTY(ctx context.Context, command string, timeout time.Duration) (output 
 	}
 
 	bufMu.Lock()
-	output = string(buf)
+	output = notice + string(buf)
 	copyErrFinal := copyErr
 	bufMu.Unlock()
 
@@ -113,6 +119,10 @@ func runPTY(ctx context.Context, command string, timeout time.Duration) (output 
 // This is used by the agent for background_bash with pty=true.
 // The appender's AppendOutput method is called with output chunks as they are produced.
 func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, appender OutputAppender) (string, int, error) {
+	return RunPTYForJobWithSandbox(ctx, command, timeout, appender, nil, sandbox.Profile{})
+}
+
+func RunPTYForJobWithSandbox(ctx context.Context, command string, timeout time.Duration, appender OutputAppender, sb sandbox.Sandbox, profile sandbox.Profile) (string, int, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -127,6 +137,10 @@ func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, ap
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Env = append(os.Environ(), "TERM=dumb")
+	notice := wrapWithSandbox(ctx, sb, profile, cmd)
+	if notice != "" && appender != nil {
+		appender.AppendOutput([]byte(notice))
+	}
 
 	// Start PTY
 	ptmx, err := pty.Start(cmd)
@@ -182,7 +196,7 @@ func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, ap
 	}
 
 	bufMu.Lock()
-	output := buf.String()
+	output := notice + buf.String()
 	copyErrFinal := copyErr
 	bufMu.Unlock()
 

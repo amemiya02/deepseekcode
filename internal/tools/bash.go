@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"runtime"
 	"time"
+
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 // Bash runs a single shell command in the user's default shell. The
@@ -17,7 +19,11 @@ import (
 // We always run via the shell rather than parsing the command ourselves
 // because the model is going to write `command1 | grep foo && command2`
 // constantly and we don't want to reimplement the shell.
-type Bash struct{}
+type Bash struct {
+	Sandbox        sandbox.Sandbox
+	SandboxProfile sandbox.Profile
+	CWD            string
+}
 
 func (Bash) Name() string { return "bash" }
 
@@ -51,7 +57,7 @@ func (Bash) Parameters() json.RawMessage {
 // tree (bounded) when a destructive bash pattern matches.
 func (Bash) AffectedPaths(args json.RawMessage) []string { return nil }
 
-func (Bash) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
+func (b Bash) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {
 		Command   string `json:"command"`
 		TimeoutMs int    `json:"timeout_ms"`
@@ -80,11 +86,14 @@ func (Bash) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
 
+	profile := sandboxProfileWithCWD(b.SandboxProfile, b.CWD)
+	notice := wrapWithSandbox(timeoutCtx, b.Sandbox, profile, cmd)
+
 	start := time.Now()
 	err := cmd.Run()
 	dur := time.Since(start)
 
-	output := truncateOutput(combined.String(), 10_000)
+	output := notice + truncateOutput(combined.String(), 10_000)
 
 	if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
 		return Errf("command timed out after %s\noutput so far:\n%s", dur, output), nil
@@ -94,9 +103,13 @@ func (Bash) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 		// Distinguish "ran but exited non-zero" from "couldn't run."
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
+			blocked, body := classifyBlocked(b.Sandbox, output)
+			if blocked {
+				return Result{Content: body, IsError: true}, nil
+			}
 			return Result{
 				Content: fmt.Sprintf("exit status %d (in %s)\n%s",
-					ee.ExitCode(), dur.Round(time.Millisecond), output),
+					ee.ExitCode(), dur.Round(time.Millisecond), body),
 				IsError: true,
 			}, nil
 		}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 // fakeJobController implements JobController for testing
@@ -15,13 +17,15 @@ type fakeJobController struct {
 	lastCommand   string
 	lastUsePTY    bool
 	lastTimeoutMs int
+	lastSandbox   sandbox.Sandbox
 }
 
-func (f *fakeJobController) StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int) (string, error) {
+func (f *fakeJobController) StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int, sb sandbox.Sandbox, profile sandbox.Profile) (string, error) {
 	f.startCalled = true
 	f.lastCommand = command
 	f.lastUsePTY = usePTY
 	f.lastTimeoutMs = timeoutMs
+	f.lastSandbox = sb
 	if f.startErr != nil {
 		return "", f.startErr
 	}
@@ -173,5 +177,19 @@ func TestBackgroundBashTool_Success(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "task_status") {
 		t.Errorf("expected content to mention 'task_status', got %q", result.Content)
+	}
+}
+
+func TestBackgroundBashTool_PassesSandbox(t *testing.T) {
+	ctrl := &fakeJobController{}
+	sb := &fakeSandbox{available: true}
+	tool := NewBackgroundBashToolWithSandbox(ctrl, sb, sandbox.Profile{AllowReadPaths: []string{"/tmp"}}, "/tmp")
+
+	_, err := tool.Execute(context.Background(), json.RawMessage(`{"command":"echo test"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ctrl.lastSandbox != sb {
+		t.Fatalf("sandbox = %v, want %v", ctrl.lastSandbox, sb)
 	}
 }

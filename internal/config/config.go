@@ -28,6 +28,7 @@ type Config struct {
 	Hooks       []HookItemConfig           `toml:"hooks"`
 	MCPServers  map[string]MCPServerConfig `toml:"mcp_servers"`
 	Web         WebConfig                  `toml:"web"`
+	Sandbox     SandboxConfig              `toml:"sandbox"`
 }
 
 // WebConfig configures web fetch and search tools.
@@ -36,6 +37,14 @@ type WebConfig struct {
 	SearchProvider string `toml:"search_provider"`
 	SearXNGBaseURL string `toml:"searxng_base_url"`
 	AllowPrivate   bool   `toml:"allow_private"`
+}
+
+// SandboxConfig controls optional OS-native sandboxing for shell tools.
+type SandboxConfig struct {
+	Enabled         bool     `toml:"enabled"`
+	AllowReadPaths  []string `toml:"allow_read_paths"`
+	AllowWritePaths []string `toml:"allow_write_paths"`
+	AllowNetwork    bool     `toml:"allow_network"`
 }
 
 type APIConfig struct {
@@ -279,6 +288,19 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if ov.Web.AllowPrivate {
 		base.Web.AllowPrivate = true
 	}
+
+	if meta.IsDefined("sandbox", "enabled") {
+		base.Sandbox.Enabled = ov.Sandbox.Enabled
+	}
+	if len(ov.Sandbox.AllowReadPaths) > 0 {
+		base.Sandbox.AllowReadPaths = ov.Sandbox.AllowReadPaths
+	}
+	if len(ov.Sandbox.AllowWritePaths) > 0 {
+		base.Sandbox.AllowWritePaths = ov.Sandbox.AllowWritePaths
+	}
+	if meta.IsDefined("sandbox", "allow_network") {
+		base.Sandbox.AllowNetwork = ov.Sandbox.AllowNetwork
+	}
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
@@ -286,6 +308,12 @@ var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 func expandEnvFields(c *Config) {
 	c.API.Key = expandEnv(c.API.Key)
 	c.API.BaseURL = expandEnv(c.API.BaseURL)
+	for i := range c.Sandbox.AllowReadPaths {
+		c.Sandbox.AllowReadPaths[i] = expandEnv(c.Sandbox.AllowReadPaths[i])
+	}
+	for i := range c.Sandbox.AllowWritePaths {
+		c.Sandbox.AllowWritePaths[i] = expandEnv(c.Sandbox.AllowWritePaths[i])
+	}
 	for name, srv := range c.MCPServers {
 		srv.Command = expandEnv(srv.Command)
 		for i := range srv.Args {

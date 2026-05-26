@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -153,5 +154,76 @@ name = "duet"
 	}
 	if cfg.Hooks[1].Name != "duet" {
 		t.Errorf("hook[1].name = %q want duet", cfg.Hooks[1].Name)
+	}
+}
+
+func TestDefaultWebConfig(t *testing.T) {
+	cfg := Default()
+	if !cfg.Web.Enabled {
+		t.Error("web.enabled should default true")
+	}
+	if cfg.Web.SearchProvider != "duckduckgo" {
+		t.Errorf("web.search_provider = %q, want duckduckgo", cfg.Web.SearchProvider)
+	}
+	if cfg.Web.AllowPrivate {
+		t.Error("web.allow_private should default false")
+	}
+}
+
+func TestValidateWebConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     WebConfig
+		wantErr bool
+		errPath string
+	}{
+		{
+			name:    "valid duckduckgo",
+			cfg:     WebConfig{Enabled: true, SearchProvider: "duckduckgo"},
+			wantErr: false,
+		},
+		{
+			name:    "valid searxng with base_url",
+			cfg:     WebConfig{Enabled: true, SearchProvider: "searxng", SearXNGBaseURL: "https://searx.example.com"},
+			wantErr: false,
+		},
+		{
+			name:    "searxng without base_url",
+			cfg:     WebConfig{Enabled: true, SearchProvider: "searxng"},
+			wantErr: true,
+			errPath: "web.searxng_base_url",
+		},
+		{
+			name:    "invalid provider",
+			cfg:     WebConfig{Enabled: true, SearchProvider: "google"},
+			wantErr: true,
+			errPath: "web.search_provider",
+		},
+		{
+			name:    "empty provider is valid (uses default)",
+			cfg:     WebConfig{Enabled: true, SearchProvider: ""},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.Web = tt.cfg
+			errs := ValidateStrict(&cfg)
+			if tt.wantErr {
+				if len(errs) == 0 {
+					t.Error("expected validation error, got none")
+				} else if tt.errPath != "" && errs[0].Path != tt.errPath {
+					t.Errorf("error path = %q, want %q", errs[0].Path, tt.errPath)
+				}
+			} else {
+				for _, e := range errs {
+					if strings.HasPrefix(e.Path, "web.") {
+						t.Errorf("unexpected web validation error: %s: %s", e.Path, e.Message)
+					}
+				}
+			}
+		})
 	}
 }

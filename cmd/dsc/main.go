@@ -228,6 +228,20 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashTool(a))
 	reg.Register(tools.NewTaskStatusTool(a))
+
+	// Web tools (fetch + search)
+	if cfg.Web.Enabled {
+		reg.Register(tools.NewWebFetchTool(cfg.Web.AllowPrivate))
+		var searchProvider tools.WebSearchProvider
+		switch cfg.Web.SearchProvider {
+		case "searxng":
+			searchProvider = tools.NewSearXNG(cfg.Web.SearXNGBaseURL)
+		default:
+			searchProvider = tools.NewDuckDuckGoHTML()
+		}
+		reg.Register(tools.NewWebSearchTool(searchProvider))
+	}
+
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
@@ -489,6 +503,20 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashTool(a))
 	reg.Register(tools.NewTaskStatusTool(a))
+
+	// Web tools (fetch + search)
+	if cfg.Web.Enabled {
+		reg.Register(tools.NewWebFetchTool(cfg.Web.AllowPrivate))
+		var searchProvider tools.WebSearchProvider
+		switch cfg.Web.SearchProvider {
+		case "searxng":
+			searchProvider = tools.NewSearXNG(cfg.Web.SearXNGBaseURL)
+		default:
+			searchProvider = tools.NewDuckDuckGoHTML()
+		}
+		reg.Register(tools.NewWebSearchTool(searchProvider))
+	}
+
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)

@@ -185,6 +185,12 @@ func isPrivateIP(ip net.IP) bool {
 
 // htmlToMarkdown converts HTML to a simple markdown representation.
 func htmlToMarkdown(htmlBytes []byte) string {
+	// First, extract the title from raw HTML (before sanitization removes head)
+	var title string
+	if doc, err := html.Parse(strings.NewReader(string(htmlBytes))); err == nil {
+		title = extractTitle(doc)
+	}
+
 	// Sanitize HTML with bluemonday
 	sanitized := bluemonday.UGCPolicy().SanitizeBytes(htmlBytes)
 
@@ -197,6 +203,14 @@ func htmlToMarkdown(htmlBytes []byte) string {
 
 	// Walk the DOM and extract text with markdown formatting
 	var b strings.Builder
+
+	// Add title first if found
+	if title != "" {
+		b.WriteString("# ")
+		b.WriteString(title)
+		b.WriteString("\n\n")
+	}
+
 	var walk func(*html.Node, int)
 	walk = func(n *html.Node, depth int) {
 		switch n.Type {
@@ -204,13 +218,6 @@ func htmlToMarkdown(htmlBytes []byte) string {
 			b.WriteString(n.Data)
 		case html.ElementNode:
 			switch n.Data {
-			case "title":
-				b.WriteString("# ")
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					walk(c, depth+1)
-				}
-				b.WriteString("\n\n")
-				return
 			case "h1", "h2", "h3", "h4", "h5", "h6":
 				level := n.Data[1]
 				for i := 0; i < int(level-'0'); i++ {
@@ -300,4 +307,23 @@ func htmlToMarkdown(htmlBytes []byte) string {
 		result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
 	}
 	return strings.TrimSpace(result)
+}
+
+// extractTitle finds the <title> element content from HTML.
+func extractTitle(n *html.Node) string {
+	if n.Type == html.ElementNode && n.Data == "title" {
+		var text strings.Builder
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.TextNode {
+				text.WriteString(c.Data)
+			}
+		}
+		return strings.TrimSpace(text.String())
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if t := extractTitle(c); t != "" {
+			return t
+		}
+	}
+	return ""
 }

@@ -27,6 +27,15 @@ type Config struct {
 	Sessions    SessionsConfig             `toml:"sessions"`
 	Hooks       []HookItemConfig           `toml:"hooks"`
 	MCPServers  map[string]MCPServerConfig `toml:"mcp_servers"`
+	Web         WebConfig                  `toml:"web"`
+}
+
+// WebConfig configures web fetch and search tools.
+type WebConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	SearchProvider string `toml:"search_provider"`
+	SearXNGBaseURL string `toml:"searxng_base_url"`
+	AllowPrivate   bool   `toml:"allow_private"`
 }
 
 type APIConfig struct {
@@ -254,6 +263,16 @@ func applyOverlay(base *Config, ov Config) {
 	if len(ov.MCPServers) > 0 {
 		base.MCPServers = ov.MCPServers
 	}
+
+	// Web config
+	base.Web.Enabled = ov.Web.Enabled || (base.Web.Enabled && !overlayHasKey(ov, "web.enabled"))
+	if ov.Web.SearchProvider != "" {
+		base.Web.SearchProvider = ov.Web.SearchProvider
+	}
+	if ov.Web.SearXNGBaseURL != "" {
+		base.Web.SearXNGBaseURL = ov.Web.SearXNGBaseURL
+	}
+	base.Web.AllowPrivate = ov.Web.AllowPrivate || (base.Web.AllowPrivate && !overlayHasKey(ov, "web.allow_private"))
 }
 
 // overlayHasKey is a temporary stub: real toml-key-presence tracking

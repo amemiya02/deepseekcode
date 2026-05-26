@@ -101,6 +101,20 @@ func ValidateStrict(c *Config) []ValidationError {
 	errs = append(errs, validateRules(c.Permissions.Rules.Deny, "deny")...)
 	errs = append(errs, validateRules(c.Permissions.Rules.Ask, "ask")...)
 
+	// Web config: search_provider must be known, searxng requires base_url
+	if c.Web.SearchProvider != "" && c.Web.SearchProvider != "duckduckgo" && c.Web.SearchProvider != "searxng" {
+		errs = append(errs, ValidationError{
+			Path:    "web.search_provider",
+			Message: "must be 'duckduckgo' or 'searxng', got " + quote(c.Web.SearchProvider),
+		})
+	}
+	if c.Web.SearchProvider == "searxng" && c.Web.SearXNGBaseURL == "" {
+		errs = append(errs, ValidationError{
+			Path:    "web.searxng_base_url",
+			Message: "required when search_provider is 'searxng'",
+		})
+	}
+
 	return errs
 }
 

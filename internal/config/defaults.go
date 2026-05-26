@@ -54,5 +54,9 @@ func Default() Config {
 			AutoResumeAge: 24,
 		},
 		MCPServers: map[string]MCPServerConfig{},
+		Web: WebConfig{
+			Enabled:        true,
+			SearchProvider: "duckduckgo",
+		},
 	}
 }

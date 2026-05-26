@@ -144,6 +144,19 @@ func (s *Scrollback) AppendHookFired(hookName, event, decision, reason string, d
 	})
 }
 
+// AppendRepair adds a repair receipt line. Kind is one of args_completed,
+// args_invalid, recovered, suppressed, schema_complex.
+func (s *Scrollback) AppendRepair(kind, tool, message string) {
+	s.EndStreams()
+	s.appendItem(chatItem{
+		kind:          itemRepair,
+		repairKind:    kind,
+		repairTool:    tool,
+		repairMessage: message,
+		timestamp:     time.Now(),
+	})
+}
+
 // AppendStepFinish closes the step's footer line with usage and
 // stop-reason. Ends any in-progress stream.
 func (s *Scrollback) AppendStepFinish(stopReason string, usage llm.Usage, model string) {

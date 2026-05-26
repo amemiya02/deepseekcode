@@ -182,6 +182,17 @@ func tapeEntries(items []chatItem) []tapeEntry {
 				label:   fmt.Sprintf("flash  tool_call  %s", it.tool),
 				chatIdx: i,
 			})
+		case itemRepair:
+			var toolPart string
+			if it.repairTool != "" {
+				toolPart = it.repairTool + " "
+			}
+			out = append(out, tapeEntry{
+				kind:    it.kind,
+				glyph:   "◈",
+				label:   fmt.Sprintf("repair  %s%s", toolPart, it.repairMessage),
+				chatIdx: i,
+			})
 		}
 	}
 	return out

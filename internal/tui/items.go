@@ -38,6 +38,7 @@ const (
 	itemToolCall
 	itemToolResult
 	itemHookFired
+	itemRepair
 	itemInfo
 	itemStepFinish
 	itemError
@@ -72,6 +73,11 @@ type chatItem struct {
 	// HookFired
 	hookDecision string
 	hookReason   string
+
+	// Repair
+	repairKind    string
+	repairTool    string
+	repairMessage string
 
 	// StepFinish
 	stopReason string
@@ -183,6 +189,15 @@ func (i chatItem) render(t Theme, width int) string {
 			i.duration.Round(time.Millisecond).String(),
 			i.hookReason)
 		return style.Render(line) + "\n"
+	case itemRepair:
+		// Compact one-line repair receipt.
+		// Format: "repaired tool call: <tool> <message>"
+		// Example: "repaired tool call: read_file args completed"
+		var toolPart string
+		if i.repairTool != "" {
+			toolPart = i.repairTool + " "
+		}
+		return t.Repair.Render("repaired tool call: "+toolPart+i.repairMessage) + "\n"
 	case itemInfo:
 		return t.Info.Render("[info] "+i.text) + "\n"
 	case itemStepFinish:

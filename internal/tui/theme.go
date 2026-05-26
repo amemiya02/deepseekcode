@@ -25,6 +25,8 @@ type Theme struct {
 	HookInfo lipgloss.Style
 	HookDeny lipgloss.Style
 
+	Repair lipgloss.Style
+
 	Status      lipgloss.Style
 	StatusModel lipgloss.Style
 	StatusGood  lipgloss.Style
@@ -98,6 +100,7 @@ func buildTheme(name string, p palette) Theme {
 		ToolBody:       lipgloss.NewStyle().Foreground(p.dim),
 		HookInfo:       lipgloss.NewStyle().Foreground(p.warn),
 		HookDeny:       lipgloss.NewStyle().Foreground(p.errc).Bold(true),
+		Repair:         lipgloss.NewStyle().Foreground(p.dim),
 		Status:         lipgloss.NewStyle().Foreground(p.dim),
 		StatusModel:    lipgloss.NewStyle().Foreground(p.flash).Bold(true),
 		StatusGood:     lipgloss.NewStyle().Foreground(p.success),

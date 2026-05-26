@@ -416,6 +416,9 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 			a.status.hint = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
 		}
 		a.refreshView()
+	case agent.EventRepair:
+		a.scrollback.AppendRepair(e.Kind, e.Tool, e.Message)
+		a.refreshView()
 	case agent.EventPermissionAsk:
 		a.permission.Open(e)
 		cmds = append(cmds, a.setMode(modePermission))

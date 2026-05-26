@@ -73,4 +73,21 @@ ALTER TABLE sessions ADD COLUMN compaction_summary TEXT NOT NULL DEFAULT '';
 ALTER TABLE sessions ADD COLUMN workspace_fp TEXT NOT NULL DEFAULT '';
 `
 
-const currentSchemaVersion = 2
+// schemaV3 extends v2 with:
+//   - transcript_receipts: append-only log of model usage, prefix hash,
+//     repair reports, and permission decisions for audit and debugging.
+const schemaV3 = `
+CREATE TABLE IF NOT EXISTS transcript_receipts (
+    session_id    TEXT NOT NULL,
+    seq           INTEGER NOT NULL,
+    kind          TEXT NOT NULL,
+    payload       TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    PRIMARY KEY (session_id, seq),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_receipts_session ON transcript_receipts(session_id, seq);
+`
+
+const currentSchemaVersion = 3

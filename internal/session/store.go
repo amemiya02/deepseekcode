@@ -138,6 +138,15 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("recording schema_version v2: %w", err)
 		}
 	}
+
+	if existing < 3 {
+		if _, err := s.db.Exec(schemaV3); err != nil {
+			return fmt.Errorf("applying schema v3: %w", err)
+		}
+		if _, err := s.db.Exec(`INSERT INTO schema_version(version) VALUES (3)`); err != nil {
+			return fmt.Errorf("recording schema_version v3: %w", err)
+		}
+	}
 	return nil
 }
 

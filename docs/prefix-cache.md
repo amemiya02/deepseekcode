@@ -22,13 +22,17 @@ component invalidates the cache.
 `ComputeFingerprint` (in `internal/llm/prefix_drift.go`) hashes:
 
 - `SystemSHA256` = SHA-256 of the static system prompt
-- `ToolsSHA256` = SHA-256 of tool names sorted and joined by `,`
+- `ToolsSHA256` = SHA-256 of canonical serialized tool specs (sorted by name, with canonicalized JSON-Schema)
 - `CombinedSHA256` = SHA-256 of `SystemSHA256:ToolsSHA256`
 
-Only tool **names** are hashed (not descriptions/parameters) — matching
-CodeWhale's `prefix_cache.rs`. This is a deliberate simplification;
-description changes also break the cache but are harder to detect
-cheaply.
+Tool specs are **fully serialized** (name, description, parameters) and
+canonicalized before hashing:
+
+1. Tools are sorted by function name
+2. Parameter schemas are canonicalized by recursive key-sort
+
+This means tool description changes and schema changes (but not key order
+differences) will trigger drift detection.
 
 ## How drift detection works
 

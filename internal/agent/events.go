@@ -178,3 +178,17 @@ type EventBackgroundJobFinish struct {
 
 func (EventBackgroundJobStart) isAgentEvent()  {}
 func (EventBackgroundJobFinish) isAgentEvent() {}
+
+// EventRepair reports a tool-call repair action (args completed, recovered,
+// suppressed, or schema-complex). Published by the repair integration layer
+// in runStep after model streaming finishes.
+type EventRepair struct {
+	Kind       string
+	Tool       string
+	CallID     string
+	Message    string
+	BeforeHash string
+	AfterHash  string
+}
+
+func (EventRepair) isAgentEvent() {}

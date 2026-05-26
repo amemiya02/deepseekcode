@@ -17,6 +17,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
+	"github.com/amemiya02/deepseekcode/internal/repair"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -120,6 +121,9 @@ type Agent struct {
 	savedTools  *tools.Registry
 	savedPolicy *permissions.Policy
 
+	// stormBreaker suppresses repeated identical read-only tool calls.
+	stormBreaker *repair.StormBreaker
+
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
@@ -144,6 +148,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		MaxToolCalls:  200,
 		CompactionCfg: DefaultCompactionConfig(),
 		Jobs:          NewJobRegistry(),
+		stormBreaker:  repair.NewStormBreaker(6, 3),
 		StopWhen: []StopCondition{
 			MaxSteps(50),
 			LoopDetection(5, 3),
@@ -437,6 +442,9 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			return StepRecord{}, fmt.Errorf("stream error: %w", ev.Err)
 		}
 	}
+
+	// Repair pipeline: scavenge, repair args, storm-breaker filter.
+	assembledCall = a.repairToolCalls(ctx, reasoning, text, assembledCall, &blocks)
 
 	// The wire flatten layer turns Blocks back into DeepSeek's
 	// {content, reasoning_content, tool_calls} shape on the next
@@ -772,6 +780,107 @@ func (a *Agent) lastUserText() string {
 		}
 	}
 	return ""
+}
+
+// repairToolCalls runs the repair pipeline on tool calls after streaming.
+// It scavenges hidden calls, repairs args, and applies storm-breaker filtering.
+// Returns the kept calls and updates blocks in-place to reflect repaired/kept calls.
+func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) []llm.ToolCall {
+	// Build allowed tool-name map from the registry
+	allowed := make(map[string]struct{})
+	for _, t := range a.Tools.AsLLMTools() {
+		allowed[t.Function.Name] = struct{}{}
+	}
+
+	// Step 1: Scavenge hidden tool calls from reasoning and content
+	scavengeResult := repair.ScavengeToolCalls(reasoning, content, allowed, repair.ScavengeOptions{})
+	for _, r := range scavengeResult.Reports {
+		a.bus.Publish(EventRepair{
+			Kind:       string(r.Kind),
+			Tool:       r.Tool,
+			CallID:     r.CallID,
+			Message:    r.Message,
+			BeforeHash: r.BeforeHash,
+			AfterHash:  r.AfterHash,
+		})
+	}
+
+	// Step 2: Merge declared and recovered calls (copy to avoid slice aliasing)
+	allCalls := make([]llm.ToolCall, 0, len(declared)+len(scavengeResult.Calls))
+	allCalls = append(allCalls, declared...)
+	allCalls = append(allCalls, scavengeResult.Calls...)
+
+	// Step 3: Repair arguments for all calls
+	repairedCalls := make([]llm.ToolCall, 0, len(allCalls))
+	for _, call := range allCalls {
+		repairResult := repair.RepairJSONArgs(call.Function.Arguments)
+		if repairResult.Changed {
+			call.Function.Arguments = repairResult.Repaired
+			a.bus.Publish(EventRepair{
+				Kind:       string(repair.KindArgsCompleted),
+				Tool:       call.Function.Name,
+				CallID:     call.ID,
+				Message:    "arguments repaired",
+				BeforeHash: repair.HashArgs(repairResult.Raw),
+				AfterHash:  repair.HashArgs(repairResult.Repaired),
+			})
+		}
+		if !repairResult.Valid {
+			a.bus.Publish(EventRepair{
+				Kind:    string(repair.KindArgsInvalid),
+				Tool:    call.Function.Name,
+				CallID:  call.ID,
+				Message: "arguments invalid after repair",
+			})
+		}
+		repairedCalls = append(repairedCalls, call)
+	}
+
+	// Step 4: Build tool kinds map from registry using ReadOnlyHint
+	kinds := make(map[string]repair.ToolKind)
+	for _, t := range a.Tools.All() {
+		kind := repair.ToolMutating // safe default
+		if ro, ok := t.(tools.ReadOnlyHint); ok && ro.IsReadOnly() {
+			kind = repair.ToolReadOnly
+		}
+		kinds[t.Name()] = kind
+	}
+
+	// Step 5: Apply storm-breaker filter
+	filtered := a.stormBreaker.Filter(repairedCalls, kinds)
+	for _, r := range filtered.Reports {
+		a.bus.Publish(EventRepair{
+			Kind:       string(r.Kind),
+			Tool:       r.Tool,
+			CallID:     r.CallID,
+			Message:    r.Message,
+			BeforeHash: r.BeforeHash,
+			AfterHash:  r.AfterHash,
+		})
+	}
+
+	// Step 6: Update blocks to reflect kept calls only
+	// Rebuild the blocks slice: preserve text/thinking blocks, replace tool-use blocks
+	var newBlocks []llm.ContentBlock
+	for _, b := range *blocks {
+		switch b.(type) {
+		case llm.TextBlock, llm.ThinkingBlock:
+			newBlocks = append(newBlocks, b)
+		case llm.ToolUseBlock:
+			// Skip original tool-use blocks; we'll add kept ones below
+		}
+	}
+	// Add ToolUseBlocks for kept calls
+	for _, call := range filtered.Calls {
+		newBlocks = append(newBlocks, llm.ToolUseBlock{
+			ID:    call.ID,
+			Name:  call.Function.Name,
+			Input: json.RawMessage(call.Function.Arguments),
+		})
+	}
+	*blocks = newBlocks
+
+	return filtered.Calls
 }
 
 // AskQuestion implements tools.Questioner. It emits an EventQuestionAsk

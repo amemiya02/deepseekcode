@@ -162,3 +162,19 @@ type EventSubagentFinish struct {
 
 func (EventSubagentStart) isAgentEvent()  {}
 func (EventSubagentFinish) isAgentEvent() {}
+
+// EventBackgroundJobStart signals that a background job has started.
+type EventBackgroundJobStart struct {
+	ID   string
+	Kind JobKind
+}
+
+// EventBackgroundJobFinish signals that a background job has completed.
+type EventBackgroundJobFinish struct {
+	ID      string
+	State   JobState
+	Summary string
+}
+
+func (EventBackgroundJobStart) isAgentEvent()  {}
+func (EventBackgroundJobFinish) isAgentEvent() {}

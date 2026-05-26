@@ -223,11 +223,13 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	reg.Register(tools.NewQuestionTool(a))
-	a.Thinking = cfg.Defaults.Thinking
-	a.AutoReasoning = cfg.Defaults.AutoReasoning
-	a.PromptBuilder = newPromptBuilder(cwd, skills)
+		reg.Register(tools.NewBackgroundBashTool(a))
+		reg.Register(tools.NewTaskStatusTool(a))
+		a.Thinking = cfg.Defaults.Thinking
+		a.AutoReasoning = cfg.Defaults.AutoReasoning
+		a.PromptBuilder = newPromptBuilder(cwd, skills)
 
-	// Hooks: assemble configs from TOML, then add the Duet builtin
+		// Hooks: assemble configs from TOML, then add the Duet builtin
 	// when enabled. Only create a Runner if there is work for it.
 	var hookConfigs []hooks.HookConfig
 	for _, hi := range cfg.Hooks {
@@ -465,6 +467,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
 	reg.Register(tools.NewQuestionTool(a))
+	reg.Register(tools.NewBackgroundBashTool(a))
+	reg.Register(tools.NewTaskStatusTool(a))
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)

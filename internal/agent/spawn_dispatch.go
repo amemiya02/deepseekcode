@@ -95,6 +95,38 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		}
 	}()
 
+	// Async path: run in goroutine and return job ID immediately
+	if req.Async {
+		job, jobCtx := s.Parent.Jobs.Start(context.Background(), JobSubagent, req.Description)
+
+		s.Parent.bus.Publish(EventBackgroundJobStart{
+			ID:   job.ID,
+			Kind: JobSubagent,
+		})
+
+		go func() {
+			_, err := child.Run(jobCtx, req.Description)
+
+			state := JobSucceeded
+			summary := extractFinalText(child)
+			if err != nil {
+				state = JobFailed
+				summary = "subagent failed: " + err.Error()
+			}
+
+			s.Parent.Jobs.Finish(job.ID, state, summary)
+
+			s.Parent.bus.Publish(EventBackgroundJobFinish{
+				ID:      job.ID,
+				State:   state,
+				Summary: summary,
+			})
+		}()
+
+		return tools.SpawnResult{JobID: job.ID, Summary: "started"}, nil
+	}
+
+	// Sync path (original behavior)
 	s.Parent.bus.Publish(EventSubagentStart{Agent: req.Agent, Description: req.Description})
 
 	_, err := child.Run(ctx, req.Description)

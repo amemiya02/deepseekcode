@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +109,10 @@ type Agent struct {
 	// assembly layer (cmd/dsc or TUI) after construction.
 	Spawner tools.Spawner
 
+	// Jobs manages background jobs (async sub-agents and background_bash).
+	// Initialized in New; closed via defer in Run.
+	Jobs *JobRegistry
+
 	// Plan-mode state. inPlan is true while the agent is in plan mode;
 	// savedTools/savedPolicy hold the originals so ExitPlan can restore.
 	inPlan      bool
@@ -136,6 +142,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		System:        DefaultSystemPrompt,
 		MaxToolCalls:  200,
 		CompactionCfg: DefaultCompactionConfig(),
+		Jobs:          NewJobRegistry(),
 		StopWhen: []StopCondition{
 			MaxSteps(50),
 			LoopDetection(5, 3),
@@ -209,6 +216,13 @@ Behavioral rules:
 func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, err error) {
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
+	}()
+
+	// Cancel all running background jobs when the agent exits.
+	defer func() {
+		if a.Jobs != nil {
+			a.Jobs.Close()
+		}
 	}()
 
 	defer func() {
@@ -780,3 +794,170 @@ func (a *Agent) AskQuestion(ctx context.Context, req tools.QuestionRequest) (too
 }
 
 var _ tools.Questioner = (*Agent)(nil)
+
+// StartBashJob implements tools.JobController. It starts a background bash
+// job and returns immediately with the job ID.
+func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, timeoutMs int) (string, error) {
+	if a.Jobs == nil {
+		return "", fmt.Errorf("no job registry configured")
+	}
+
+	job, jobCtx := a.Jobs.Start(context.Background(), JobBackgroundBash, command)
+
+	a.bus.Publish(EventBackgroundJobStart{
+		ID:   job.ID,
+		Kind: JobBackgroundBash,
+	})
+
+	go func() {
+		defer func() {
+			a.bus.Publish(EventBackgroundJobFinish{
+				ID:      job.ID,
+				State:   job.State,
+				Summary: job.Summary,
+			})
+		}()
+
+		var exitCode int
+		var execErr error
+
+		if usePTY {
+			// Use PTY runner - pass job directly as OutputAppender
+			_, exitCode, execErr = tools.RunPTYForJob(jobCtx, command, time.Duration(timeoutMs)*time.Millisecond, job)
+		} else {
+			// Use regular bash runner
+			exitCode, execErr = runBashCommand(jobCtx, command, timeoutMs, job)
+		}
+
+		if execErr != nil {
+			a.Jobs.Finish(job.ID, JobFailed, fmt.Sprintf("error: %v", execErr))
+			return
+		}
+
+		state := JobSucceeded
+		if exitCode != 0 {
+			state = JobFailed
+		}
+
+		summary := fmt.Sprintf("exit %d", exitCode)
+		a.Jobs.Finish(job.ID, state, summary)
+	}()
+
+	return job.ID, nil
+}
+
+// runBashCommand runs a shell command and streams output to the job.
+// Returns exit code and error.
+func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job) (int, error) {
+	shell := "/bin/sh"
+	if s := os.Getenv("SHELL"); s != "" {
+		shell = s
+	}
+
+	// Create timeout context
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 600 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, shell, "-c", command)
+	cmd.Env = append(os.Environ(), "TERM=dumb")
+
+	// Get pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return -1, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return -1, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return -1, err
+	}
+
+	// Stream output to job buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stdout.Read(buf)
+			if n > 0 {
+				job.AppendOutput(buf[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := stderr.Read(buf)
+			if n > 0 {
+				job.AppendOutput(buf[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
+	err = cmd.Wait()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return -1, err
+		}
+	}
+
+	return exitCode, nil
+}
+
+// JobStatus implements tools.JobStatusController.
+func (a *Agent) JobStatus(id string) (tools.Status, error) {
+	if a.Jobs == nil {
+		return tools.Status{}, fmt.Errorf("no job registry configured")
+	}
+	status, err := a.Jobs.JobStatus(id)
+	if err != nil {
+		return tools.Status{}, err
+	}
+	// Convert our Status to tools.Status
+	return tools.Status{
+		ID:           status.ID,
+		Kind:         status.Kind,
+		State:        status.State,
+		StartedAt:    status.StartedAt,
+		FinishedAt:   status.FinishedAt,
+		Summary:      status.Summary,
+		Tail:         status.Tail,
+		DroppedBytes: status.DroppedBytes,
+		TotalLines:   status.TotalLines,
+		Truncated:    status.Truncated,
+	}, nil
+}
+
+// CancelJob implements tools.JobStatusController.
+func (a *Agent) CancelJob(id string) error {
+	if a.Jobs == nil {
+		return fmt.Errorf("no job registry configured")
+	}
+	if !a.Jobs.Cancel(id) {
+		return fmt.Errorf("job not found or already finished")
+	}
+	return nil
+}
+
+var _ tools.JobController = (*Agent)(nil)
+var _ tools.JobStatusController = (*Agent)(nil)

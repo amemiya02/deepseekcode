@@ -96,7 +96,13 @@ type ResponseFmt struct {
 // canonicalized by key-sort, Messages flattened from ContentBlock form
 // into DeepSeek's OpenAI shape. Pass this to the HTTP layer instead of
 // json.Marshal directly.
+//
+// The request is first sanitized for DeepSeek thinking mode: assistant
+// messages with tool calls but no thinking block have a placeholder
+// reasoning_content prepended.
 func (r Request) MarshalCacheStable() ([]byte, error) {
+	// Sanitize first so thinking-mode replay is stable
+	r = r.SanitizeForDeepSeek()
 	tools := make([]Tool, len(r.Tools))
 	copy(tools, r.Tools)
 	sort.SliceStable(tools, func(i, j int) bool {

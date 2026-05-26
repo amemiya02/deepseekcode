@@ -96,6 +96,40 @@ func TestTapeIncludesRepair(t *testing.T) {
 	}
 }
 
+func TestRepairLongMessageWraps(t *testing.T) {
+	th := DarkTheme()
+	// Create a long message that should wrap at narrow width
+	longMsg := "this is a very long repair message that should wrap when rendered at a narrow width because it exceeds the terminal width constraint"
+	item := chatItem{
+		kind:          itemRepair,
+		repairKind:    "args_completed",
+		repairTool:    "read_file",
+		repairMessage: longMsg,
+	}
+
+	// Render at narrow width (20 columns) — should wrap to multiple lines
+	out := item.render(th, 20)
+
+	// Should contain multiple newlines (wrapped lines)
+	newlineCount := strings.Count(out, "\n")
+	if newlineCount < 2 {
+		t.Errorf("expected wrapped output with multiple newlines at width 20, got %d newlines: %q", newlineCount, out)
+	}
+
+	// The item kind should remain itemRepair
+	if item.kind != itemRepair {
+		t.Errorf("item kind changed during render, got %v", item.kind)
+	}
+
+	// Verify the content is preserved
+	if !strings.Contains(out, "repaired tool call:") {
+		t.Errorf("expected 'repaired tool call:' in output, got %q", out)
+	}
+	if !strings.Contains(out, "read_file") {
+		t.Errorf("expected 'read_file' in output, got %q", out)
+	}
+}
+
 func TestRepairNotRoutedThroughEventInfo(t *testing.T) {
 	// This test verifies that EventRepair is handled separately from EventInfo.
 	// The dispatchAgentEvent function should have a dedicated case for EventRepair

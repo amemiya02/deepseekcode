@@ -38,10 +38,25 @@ func (s statusState) render(t Theme) string {
 	if s.costKnown || llm.CostKnown(s.model) {
 		costStr = fmt.Sprintf("¥%.4f", s.costYuan)
 	}
+
+	// Build HUD data for additional metrics (without model to avoid duplication)
+	hudData := HUDData{
+		ContextTokens:   s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
+		InputHitTokens:  s.usage.PromptCacheHitTokens,
+		InputMissTokens: s.usage.PromptCacheMissTokens,
+		OutputTokens:    s.usage.CompletionTokens,
+	}
+
+	hudLine := RenderHUD(hudData, 200) // Use wide width for status line
+
+	// Build the full status line preserving existing model/step/cost semantics
 	line1 := modeBadge + t.StatusModel.Render(shortModel(s.model)) +
 		dot + fmt.Sprintf("%d steps", s.steps) +
 		dot + fmt.Sprintf("cache %.0f%%", hit) +
 		dot + costStr
+	if hudLine != "" {
+		line1 += dot + hudLine
+	}
 	if s.compactionCount > 0 {
 		line1 += dot + fmt.Sprintf("compacted %d", s.compactionCount)
 	}

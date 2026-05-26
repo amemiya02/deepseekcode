@@ -116,10 +116,9 @@ func (i chatItem) render(t Theme, width int) string {
 		if strings.HasPrefix(i.tool, "mcp__") {
 			mcpTag = "[MCP] "
 		}
-		argsMax := width - len(i.tool) - len(mcpTag) - 8
-		args := compactArgs(i.args, argsMax)
-		return prefix + t.ToolCall.Render(IconToolPending+" "+mcpTag+i.tool) +
-			t.Hint.Render("  "+args) + "\n"
+		// Use RenderToolSummary for consistent tool rendering
+		summary := RenderToolSummary(i.tool, i.args, "", false, width-8)
+		return prefix + t.ToolCall.Render(IconToolPending+" "+mcpTag+summary) + "\n"
 	case itemToolResult:
 		// Card: header line with status + duration, then body lines.
 		prefix := t.CardBar.Render(BarThick + " ")
@@ -131,7 +130,10 @@ func (i chatItem) render(t Theme, width int) string {
 			mcpTag = "[MCP] "
 		}
 
-		// Header line with status icon + tool name + args + duration.
+		// Use RenderToolSummary for consistent tool rendering
+		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, width-len(dur)-10)
+
+		// Header line with status icon + summary + duration.
 		var statusIcon string
 		var statusStyle lipgloss.Style
 		if i.result.IsError {
@@ -141,11 +143,8 @@ func (i chatItem) render(t Theme, width int) string {
 			statusIcon = IconToolOk
 			statusStyle = t.ToolOk
 		}
-		argsMax := width - len(i.tool) - len(mcpTag) - len(dur) - 10
-		args := compactArgs(i.args, argsMax)
 		header := prefix +
-			statusStyle.Render(statusIcon+" "+mcpTag+i.tool) +
-			t.CardHeader.Render("  "+args) +
+			statusStyle.Render(statusIcon+" "+mcpTag+summary) +
 			"  " + statusStyle.Render(dur) + "\n"
 
 		body := i.result.Content
@@ -190,14 +189,15 @@ func (i chatItem) render(t Theme, width int) string {
 			i.hookReason)
 		return style.Render(line) + "\n"
 	case itemRepair:
-		// Compact one-line repair receipt.
+		// Compact one-line repair receipt with wrapping for long messages.
 		// Format: "repaired tool call: <tool> <message>"
 		// Example: "repaired tool call: read_file args completed"
 		var toolPart string
 		if i.repairTool != "" {
 			toolPart = i.repairTool + " "
 		}
-		return t.Repair.Render("repaired tool call: "+toolPart+i.repairMessage) + "\n"
+		line := "repaired tool call: " + toolPart + i.repairMessage
+		return t.Repair.Render(wrapWords(line, width)) + "\n"
 	case itemInfo:
 		return t.Info.Render("[info] "+i.text) + "\n"
 	case itemStepFinish:

@@ -12,6 +12,7 @@ func RegisterBuiltins(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string
 	r.Register(NewApplyPatchTool(cwd, maxWriteBytes))
 	r.Register(&EditFile{CWD: cwd})
 	r.Register(Bash{})
+	r.Register(BashPTY{})
 	r.Register(Glob{})
 	r.Register(Grep{})
 	r.Register(Ls{})

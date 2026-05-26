@@ -154,8 +154,8 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 		}
 	}
 
-	// Bash: classify intent, then apply tiered policy.
-	if c.Tool.Name() == "bash" {
+	// Bash/bash_pty: classify intent, then apply tiered policy.
+	if c.Tool.Name() == "bash" || c.Tool.Name() == "bash_pty" {
 		var args struct {
 			Command string `json:"command"`
 		}

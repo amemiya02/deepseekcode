@@ -211,6 +211,54 @@ func TestPolicyBashReadAllowsIgnoresAllowlist(t *testing.T) {
 	}
 }
 
+func TestPolicyBashPTYSameAsBash(t *testing.T) {
+	// bash_pty should be treated the same as bash for permission decisions.
+	pol := New(ModeDefault, "/tmp", nil, []string{}, nil)
+
+	// BashRead → auto-allow
+	dec, _ := pol.Decide(Check{
+		Tool: &fakeTool{name: "bash_pty", readOnly: false},
+		Args: json.RawMessage(`{"command":"git status"}`),
+	})
+	if dec != Allow {
+		t.Errorf("bash_pty BashRead should auto-allow: got %v", dec)
+	}
+
+	// BashDestructive → ask
+	dec, _ = pol.Decide(Check{
+		Tool: &fakeTool{name: "bash_pty", readOnly: false},
+		Args: json.RawMessage(`{"command":"rm -rf node_modules"}`),
+	})
+	if dec != Ask {
+		t.Errorf("bash_pty BashDestructive should ask: got %v", dec)
+	}
+
+	// BashSafe → ask (no allowlist)
+	dec, _ = pol.Decide(Check{
+		Tool: &fakeTool{name: "bash_pty", readOnly: false},
+		Args: json.RawMessage(`{"command":"mkdir newdir"}`),
+	})
+	if dec != Ask {
+		t.Errorf("bash_pty BashSafe should ask: got %v", dec)
+	}
+}
+
+func TestPolicyBashPTYPlanModeDeny(t *testing.T) {
+	// bash_pty should be denied in plan mode (non-readonly tool).
+	pol := New(ModePlan, "/tmp", nil, []string{}, nil)
+
+	dec, reason := pol.Decide(Check{
+		Tool: &fakeTool{name: "bash_pty", readOnly: false},
+		Args: json.RawMessage(`{"command":"git status"}`),
+	})
+	if dec != Deny {
+		t.Errorf("bash_pty in plan mode should be denied: got %v", dec)
+	}
+	if !strings.Contains(reason, "plan mode") {
+		t.Errorf("reason should mention plan mode: got %q", reason)
+	}
+}
+
 func TestPolicyBashDestructiveAlwaysAsks(t *testing.T) {
 	// BashDestructive should always ask, even if the allowlist contains the pattern.
 	pol := New(ModeDefault, "/tmp", nil, []string{"rm -rf *"}, nil)

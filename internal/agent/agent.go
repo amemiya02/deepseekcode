@@ -218,13 +218,6 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
 	}()
 
-	// Cancel all running background jobs when the agent exits.
-	defer func() {
-		if a.Jobs != nil {
-			a.Jobs.Close()
-		}
-	}()
-
 	defer func() {
 		if a.HookRunner != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -810,11 +803,20 @@ func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, t
 	})
 
 	go func() {
+		var finalState JobState
+		var finalSummary string
+
 		defer func() {
+			// Read final state under lock before publishing
+			job.mu.Lock()
+			finalState = job.State
+			finalSummary = job.Summary
+			job.mu.Unlock()
+
 			a.bus.Publish(EventBackgroundJobFinish{
 				ID:      job.ID,
-				State:   job.State,
-				Summary: job.Summary,
+				State:   finalState,
+				Summary: finalSummary,
 			})
 		}()
 
@@ -830,7 +832,11 @@ func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, t
 		}
 
 		if execErr != nil {
-			a.Jobs.Finish(job.ID, JobFailed, fmt.Sprintf("error: %v", execErr))
+			if jobCtx.Err() == context.Canceled {
+				a.Jobs.Finish(job.ID, JobCanceled, "canceled by agent shutdown")
+			} else {
+				a.Jobs.Finish(job.ID, JobFailed, fmt.Sprintf("error: %v", execErr))
+			}
 			return
 		}
 
@@ -844,6 +850,16 @@ func (a *Agent) StartBashJob(ctx context.Context, command string, usePTY bool, t
 	}()
 
 	return job.ID, nil
+}
+
+// jobWriter wraps a Job to implement io.Writer for streaming output.
+type jobWriter struct {
+	job *Job
+}
+
+func (w jobWriter) Write(p []byte) (int, error) {
+	w.job.AppendOutput(p)
+	return len(p), nil
 }
 
 // runBashCommand runs a shell command and streams output to the job.
@@ -865,59 +881,22 @@ func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Env = append(os.Environ(), "TERM=dumb")
 
-	// Get pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return -1, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return -1, err
-	}
+	// Use a single writer to merge stdout/stderr
+	cmd.Stdout = jobWriter{job: job}
+	cmd.Stderr = jobWriter{job: job}
 
 	if err := cmd.Start(); err != nil {
 		return -1, err
 	}
 
-	// Stream output to job buffer
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				job.AppendOutput(buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, err := stderr.Read(buf)
-			if n > 0 {
-				job.AppendOutput(buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-	}()
-
-	wg.Wait()
-	err = cmd.Wait()
+	waitErr := cmd.Wait()
 
 	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return -1, err
+			return -1, waitErr
 		}
 	}
 
@@ -925,11 +904,11 @@ func runBashCommand(ctx context.Context, command string, timeoutMs int, job *Job
 }
 
 // JobStatus implements tools.JobStatusController.
-func (a *Agent) JobStatus(id string) (tools.Status, error) {
+func (a *Agent) JobStatus(id string, tailLines int) (tools.Status, error) {
 	if a.Jobs == nil {
 		return tools.Status{}, fmt.Errorf("no job registry configured")
 	}
-	status, err := a.Jobs.JobStatus(id)
+	status, err := a.Jobs.JobStatus(id, tailLines)
 	if err != nil {
 		return tools.Status{}, err
 	}
@@ -957,6 +936,14 @@ func (a *Agent) CancelJob(id string) error {
 		return fmt.Errorf("job not found or already finished")
 	}
 	return nil
+}
+
+// Close releases agent resources. It cancels all running background jobs
+// and should be called when the session ends (not per prompt turn).
+func (a *Agent) Close() {
+	if a.Jobs != nil {
+		a.Jobs.Close()
+	}
 }
 
 var _ tools.JobController = (*Agent)(nil)

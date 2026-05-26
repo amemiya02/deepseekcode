@@ -11,6 +11,7 @@ type AgentDef struct {
 	Mode        string   // frontmatter "mode": "subagent" (default) or "plan"
 	Model       string   // frontmatter "model" (empty = inherit parent)
 	Tools       []string // frontmatter "tools": comma-separated whitelist; nil = inherit parent full set
+	Worktree    bool     // frontmatter "worktree": true|false — isolate in git worktree
 	Prompt      string   // body after frontmatter (trimmed)
 	Path        string   // absolute path (filled by Load)
 }
@@ -63,6 +64,8 @@ func parseFrontmatter(fm, body string) (AgentDef, error) {
 			d.Model = val
 		case "tools":
 			d.Tools = splitTools(val)
+		case "worktree":
+			d.Worktree = parseBool(val)
 		}
 	}
 	if d.Mode == "" {
@@ -97,4 +100,13 @@ func unquote(s string) string {
 		}
 	}
 	return s
+}
+
+func parseBool(s string) bool {
+	switch strings.ToLower(s) {
+	case "true", "yes", "1":
+		return true
+	default:
+		return false
+	}
 }

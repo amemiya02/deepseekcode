@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -134,8 +135,8 @@ func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, ap
 	}
 	defer ptmx.Close()
 
-	// Read all output
-	var buf []byte
+	// Read output incrementally, streaming to appender as we go
+	var buf bytes.Buffer
 	var bufMu sync.Mutex
 	var copyErr error
 	var copyWg sync.WaitGroup
@@ -143,15 +144,23 @@ func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, ap
 	copyWg.Add(1)
 	go func() {
 		defer copyWg.Done()
-		data, err := io.ReadAll(ptmx)
-		bufMu.Lock()
-		buf = data
-		copyErr = err
-		bufMu.Unlock()
+		chunk := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(chunk)
+			if n > 0 {
+				bufMu.Lock()
+				buf.Write(chunk[:n])
+				bufMu.Unlock()
 
-		// Append to job if appender provided
-		if appender != nil && len(data) > 0 {
-			appender.AppendOutput(data)
+				// Stream to job buffer incrementally
+				if appender != nil {
+					appender.AppendOutput(chunk[:n])
+				}
+			}
+			if err != nil {
+				copyErr = err
+				break
+			}
 		}
 	}()
 
@@ -173,7 +182,7 @@ func RunPTYForJob(ctx context.Context, command string, timeout time.Duration, ap
 	}
 
 	bufMu.Lock()
-	output := string(buf)
+	output := buf.String()
 	copyErrFinal := copyErr
 	bufMu.Unlock()
 

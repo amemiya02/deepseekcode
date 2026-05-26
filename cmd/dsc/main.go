@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
@@ -39,6 +40,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/tools"
 	"github.com/amemiya02/deepseekcode/internal/tui"
 	"github.com/amemiya02/deepseekcode/internal/version"
+	"github.com/amemiya02/deepseekcode/internal/worktree"
 )
 
 func main() {
@@ -222,14 +224,15 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
-		reg.Register(tools.NewBackgroundBashTool(a))
-		reg.Register(tools.NewTaskStatusTool(a))
-		a.Thinking = cfg.Defaults.Thinking
-		a.AutoReasoning = cfg.Defaults.AutoReasoning
-		a.PromptBuilder = newPromptBuilder(cwd, skills)
+	reg.Register(tools.NewBackgroundBashTool(a))
+	reg.Register(tools.NewTaskStatusTool(a))
+	a.Thinking = cfg.Defaults.Thinking
+	a.AutoReasoning = cfg.Defaults.AutoReasoning
+	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
-		// Hooks: assemble configs from TOML, then add the Duet builtin
+	// Hooks: assemble configs from TOML, then add the Duet builtin
 	// when enabled. Only create a Runner if there is work for it.
 	var hookConfigs []hooks.HookConfig
 	for _, hi := range cfg.Hooks {
@@ -402,6 +405,22 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 	}
 
+	// Set up sub-agent spawner with worktree support (A7).
+	defs, _ := agents.Load(cwd, home)
+	wtMgr := worktree.NewManager(cwd)
+	wtLocks := worktree.NewBranchLock()
+	spawner := &agent.LoopSpawner{
+		Client:   client,
+		Parent:   a,
+		Defs:     defs,
+		MaxDepth: 2,
+		WT:       wtMgr,
+		Locks:    wtLocks,
+	}
+	a.Spawner = spawner
+	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewWorktreeTool(wtMgr))
+
 	app := tui.New(tui.Config{
 		Agent:           a,
 		Model:           cfg.Defaults.Model,
@@ -466,12 +485,29 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashTool(a))
 	reg.Register(tools.NewTaskStatusTool(a))
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
+
+	// Set up sub-agent spawner with worktree support (A7).
+	defs, _ := agents.Load(cwd, home4skills)
+	wtMgr := worktree.NewManager(cwd)
+	wtLocks := worktree.NewBranchLock()
+	spawner := &agent.LoopSpawner{
+		Client:   client,
+		Parent:   a,
+		Defs:     defs,
+		MaxDepth: 2,
+		WT:       wtMgr,
+		Locks:    wtLocks,
+	}
+	a.Spawner = spawner
+	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewWorktreeTool(wtMgr))
 
 	// Consumer goroutine: pulls events from the agent's lifetime stream
 	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents

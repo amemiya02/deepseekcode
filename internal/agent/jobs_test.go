@@ -153,7 +153,7 @@ func TestJobRegistryClose(t *testing.T) {
 	if job1.State != JobSucceeded {
 		t.Errorf("job1 should still be succeeded, got %v", job1.State)
 	}
-	if job2.State != JobRunning {
+	if job2.State != JobCanceled {
 		t.Errorf("job2 should be canceled by Close, got %v", job2.State)
 	}
 }
@@ -246,7 +246,7 @@ func TestJobRegistryJobStatus(t *testing.T) {
 
 	r.Finish(job.ID, JobSucceeded, "completed")
 
-	status, err := r.JobStatus(job.ID)
+	status, err := r.JobStatus(job.ID, 200)
 	if err != nil {
 		t.Fatalf("JobStatus error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestJobRegistryJobStatus(t *testing.T) {
 	}
 
 	// Unknown job
-	_, err = r.JobStatus("nonexistent")
+	_, err = r.JobStatus("nonexistent", 200)
 	if err == nil {
 		t.Error("expected error for unknown job")
 	}

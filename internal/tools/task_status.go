@@ -9,7 +9,7 @@ import (
 
 // JobStatusController is the narrow interface for status queries.
 type JobStatusController interface {
-	JobStatus(id string) (Status, error)
+	JobStatus(id string, tailLines int) (Status, error)
 	CancelJob(id string) error
 }
 
@@ -82,7 +82,7 @@ func (t *TaskStatusTool) Execute(ctx context.Context, args json.RawMessage) (Res
 		_ = t.c.CancelJob(p.JobID)
 	}
 
-	status, err := t.c.JobStatus(p.JobID)
+	status, err := t.c.JobStatus(p.JobID, p.TailLines)
 	if err != nil {
 		return Errf("job not found: %s", p.JobID), nil
 	}

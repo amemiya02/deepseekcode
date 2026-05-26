@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -135,6 +136,57 @@ func TestSubagentToolExecute(t *testing.T) {
 		}
 		if res.Content != "(subagent returned no summary)" {
 			t.Errorf("Content = %q, want placeholder", res.Content)
+		}
+	})
+
+	t.Run("async success", func(t *testing.T) {
+		sp := &fakeSpawner{result: SpawnResult{JobID: "test-job-async", Summary: "started"}}
+		tool := NewSubagentTool(sp)
+		res, err := tool.Execute(context.Background(), json.RawMessage(`{"description":"do work","async":true}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.IsError {
+			t.Fatalf("expected success, got error: %s", res.Content)
+		}
+		if !sp.called {
+			t.Error("Spawn not called")
+		}
+		if !sp.req.Async {
+			t.Error("expected Async=true in SpawnRequest")
+		}
+		if !strings.Contains(res.Content, "started subagent job test-job-async") {
+			t.Errorf("expected content to contain 'started subagent job test-job-async', got %q", res.Content)
+		}
+		if !strings.Contains(res.Content, "task_status") {
+			t.Errorf("expected content to mention 'task_status', got %q", res.Content)
+		}
+	})
+
+	t.Run("async with empty job ID falls through to sync", func(t *testing.T) {
+		sp := &fakeSpawner{result: SpawnResult{JobID: "", Summary: "done"}}
+		tool := NewSubagentTool(sp)
+		res, err := tool.Execute(context.Background(), json.RawMessage(`{"description":"x","async":true}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sp.req.Async != true {
+			t.Error("expected Async=true in SpawnRequest")
+		}
+		if res.Content != "done" {
+			t.Errorf("expected sync summary 'done', got %q", res.Content)
+		}
+	})
+
+	t.Run("async default false", func(t *testing.T) {
+		sp := &fakeSpawner{result: SpawnResult{Summary: "done"}}
+		tool := NewSubagentTool(sp)
+		_, err := tool.Execute(context.Background(), json.RawMessage(`{"description":"x"}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if sp.req.Async {
+			t.Error("expected Async=false by default")
 		}
 	})
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -261,5 +263,87 @@ func TestSpawnInheritsParentSystem(t *testing.T) {
 	_, err := s.Spawn(context.Background(), tools.SpawnRequest{Description: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSpawnAsyncDepthLimit(t *testing.T) {
+	client := llm.NewClient("k", "http://unused")
+	parent := New(client, tools.New(), permissions.New(permissions.ModeDefault, "", nil, nil, nil), "m")
+	s := &LoopSpawner{
+		Client:   client,
+		Parent:   parent,
+		MaxDepth: 1,
+		depth:    1, // already at max
+	}
+	res, err := s.Spawn(context.Background(), tools.SpawnRequest{Description: "x", Async: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.JobID != "" {
+		t.Errorf("expected empty JobID at depth limit, got %q", res.JobID)
+	}
+	if res.Summary != "subagent depth limit reached" {
+		t.Errorf("Summary = %q, want 'subagent depth limit reached'", res.Summary)
+	}
+}
+
+func TestSpawnAsyncReturnsJobID(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if n == 1 {
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"content":"async child done"}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+			)
+		} else {
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	reg := tools.New()
+	reg.Register(stubTool{name: "read_file"})
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, reg, pol, "test-model")
+	parent.MaxToolCalls = 0 // no tool calls, just text
+
+	s := &LoopSpawner{
+		Client: client,
+		Parent: parent,
+		Defs:   map[string]agents.AgentDef{},
+	}
+
+	res, err := s.Spawn(context.Background(), tools.SpawnRequest{Description: "do async work", Async: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.JobID == "" {
+		t.Fatal("expected non-empty JobID for async spawn")
+	}
+	if !strings.Contains(res.Summary, "started") {
+		t.Errorf("expected Summary to contain 'started', got %q", res.Summary)
+	}
+
+	// Wait for background job to finish
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-parent.Events():
+			if finish, ok := ev.(EventBackgroundJobFinish); ok && finish.ID == res.JobID {
+				if finish.State != JobSucceeded {
+					t.Errorf("expected JobSucceeded, got %v", finish.State)
+				}
+				if !strings.Contains(finish.Summary, "async child done") {
+					t.Errorf("expected summary to contain 'async child done', got %q", finish.Summary)
+				}
+				return
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for EventBackgroundJobFinish")
+		}
 	}
 }

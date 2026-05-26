@@ -244,6 +244,7 @@ func (r *JobRegistry) Cancel(id string) bool {
 }
 
 // Close cancels all running jobs and waits up to 2 seconds for them to finish.
+// Any jobs still running after the grace period are marked as JobCanceled.
 func (r *JobRegistry) Close() {
 	r.mu.RLock()
 	var running []*Job
@@ -279,10 +280,21 @@ func (r *JobRegistry) Close() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+
+	// Mark any still-running jobs as canceled (they had no worker to observe cancellation).
+	for _, job := range running {
+		job.mu.Lock()
+		if job.State == JobRunning {
+			job.State = JobCanceled
+			job.FinishedAt = time.Now()
+			job.Summary = "canceled by agent shutdown"
+		}
+		job.mu.Unlock()
+	}
 }
 
 // JobStatus returns status information for a job suitable for tools.Status return.
-func (r *JobRegistry) JobStatus(id string) (Status, error) {
+func (r *JobRegistry) JobStatus(id string, tailLines int) (Status, error) {
 	job, ok := r.Get(id)
 	if !ok {
 		return Status{}, fmt.Errorf("job not found: %s", id)
@@ -299,10 +311,13 @@ func (r *JobRegistry) JobStatus(id string) (Status, error) {
 	job.mu.Unlock()
 
 	// Now call Tail without holding the lock
-	tail, dropped, truncated := job.Tail(200)
-	var tailLines int
+	if tailLines <= 0 {
+		tailLines = 200
+	}
+	tail, dropped, truncated := job.Tail(tailLines)
+	var lineCount int
 	if tail != "" {
-		tailLines = bytes.Count([]byte(tail), []byte{'\n'}) + 1
+		lineCount = bytes.Count([]byte(tail), []byte{'\n'}) + 1
 	}
 
 	return Status{
@@ -314,7 +329,7 @@ func (r *JobRegistry) JobStatus(id string) (Status, error) {
 		Summary:      summary,
 		Tail:         tail,
 		DroppedBytes: dropped,
-		TotalLines:   tailLines,
+		TotalLines:   lineCount,
 		Truncated:    truncated,
 	}, nil
 }

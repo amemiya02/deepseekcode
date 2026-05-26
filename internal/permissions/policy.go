@@ -227,6 +227,14 @@ func (p *Policy) DeriveChild(requested Mode) *Policy {
 	return New(clampMode(p.Mode, requested), p.Cwd, p.SecretPathPatterns, p.BashAllowlist(), p.Rules)
 }
 
+// DeriveChildWithCwd is like DeriveChild but overrides the child's Cwd.
+// Used when a sub-agent runs in a worktree with a different working directory.
+func (p *Policy) DeriveChildWithCwd(requested Mode, cwd string) *Policy {
+	child := p.DeriveChild(requested)
+	child.Cwd = cwd
+	return child
+}
+
 // clampMode returns the safer (lower danger) of a and b.
 func clampMode(a, b Mode) Mode {
 	if danger(a) <= danger(b) {

@@ -21,7 +21,12 @@ func ResolveAndCheck(raw, cwd string) (string, error) {
 		return "", fmt.Errorf("resolve cwd symlinks: %w", err)
 	}
 
-	abs, err := filepath.Abs(raw)
+	// If raw is relative, resolve it against cwd first.
+	target := raw
+	if !filepath.IsAbs(raw) {
+		target = filepath.Join(cwdAbs, raw)
+	}
+	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", fmt.Errorf("resolve path %s: %w", raw, err)
 	}

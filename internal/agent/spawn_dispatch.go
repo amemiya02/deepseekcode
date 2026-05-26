@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
+	"github.com/amemiya02/deepseekcode/internal/worktree"
 )
 
 // LoopSpawner implements tools.Spawner by running a child Agent loop
@@ -19,6 +22,13 @@ type LoopSpawner struct {
 	Defs     map[string]agents.AgentDef
 	MaxDepth int // 0 → default 2
 	depth    int // current recursion depth (internal)
+
+	// WT is the worktree manager for git-worktree isolation.
+	// nil = worktree path disabled; def.Worktree==true degrades to normal spawn.
+	WT *worktree.Manager
+
+	// Locks provides branch-level mutual exclusion for worktree operations.
+	Locks worktree.BranchLocker
 }
 
 var _ tools.Spawner = (*LoopSpawner)(nil)
@@ -59,8 +69,38 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		names = readOnlyToolNames(sub)
 	}
 
+	// Worktree isolation: create a git worktree for the child agent
+	// when the agent def has worktree:true and we have a manager.
+	useWT := def.Worktree && def.Mode != "plan" && s.WT != nil && s.Locks != nil
+	var wtCwd string
+	var wtRelease func()
+	if useWT {
+		branch := fmt.Sprintf("subagent/%s-%d", coalesce(req.Agent, "generic"), time.Now().UnixNano())
+		rel, err := s.Locks.Acquire(ctx, branch)
+		if err != nil {
+			return tools.SpawnResult{Summary: "worktree branch busy: " + err.Error()}, nil
+		}
+		wt, err := s.WT.Create(ctx, branch, "HEAD")
+		if err != nil {
+			rel()
+			return tools.SpawnResult{Summary: "worktree create failed: " + err.Error()}, nil
+		}
+		wtCwd = wt.Path
+		wtRelease = rel
+	} else if def.Worktree && s.WT == nil {
+		s.Parent.EmitInfo("worktree disabled: no manager configured")
+	}
+
 	subReg := s.Parent.Tools.Subset(names)
-	childPol := s.Parent.Permissions.DeriveChild(childMode)
+	if wtCwd != "" {
+		subReg = subReg.CloneForCWD(wtCwd)
+	}
+	var childPol *permissions.Policy
+	if wtCwd != "" {
+		childPol = s.Parent.Permissions.DeriveChildWithCwd(childMode, wtCwd)
+	} else {
+		childPol = s.Parent.Permissions.DeriveChild(childMode)
+	}
 
 	model := def.Model
 	if model == "" {
@@ -105,21 +145,37 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		})
 
 		go func() {
+			if wtRelease != nil {
+				defer wtRelease()
+			}
 			_, err := child.Run(jobCtx, req.Description)
 
 			state := JobSucceeded
 			summary := extractFinalText(child)
 			if err != nil {
-				state = JobFailed
-				summary = "subagent failed: " + err.Error()
+				if jobCtx.Err() == context.Canceled {
+					state = JobCanceled
+					summary = "canceled by agent shutdown"
+				} else {
+					state = JobFailed
+					summary = "subagent failed: " + err.Error()
+				}
 			}
 
 			s.Parent.Jobs.Finish(job.ID, state, summary)
 
+			// Read final state/summary under lock so user-initiated
+			// cancel (which sets "canceled by user") is not overwritten
+			// by the goroutine's local "canceled by agent shutdown".
+			job.mu.Lock()
+			eventState := job.State
+			eventSummary := job.Summary
+			job.mu.Unlock()
+
 			s.Parent.bus.Publish(EventBackgroundJobFinish{
 				ID:      job.ID,
-				State:   state,
-				Summary: summary,
+				State:   eventState,
+				Summary: eventSummary,
 			})
 		}()
 
@@ -127,6 +183,9 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 	}
 
 	// Sync path (original behavior)
+	if wtRelease != nil {
+		defer wtRelease()
+	}
 	s.Parent.bus.Publish(EventSubagentStart{Agent: req.Agent, Description: req.Description})
 
 	_, err := child.Run(ctx, req.Description)
@@ -207,4 +266,12 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// coalesce returns a if non-empty, otherwise b.
+func coalesce(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

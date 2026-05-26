@@ -139,6 +139,19 @@ func (r *Registry) Subset(names []string) *Registry {
 	return sub
 }
 
+// CloneForCWD returns a new Registry where every cwd-aware tool has been
+// cloned with its working directory rebound to cwd. Tools without a cwd
+// dependency are shared with the original registry.
+func (r *Registry) CloneForCWD(cwd string) *Registry {
+	cloned := New()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for name, t := range r.tools {
+		cloned.tools[name] = CloneForCWD(t, cwd)
+	}
+	return cloned
+}
+
 // MustParams marshals v to JSON and panics on error. Tools call this
 // from their Parameters() method on a Go struct literal, which can't
 // fail in practice. Keeps each tool definition readable.

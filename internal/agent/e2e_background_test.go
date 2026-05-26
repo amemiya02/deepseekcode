@@ -4,9 +4,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,13 +64,17 @@ func TestE2EBackgroundBash(t *testing.T) {
 			case EventBackgroundJobFinish:
 				sawFinish = true
 			case EventDone:
-				t.Log("agent done")
-				return
+				// Continue waiting for background job finish
+			}
+			// Exit loop when we have both start and finish
+			if sawStart && sawFinish {
+				goto done
 			}
 		case <-timeout:
 			t.Fatal("timeout waiting for events")
 		}
 	}
+done:
 
 	if !sawStart {
 		t.Error("expected EventBackgroundJobStart")
@@ -82,28 +89,45 @@ func TestE2EBackgroundBash(t *testing.T) {
 		t.Errorf("expected kind 'background_bash', got %q", jobKind)
 	}
 
-	// Check the job status
-	status, err := parent.JobStatus(jobID)
+	// Check the job status via TaskStatusTool.Execute (T-2805 acceptance).
+	taskStatusTool := tools.NewTaskStatusTool(parent)
+	res, err := taskStatusTool.Execute(context.Background(),
+		json.RawMessage(fmt.Sprintf(`{"job_id":%q,"tail_lines":200}`, jobID)))
 	if err != nil {
-		t.Fatalf("JobStatus error: %v", err)
+		t.Fatalf("TaskStatusTool.Execute error: %v", err)
 	}
-	if status.State != "succeeded" {
-		t.Errorf("expected state 'succeeded', got %q", status.State)
+	if res.IsError {
+		t.Fatalf("task_status returned error: %s", res.Content)
 	}
-	if !strings.Contains(status.Tail, "hello") {
-		t.Errorf("expected tail to contain 'hello', got %q", status.Tail)
+	if !strings.Contains(res.Content, "state: succeeded") {
+		t.Errorf("expected 'state: succeeded' in content, got %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "hello") {
+		t.Errorf("expected 'hello' in content, got %q", res.Content)
 	}
 }
 
 func TestE2EAsyncSubagent(t *testing.T) {
+	var reqCount int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&reqCount, 1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		// Parent turn: model calls task with async:true
-		emitSSE(w,
-			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"task","arguments":"{\"description\":\"test\",\"async\":true}"}}]}}]}`,
-			`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`,
-		)
+		if n == 1 {
+			// Parent turn: model calls task with async:true
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"task","arguments":"{\"description\":\"test\",\"async\":true}"}}]}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`,
+			)
+		} else if n == 2 {
+			// Child subagent: returns final text
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"content":"subagent result: found 3 items"}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`,
+			)
+		} else {
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
 	}))
 	defer srv.Close()
 
@@ -132,28 +156,37 @@ func TestE2EAsyncSubagent(t *testing.T) {
 	}()
 
 	var sawStart, sawFinish bool
+	var sawSubagentStart bool
 	var jobID string
 	var jobKind string
+	var finishState JobState
 
 	timeout := time.After(5 * time.Second)
 	for {
 		select {
 		case ev := <-parent.Events():
 			switch e := ev.(type) {
+			case EventSubagentStart:
+				sawSubagentStart = true
 			case EventBackgroundJobStart:
 				sawStart = true
 				jobID = e.ID
 				jobKind = e.Kind.String()
 			case EventBackgroundJobFinish:
 				sawFinish = true
+				finishState = e.State
 			case EventDone:
-				t.Log("agent done")
-				return
+				// Continue waiting for background job finish
+			}
+			// Exit loop when we have both start and finish
+			if sawStart && sawFinish {
+				goto done
 			}
 		case <-timeout:
 			t.Fatal("timeout waiting for events")
 		}
 	}
+done:
 
 	if !sawStart {
 		t.Error("expected EventBackgroundJobStart")
@@ -168,6 +201,29 @@ func TestE2EAsyncSubagent(t *testing.T) {
 		t.Errorf("expected kind 'subagent', got %q", jobKind)
 	}
 
-	// Verify we did NOT emit EventSubagentStart (async uses BackgroundJob events)
-	// This test confirms the event unification
+	// T-2805: async subagent MUST NOT emit EventSubagentStart
+	if sawSubagentStart {
+		t.Error("async subagent must NOT emit EventSubagentStart (uses BackgroundJob events)")
+	}
+
+	// T-2805: verify via TaskStatusTool.Execute
+	taskStatusTool := tools.NewTaskStatusTool(parent)
+	res, err := taskStatusTool.Execute(context.Background(),
+		json.RawMessage(fmt.Sprintf(`{"job_id":%q,"tail_lines":200}`, jobID)))
+	if err != nil {
+		t.Fatalf("TaskStatusTool.Execute error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_status returned error: %s", res.Content)
+	}
+	if !strings.Contains(res.Content, "state: succeeded") {
+		t.Errorf("expected 'state: succeeded' in content, got %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "subagent result") {
+		t.Errorf("expected 'subagent result' in content, got %q", res.Content)
+	}
+
+	if finishState != JobSucceeded {
+		t.Errorf("expected finish state JobSucceeded, got %v", finishState)
+	}
 }

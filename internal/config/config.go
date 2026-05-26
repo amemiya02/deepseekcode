@@ -19,16 +19,22 @@ import (
 
 // Config is the full configuration tree. Keep it flat per concern.
 type Config struct {
-	API         APIConfig                  `toml:"api"`
-	Defaults    DefaultsConfig             `toml:"defaults"`
-	Tools       ToolsConfig                `toml:"tools"`
-	Duet        DuetConfig                 `toml:"duet"`
-	Permissions PermissionsConfig          `toml:"permissions"`
-	Sessions    SessionsConfig             `toml:"sessions"`
-	Hooks       []HookItemConfig           `toml:"hooks"`
-	MCPServers  map[string]MCPServerConfig `toml:"mcp_servers"`
-	Web         WebConfig                  `toml:"web"`
-	Sandbox     SandboxConfig              `toml:"sandbox"`
+	API         APIConfig                     `toml:"api"`
+	Defaults    DefaultsConfig                `toml:"defaults"`
+	Tools       ToolsConfig                   `toml:"tools"`
+	Duet        DuetConfig                    `toml:"duet"`
+	Permissions PermissionsConfig             `toml:"permissions"`
+	Sessions    SessionsConfig                `toml:"sessions"`
+	Hooks       []HookItemConfig              `toml:"hooks"`
+	MCPServers  map[string]MCPServerConfig    `toml:"mcp_servers"`
+	Web         WebConfig                     `toml:"web"`
+	Sandbox     SandboxConfig                 `toml:"sandbox"`
+	Active      ActiveConfig                  `toml:"active"`
+	Providers   map[string]ProviderConfigTOML `toml:"providers"`
+
+	LegacyAPIUsed         bool `toml:"-"`
+	DefaultsModelExplicit bool `toml:"-"`
+	providersExplicit     bool
 }
 
 // WebConfig configures web fetch and search tools.
@@ -45,6 +51,21 @@ type SandboxConfig struct {
 	AllowReadPaths  []string `toml:"allow_read_paths"`
 	AllowWritePaths []string `toml:"allow_write_paths"`
 	AllowNetwork    bool     `toml:"allow_network"`
+}
+
+type ActiveConfig struct {
+	Provider string `toml:"provider"`
+}
+
+type ProviderConfigTOML struct {
+	Type                string `toml:"type"`
+	BaseURL             string `toml:"base_url"`
+	APIKey              string `toml:"api_key"`
+	EnvVar              string `toml:"env_var"`
+	SecretsFileKey      string `toml:"secrets_file_key"`
+	FirstTokenTimeoutMs int    `toml:"first_token_timeout_ms"`
+	ChunkStallTimeoutMs int    `toml:"chunk_stall_timeout_ms"`
+	DefaultModel        string `toml:"default_model"`
 }
 
 type APIConfig struct {
@@ -138,14 +159,12 @@ func Load() (Config, error) {
 	if cfg.API.Key == "" {
 		cfg.API.Key = os.Getenv("DEEPSEEK_API_KEY")
 	}
+	applyLegacyAPICompat(&cfg)
 	return cfg, nil
 }
 
 // Validate checks invariants. Call after Load + any CLI overrides.
 func (c Config) Validate() error {
-	if c.API.Key == "" {
-		return errors.New("DEEPSEEK_API_KEY is not set (export it or put `key` in [api])")
-	}
 	if c.API.BaseURL == "" {
 		return errors.New("api.base_url is empty")
 	}
@@ -203,9 +222,15 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if ov.API.ChunkStallTimeoutMs != 0 {
 		base.API.ChunkStallTimeoutMs = ov.API.ChunkStallTimeoutMs
 	}
+	if meta.IsDefined("api", "key") || meta.IsDefined("api", "base_url") {
+		base.LegacyAPIUsed = true
+	}
 
 	if ov.Defaults.Model != "" {
 		base.Defaults.Model = ov.Defaults.Model
+	}
+	if meta.IsDefined("defaults", "model") {
+		base.DefaultsModelExplicit = true
 	}
 	// bool overlays only flip if explicitly set in toml; we can't tell
 	// from a zero value alone. For booleans we accept the overlay always
@@ -301,6 +326,14 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if meta.IsDefined("sandbox", "allow_network") {
 		base.Sandbox.AllowNetwork = ov.Sandbox.AllowNetwork
 	}
+
+	if ov.Active.Provider != "" {
+		base.Active.Provider = ov.Active.Provider
+	}
+	if len(ov.Providers) > 0 {
+		base.Providers = ov.Providers
+		base.providersExplicit = true
+	}
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
@@ -308,6 +341,11 @@ var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)
 func expandEnvFields(c *Config) {
 	c.API.Key = expandEnv(c.API.Key)
 	c.API.BaseURL = expandEnv(c.API.BaseURL)
+	for name, provider := range c.Providers {
+		provider.BaseURL = expandEnv(provider.BaseURL)
+		provider.APIKey = expandEnv(provider.APIKey)
+		c.Providers[name] = provider
+	}
 	for i := range c.Sandbox.AllowReadPaths {
 		c.Sandbox.AllowReadPaths[i] = expandEnv(c.Sandbox.AllowReadPaths[i])
 	}
@@ -337,4 +375,33 @@ func expandEnv(s string) string {
 		}
 		return m
 	})
+}
+
+func applyLegacyAPICompat(c *Config) {
+	if c.Active.Provider == "" {
+		c.Active.Provider = "deepseek"
+	}
+	if c.Providers == nil {
+		c.Providers = map[string]ProviderConfigTOML{}
+	}
+	p, ok := c.Providers["deepseek"]
+	if !ok {
+		p = ProviderConfigTOML{Type: "deepseek"}
+	}
+	if p.BaseURL == "" {
+		p.BaseURL = c.API.BaseURL
+	}
+	if p.EnvVar == "" && !c.providersExplicit {
+		p.EnvVar = "DEEPSEEK_API_KEY"
+	}
+	if c.API.Key != "" && !c.providersExplicit && p.APIKey == "" {
+		p.APIKey = c.API.Key
+	}
+	if p.FirstTokenTimeoutMs == 0 {
+		p.FirstTokenTimeoutMs = c.API.FirstTokenTimeoutMs
+	}
+	if p.ChunkStallTimeoutMs == 0 {
+		p.ChunkStallTimeoutMs = c.API.ChunkStallTimeoutMs
+	}
+	c.Providers["deepseek"] = p
 }

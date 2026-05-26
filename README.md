@@ -80,6 +80,10 @@ r / R      toggle most recent / all thinking blocks
 | `DEEPSEEK_API_KEY` | (required) | DeepSeek API credential. |
 | `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` | `100000` | Trigger threshold for automatic session compaction. Once the estimated token count of the running message list exceeds this value, older turns are collapsed into a single summary message. Set lower for chattier sessions, higher to disable in practice. |
 
+## Providers
+
+DeepSeek is the default provider; OpenAI-compatible endpoints can be configured in `.deepseek/config.toml`. See [Providers](docs/PROVIDERS.md).
+
 ## Architecture in one paragraph
 
 ReAct loop (callback-driven, modeled on Crush's `internal/agent/agent.go`)

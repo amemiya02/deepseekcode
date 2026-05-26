@@ -26,11 +26,11 @@ func TestDefaultValid(t *testing.T) {
 	}
 }
 
-func TestValidateRequiresAPIKey(t *testing.T) {
+func TestValidateAllowsSecretResolutionLater(t *testing.T) {
 	cfg := Default()
 	cfg.API.Key = ""
-	if err := cfg.Validate(); err == nil {
-		t.Error("expected error when API key is empty")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate should allow provider secret resolution later: %v", err)
 	}
 }
 
@@ -167,6 +167,48 @@ func TestDefaultWebConfig(t *testing.T) {
 	}
 	if cfg.Web.AllowPrivate {
 		t.Error("web.allow_private should default false")
+	}
+}
+
+func TestDefaultProvidersConfig(t *testing.T) {
+	cfg := Default()
+	if cfg.Active.Provider != "deepseek" {
+		t.Fatalf("active.provider = %q, want deepseek", cfg.Active.Provider)
+	}
+	p, ok := cfg.Providers["deepseek"]
+	if !ok {
+		t.Fatal("default deepseek provider missing")
+	}
+	if p.Type != "deepseek" || p.BaseURL != "https://api.deepseek.com" || p.EnvVar != "DEEPSEEK_API_KEY" {
+		t.Fatalf("deepseek provider = %#v", p)
+	}
+}
+
+func TestConfigLoadProviders(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[active]
+provider = "openai"
+
+[providers.openai]
+type = "openai-compat"
+base_url = "https://api.openai.com"
+env_var = "OPENAI_API_KEY"
+default_model = "gpt-4o"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Active.Provider != "openai" {
+		t.Fatalf("active.provider = %q, want openai", cfg.Active.Provider)
+	}
+	if cfg.Providers["openai"].Type != "openai-compat" {
+		t.Fatalf("provider = %#v", cfg.Providers["openai"])
 	}
 }
 

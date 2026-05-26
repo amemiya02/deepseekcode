@@ -64,5 +64,15 @@ func Default() Config {
 			AllowWritePaths: nil,
 			AllowNetwork:    false,
 		},
+		Active: ActiveConfig{Provider: "deepseek"},
+		Providers: map[string]ProviderConfigTOML{
+			"deepseek": {
+				Type:                "deepseek",
+				BaseURL:             "https://api.deepseek.com",
+				EnvVar:              "DEEPSEEK_API_KEY",
+				FirstTokenTimeoutMs: 45000,
+				ChunkStallTimeoutMs: 20000,
+			},
+		},
 	}
 }

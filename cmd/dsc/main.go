@@ -121,6 +121,7 @@ func run() error {
 
 	if model != "" {
 		cfg.Defaults.Model = model
+		cfg.DefaultsModelExplicit = true
 	}
 	if noDuet {
 		cfg.Duet.Enabled = false
@@ -171,13 +172,11 @@ func run() error {
 // agent.Callbacks.OnInfo so nothing writes to stderr after this point —
 // stderr writes would corrupt Bubble Tea's AltScreen.
 func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, continueSes bool, resumeSes string) error {
-	client := llm.NewClient(cfg.API.Key, cfg.API.BaseURL)
-	if cfg.API.FirstTokenTimeoutMs > 0 {
-		client.FirstTokenTimeout = time.Duration(cfg.API.FirstTokenTimeoutMs) * time.Millisecond
+	rt, err := providerFromConfig(cfg)
+	if err != nil {
+		return err
 	}
-	if cfg.API.ChunkStallTimeoutMs > 0 {
-		client.ChunkStallTimeout = time.Duration(cfg.API.ChunkStallTimeoutMs) * time.Millisecond
-	}
+	client := rt.Client
 
 	reg := tools.New()
 	sb, sbProfile := sandboxFromConfig(cfg)
@@ -232,7 +231,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	// Load skills once; shared between prompt builder and command table.
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
-	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
@@ -299,7 +298,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		hookRunner := hooks.NewRunner()
 		if cfg.Duet.Enabled {
 			hookRunner.Register("duet", hooks.NewDuetHook(
-				client,
+				rt.Provider,
 				cfg.Duet.ExtraDestructive,
 				cwd,
 				cfg.Permissions.SecretPathPatterns,
@@ -327,6 +326,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		notices    []string
 		sess       session.Session
 	)
+	notices = append(notices, rt.Notices...)
 
 	store, err := session.Open("")
 	if err != nil {
@@ -357,7 +357,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 
 		if sess.ID == "" {
-			sess, err = store.NewSession(ctx, cwd, cfg.Defaults.Model, cfg.Duet.Enabled)
+			sess, err = store.NewSession(ctx, cwd, rt.Model, cfg.Duet.Enabled)
 			if err != nil {
 				notices = append(notices, "warning: creating session: "+err.Error())
 			}
@@ -446,7 +446,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	app := tui.New(tui.Config{
 		Agent:           a,
-		Model:           cfg.Defaults.Model,
+		Model:           rt.Model,
 		Thinking:        cfg.Defaults.Thinking,
 		Theme:           cfg.Defaults.Theme,
 		Cwd:             cwd,
@@ -463,6 +463,53 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 type modeFlags struct {
 	yolo, readOnly, askAll bool
+}
+
+type providerRuntime struct {
+	Provider llm.Provider
+	Client   *llm.Client
+	Model    string
+	Notices  []string
+}
+
+func providerFromConfig(cfg config.Config) (providerRuntime, error) {
+	name := cfg.Active.Provider
+	if name == "" {
+		name = "deepseek"
+	}
+	pcfg, ok := cfg.Providers[name]
+	if !ok {
+		return providerRuntime{}, fmt.Errorf("active provider %q is not configured", name)
+	}
+	apiKey, err := config.ResolveSecret(pcfg)
+	if err != nil {
+		return providerRuntime{}, err
+	}
+	model := cfg.Defaults.Model
+	if !cfg.DefaultsModelExplicit && pcfg.DefaultModel != "" {
+		model = pcfg.DefaultModel
+	}
+	validationModel := pcfg.DefaultModel
+	if validationModel == "" {
+		validationModel = model
+	}
+	prov, err := llm.NewProvider(pcfg.Type, llm.ProviderConfig{
+		Name:                name,
+		BaseURL:             pcfg.BaseURL,
+		APIKey:              apiKey,
+		FirstTokenTimeoutMs: pcfg.FirstTokenTimeoutMs,
+		ChunkStallTimeoutMs: pcfg.ChunkStallTimeoutMs,
+		DefaultModel:        model,
+		ValidationModel:     validationModel,
+	})
+	if err != nil {
+		return providerRuntime{}, err
+	}
+	notices := []string(nil)
+	if cfg.LegacyAPIUsed {
+		notices = append(notices, "`[api]` is deprecated; use `[providers.deepseek]`")
+	}
+	return providerRuntime{Provider: prov, Client: prov.BaseClient(), Model: model, Notices: notices}, nil
 }
 
 func sandboxFromConfig(cfg config.Config) (sandboxpkg.Sandbox, sandboxpkg.Profile) {
@@ -484,15 +531,16 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	client := llm.NewClient(cfg.API.Key, cfg.API.BaseURL)
-	if cfg.API.FirstTokenTimeoutMs > 0 {
-		client.FirstTokenTimeout = time.Duration(cfg.API.FirstTokenTimeoutMs) * time.Millisecond
+	rt, err := providerFromConfig(cfg)
+	if err != nil {
+		return err
 	}
-	if cfg.API.ChunkStallTimeoutMs > 0 {
-		client.ChunkStallTimeout = time.Duration(cfg.API.ChunkStallTimeoutMs) * time.Millisecond
-	}
+	client := rt.Client
 	client.OnRetry = func(attempt int, err error) {
 		fmt.Fprintf(os.Stderr, "\n\033[33m[retry %d/%d: %v]\033[0m\n", attempt, client.MaxRetries, err)
+	}
+	for _, notice := range rt.Notices {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", notice)
 	}
 
 	reg := tools.New()
@@ -520,7 +568,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	// Load skills once; shared between prompt builder and command table.
 	home4skills, _ := os.UserHomeDir()
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
-	a := agent.New(client, reg, pol, cfg.Defaults.Model)
+	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
@@ -562,7 +610,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	// Consumer goroutine: pulls events from the agent's lifetime stream
 	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents
 	// adapter — same channel, different sink.
-	go consumeAgentEvents(a, cfg.Defaults.Model)
+	go consumeAgentEvents(a, rt.Model)
 
 	reason, err := a.Run(ctx, prompt)
 	fmt.Fprintf(os.Stderr, "\n[stop: %s", reason)

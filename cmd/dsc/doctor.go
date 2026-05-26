@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
+	sandboxpkg "github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/version"
 )
@@ -31,7 +33,10 @@ type checkResult struct {
 func runDoctor(cfg config.Config, loadErr error) error {
 	results := []checkResult{
 		checkConfig(loadErr),
-		checkAPIKey(cfg),
+		checkActiveProvider(cfg),
+		checkProviderSecret(cfg),
+		checkProviderCapabilities(cfg),
+		checkSandbox(cfg),
 		checkAPIReachable(cfg),
 		checkSQLite(),
 		checkSnapshots(),
@@ -82,28 +87,84 @@ func checkConfig(err error) checkResult {
 	return checkResult{"config", "ok", "loaded"}
 }
 
-func checkAPIKey(cfg config.Config) checkResult {
-	if cfg.API.Key == "" {
-		return checkResult{"api_key", "fail", "DEEPSEEK_API_KEY is not set"}
+func checkActiveProvider(cfg config.Config) checkResult {
+	name, pcfg, ok := activeProvider(cfg)
+	if !ok {
+		return checkResult{"active provider", "fail", "not configured: " + cfg.Active.Provider}
 	}
-	if len(cfg.API.Key) < 10 {
-		return checkResult{"api_key", "warn", "API key looks too short"}
+	return checkResult{"active provider", "ok", fmt.Sprintf("%s (type=%s, base_url=%s)", name, pcfg.Type, pcfg.BaseURL)}
+}
+
+func checkProviderSecret(cfg config.Config) checkResult {
+	_, pcfg, ok := activeProvider(cfg)
+	if !ok {
+		return checkResult{"secret", "fail", "active provider not configured"}
 	}
-	return checkResult{"api_key", "ok", "set (" + cfg.API.Key[:4] + "...)"}
+	_, source, err := config.ResolveSecretWithSource(pcfg)
+	if err != nil {
+		return checkResult{"secret", "fail", "NOT FOUND: " + err.Error()}
+	}
+	switch source {
+	case config.SecretSourceEnv:
+		return checkResult{"secret", "ok", "present (from env " + pcfg.EnvVar + ")"}
+	case config.SecretSourceFile:
+		return checkResult{"secret", "ok", "present (from file " + config.SecretsPath() + ")"}
+	default:
+		return checkResult{"secret", "ok", "present (from explicit config)"}
+	}
+}
+
+func checkProviderCapabilities(cfg config.Config) checkResult {
+	_, pcfg, ok := activeProvider(cfg)
+	if !ok {
+		return checkResult{"capabilities", "fail", "active provider not configured"}
+	}
+	model := cfg.Defaults.Model
+	if !cfg.DefaultsModelExplicit && pcfg.DefaultModel != "" {
+		model = pcfg.DefaultModel
+	}
+	prov, err := llm.NewProvider(pcfg.Type, llm.ProviderConfig{
+		BaseURL:         pcfg.BaseURL,
+		APIKey:          "doctor-redacted",
+		DefaultModel:    model,
+		ValidationModel: model,
+	})
+	if err != nil {
+		return checkResult{"capabilities", "fail", err.Error()}
+	}
+	caps := prov.Capabilities()
+	return checkResult{"capabilities", "ok",
+		fmt.Sprintf("thinking=%v prefix_cache=%v json_mode=%v max_ctx=%d",
+			caps.Thinking, caps.PrefixCache, caps.JSONMode, caps.MaxContextTokens)}
+}
+
+func checkSandbox(cfg config.Config) checkResult {
+	sb := sandboxpkg.Detect()
+	status := "ok"
+	if cfg.Sandbox.Enabled && !sb.Available() {
+		status = "warn"
+	}
+	return checkResult{"sandbox", status,
+		fmt.Sprintf("%s available=%v enabled=%v", sb.Name(), sb.Available(), cfg.Sandbox.Enabled)}
 }
 
 func checkAPIReachable(cfg config.Config) checkResult {
-	if cfg.API.Key == "" || cfg.API.BaseURL == "" {
+	_, pcfg, ok := activeProvider(cfg)
+	if !ok {
+		return checkResult{"api_reachable", "fail", "skipped (active provider not configured)"}
+	}
+	apiKey, err := config.ResolveSecret(pcfg)
+	if err != nil || pcfg.BaseURL == "" {
 		return checkResult{"api_reachable", "fail", "skipped (missing key or base URL)"}
 	}
 	// 15s — reasoner cold starts and slow networks need headroom.
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequestWithContext(context.Background(),
-		http.MethodGet, cfg.API.BaseURL+"/v1/models", nil)
+		http.MethodGet, pcfg.BaseURL+"/v1/models", nil)
 	if err != nil {
 		return checkResult{"api_reachable", "fail", err.Error()}
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.API.Key)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -115,9 +176,18 @@ func checkAPIReachable(cfg config.Config) checkResult {
 		return checkResult{"api_reachable", "fail", fmt.Sprintf("auth failed (HTTP %d)", resp.StatusCode)}
 	}
 	if resp.StatusCode/100 != 2 {
-		return checkResult{"api_reachable", "warn", fmt.Sprintf("HTTP %d from %s", resp.StatusCode, cfg.API.BaseURL)}
+		return checkResult{"api_reachable", "warn", fmt.Sprintf("HTTP %d from %s", resp.StatusCode, pcfg.BaseURL)}
 	}
-	return checkResult{"api_reachable", "ok", cfg.API.BaseURL + " responded"}
+	return checkResult{"api_reachable", "ok", pcfg.BaseURL + " responded"}
+}
+
+func activeProvider(cfg config.Config) (string, config.ProviderConfigTOML, bool) {
+	name := cfg.Active.Provider
+	if name == "" {
+		name = "deepseek"
+	}
+	pcfg, ok := cfg.Providers[name]
+	return name, pcfg, ok
 }
 
 func checkSQLite() checkResult {

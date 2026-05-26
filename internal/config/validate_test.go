@@ -161,3 +161,27 @@ func TestValidateStrictMultipleErrors(t *testing.T) {
 		t.Fatalf("expected >=3 errors, got %d: %v", len(errs), errs)
 	}
 }
+
+func TestValidateStrictProviderType(t *testing.T) {
+	cfg := Default()
+	cfg.Providers["bad"] = ProviderConfigTOML{Type: "bogus", BaseURL: "https://example.com"}
+	errs := ValidateStrict(&cfg)
+	var found bool
+	for _, err := range errs {
+		if err.Path == "providers[bad].type" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected providers[bad].type error, got %v", errs)
+	}
+}
+
+func TestValidateStrictActiveProvider(t *testing.T) {
+	cfg := Default()
+	cfg.Active.Provider = "missing"
+	errs := ValidateStrict(&cfg)
+	if len(errs) == 0 || errs[0].Path != "active.provider" {
+		t.Fatalf("expected active.provider error, got %v", errs)
+	}
+}

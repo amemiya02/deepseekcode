@@ -399,9 +399,13 @@ type sseFunction struct {
 // It returns the model's approve/block decision and reasoning. Used by
 // the Duet builtin hook (Phase 4).
 func (c *Client) ValidatePro(ctx context.Context, prompt string) (approve bool, reasoning string, err error) {
+	return validateWithModel(ctx, c, "deepseek-v4-pro", prompt)
+}
+
+func validateWithModel(ctx context.Context, c *Client, model string, prompt string) (approve bool, reasoning string, err error) {
 	system := "You are a safety validator. Respond ONLY with JSON: {\"approve\": true|false, \"reasoning\": \"...\"}"
 	req := Request{
-		Model: "deepseek-v4-pro",
+		Model: model,
 		Messages: []Message{
 			{Role: "system", Blocks: []ContentBlock{TextBlock{Text: system}}},
 			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: prompt}}},

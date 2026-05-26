@@ -31,6 +31,11 @@ var knownRuleDecisions = map[string]bool{
 	"ask":   true,
 }
 
+var knownProviderTypes = map[string]bool{
+	"deepseek":      true,
+	"openai-compat": true,
+}
+
 // ValidateStrict checks the full config tree for structural errors that
 // Validate (the lightweight startup check) does not catch. Returns an
 // empty slice when the config is sound.
@@ -128,6 +133,49 @@ func ValidateStrict(c *Config) []ValidationError {
 			errs = append(errs, ValidationError{
 				Path:    "sandbox.allow_write_paths[" + itoa(i) + "]",
 				Message: "must not be empty",
+			})
+		}
+	}
+
+	if c.Active.Provider == "" {
+		errs = append(errs, ValidationError{
+			Path:    "active.provider",
+			Message: "must not be empty",
+		})
+	} else if _, ok := c.Providers[c.Active.Provider]; !ok {
+		errs = append(errs, ValidationError{
+			Path:    "active.provider",
+			Message: "unknown provider " + quote(c.Active.Provider),
+		})
+	}
+	for name, p := range c.Providers {
+		if name == "" {
+			errs = append(errs, ValidationError{
+				Path:    "providers",
+				Message: "provider name must not be empty",
+			})
+		}
+		if p.Type == "" {
+			errs = append(errs, ValidationError{
+				Path:    "providers[" + name + "].type",
+				Message: "must not be empty",
+			})
+		} else if !knownProviderTypes[p.Type] {
+			errs = append(errs, ValidationError{
+				Path:    "providers[" + name + "].type",
+				Message: "unknown provider type " + quote(p.Type),
+			})
+		}
+		if p.BaseURL == "" {
+			errs = append(errs, ValidationError{
+				Path:    "providers[" + name + "].base_url",
+				Message: "must not be empty",
+			})
+		}
+		if p.EnvVar != "" && !envVarRe.MatchString("${"+p.EnvVar+"}") {
+			errs = append(errs, ValidationError{
+				Path:    "providers[" + name + "].env_var",
+				Message: "must be an environment variable name",
 			})
 		}
 	}

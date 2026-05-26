@@ -79,6 +79,10 @@ r / R      展开/折叠 最近一个 / 所有 思考块
 | `DEEPSEEK_API_KEY` | （必填） | DeepSeek API 凭据。 |
 | `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` | `100000` | 自动会话压缩触发阈值。当估算 token 数超过该值时，较早的消息被折叠为一条摘要消息。会话较长时调小，几乎不想触发时调大。 |
 
+## 多 Provider 支持
+
+DeepSeek 是默认 provider；也可以在 `.deepseek/config.toml` 中配置 OpenAI-compatible 端点。见 [Providers](docs/PROVIDERS.md)。
+
 ## 一段话讲清架构
 
 ReAct 主循环（回调驱动，参考 Crush 的 `internal/agent/agent.go`），构建在

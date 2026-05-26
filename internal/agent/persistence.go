@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -44,6 +46,13 @@ type Persister interface {
 	// exists so the rest of the system can compile against the final
 	// interface shape.
 	ReplaceWithCompaction(ctx context.Context, fromIdx, toIdx int, summary string) (int, error)
+}
+
+// ReceiptAppender is an optional interface that Persister implementations
+// can satisfy to support transcript receipt persistence. The agent checks
+// for this interface via type assertion and uses it when available.
+type ReceiptAppender interface {
+	AppendReceipt(ctx context.Context, kind session.ReceiptKind, payload json.RawMessage) (int64, error)
 }
 
 // AffectedPathsFor returns the static affected paths for a tool call

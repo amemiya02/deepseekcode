@@ -19,6 +19,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/repair"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
+	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -123,6 +124,11 @@ type Agent struct {
 
 	// stormBreaker suppresses repeated identical read-only tool calls.
 	stormBreaker *repair.StormBreaker
+
+	// BudgetPolicy and BudgetState control session cost gating.
+	// Zero values (default) disable budget checks entirely.
+	BudgetPolicy BudgetPolicy
+	BudgetState  BudgetState
 
 	toolCallCount int
 	steps         []StepRecord
@@ -390,8 +396,22 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
 		staticSys = a.System[:i]
 	}
-	if changed, which := a.prefixMon.Check(staticSys, req.Tools); changed {
-		a.bus.Publish(EventInfo{Text: "prefix cache invalidated: " + which})
+	prefixChanged, prefixWhich := a.prefixMon.Check(staticSys, req.Tools)
+	if prefixChanged {
+		a.bus.Publish(EventInfo{Text: "prefix cache invalidated: " + prefixWhich})
+	}
+
+	// Session budget gate: check before model streaming starts.
+	// Zero projection preserves existing behavior until real config/projection exists.
+	projectedCNY := 0.0
+	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
+	if warn {
+		a.BudgetState.Warned = true
+		a.bus.Publish(EventInfo{Text: "budget warning: projected session cost reached warning threshold"})
+	}
+	if !allow {
+		a.bus.Publish(EventInfo{Text: "budget blocked: projected session cost reached hard threshold"})
+		return StepRecord{FinishReason: "budget_blocked"}, nil
 	}
 
 	events, err := a.Client.Stream(ctx, req)
@@ -456,6 +476,29 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	})
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
+
+		// Persist model_final transcript receipt with usage and prefix hash.
+		if rp, ok := a.Persister.(ReceiptAppender); ok {
+			fp := llm.ComputeFingerprint(llm.PrefixInput{
+				SystemPrompt: staticSys,
+				Tools:        req.Tools,
+			})
+			payload, _ := json.Marshal(map[string]any{
+				"model":                a.Model,
+				"usage":                usage,
+				"prefix_hash":          fp.CombinedSHA256,
+				"prefix_system_hash":   fp.SystemSHA256,
+				"prefix_tools_hash":    fp.ToolsSHA256,
+				"prefix_cache_changed": prefixChanged,
+				"prefix_cache_reason":  prefixWhich,
+			})
+			_, _ = rp.AppendReceipt(context.Background(), session.ReceiptModelFinal, payload)
+		}
+	}
+
+	// Accumulate observed model cost into session budget state.
+	if cost := llm.Cost(a.Model, usage); cost > 0 {
+		a.BudgetState.SpentCNY += cost
 	}
 
 	return StepRecord{
@@ -607,8 +650,20 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 
 	// Permission gate.
 	dec, reason := a.Permissions.Decide(permissions.Check{Tool: tool, Args: rawArgs})
+
 	switch dec {
 	case permissions.Deny:
+		// Persist permission decision receipt for automatic deny.
+		if a.Persister != nil {
+			if rp, ok := a.Persister.(ReceiptAppender); ok {
+				payload, _ := json.Marshal(map[string]any{
+					"tool":     tool.Name(),
+					"decision": "deny",
+					"reason":   reason,
+				})
+				_, _ = rp.AppendReceipt(ctx, session.ReceiptPermission, payload)
+			}
+		}
 		if strings.HasPrefix(reason, "matched deny rule:") {
 			a.bus.Publish(EventInfo{Text: "denied by rule: " + reason})
 			return tools.Errf("denied by rule: %s", reason), nil
@@ -630,6 +685,24 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 		case <-ctx.Done():
 			return tools.Errf("cancelled while awaiting permission"), nil
 		}
+
+		// Persist permission decision receipt with final user response.
+		if a.Persister != nil {
+			if rp, ok := a.Persister.(ReceiptAppender); ok {
+				decision := "allow"
+				if !resp.Allow {
+					decision = "deny"
+				}
+				payload, _ := json.Marshal(map[string]any{
+					"tool":            tool.Name(),
+					"policy_decision": dec.String(),
+					"decision":        decision,
+					"persist_pattern": resp.PersistPattern,
+				})
+				_, _ = rp.AppendReceipt(ctx, session.ReceiptPermission, payload)
+			}
+		}
+
 		if !resp.Allow {
 			return tools.Errf("user denied tool call"), nil
 		}
@@ -639,6 +712,18 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 			}
 			_ = json.Unmarshal(rawArgs, &ba)
 			a.Permissions.AllowBashPattern(ba.Command)
+		}
+	default:
+		// Automatic Allow — persist receipt.
+		if a.Persister != nil {
+			if rp, ok := a.Persister.(ReceiptAppender); ok {
+				payload, _ := json.Marshal(map[string]any{
+					"tool":     tool.Name(),
+					"decision": "allow",
+					"reason":   reason,
+				})
+				_, _ = rp.AppendReceipt(ctx, session.ReceiptPermission, payload)
+			}
 		}
 	}
 
@@ -782,6 +867,18 @@ func (a *Agent) lastUserText() string {
 	return ""
 }
 
+// publishRepairEvent publishes an EventRepair and persists a repair receipt
+// if the persister supports ReceiptAppender.
+func (a *Agent) publishRepairEvent(ev EventRepair) {
+	a.bus.Publish(ev)
+	if a.Persister != nil {
+		if rp, ok := a.Persister.(ReceiptAppender); ok {
+			payload, _ := json.Marshal(ev)
+			_, _ = rp.AppendReceipt(context.Background(), session.ReceiptRepair, payload)
+		}
+	}
+}
+
 // repairToolCalls runs the repair pipeline on tool calls after streaming.
 // It scavenges hidden calls, repairs args, and applies storm-breaker filtering.
 // Returns the kept calls and updates blocks in-place to reflect repaired/kept calls.
@@ -795,7 +892,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	// Step 1: Scavenge hidden tool calls from reasoning and content
 	scavengeResult := repair.ScavengeToolCalls(reasoning, content, allowed, repair.ScavengeOptions{})
 	for _, r := range scavengeResult.Reports {
-		a.bus.Publish(EventRepair{
+		a.publishRepairEvent(EventRepair{
 			Kind:       string(r.Kind),
 			Tool:       r.Tool,
 			CallID:     r.CallID,
@@ -816,7 +913,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 		repairResult := repair.RepairJSONArgs(call.Function.Arguments)
 		if repairResult.Changed {
 			call.Function.Arguments = repairResult.Repaired
-			a.bus.Publish(EventRepair{
+			a.publishRepairEvent(EventRepair{
 				Kind:       string(repair.KindArgsCompleted),
 				Tool:       call.Function.Name,
 				CallID:     call.ID,
@@ -826,7 +923,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 			})
 		}
 		if !repairResult.Valid {
-			a.bus.Publish(EventRepair{
+			a.publishRepairEvent(EventRepair{
 				Kind:    string(repair.KindArgsInvalid),
 				Tool:    call.Function.Name,
 				CallID:  call.ID,
@@ -849,7 +946,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	// Step 5: Apply storm-breaker filter
 	filtered := a.stormBreaker.Filter(repairedCalls, kinds)
 	for _, r := range filtered.Reports {
-		a.bus.Publish(EventRepair{
+		a.publishRepairEvent(EventRepair{
 			Kind:       string(r.Kind),
 			Tool:       r.Tool,
 			CallID:     r.CallID,

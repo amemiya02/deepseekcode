@@ -173,14 +173,15 @@ func mergeFile(cfg *Config, path string) error {
 	// toml leaves fields it doesn't see untouched), then explicitly
 	// preserve slices/maps if the overlay didn't provide them.
 	var overlay Config
-	if _, err := toml.Decode(string(b), &overlay); err != nil {
+	meta, err := toml.Decode(string(b), &overlay)
+	if err != nil {
 		return err
 	}
-	applyOverlay(cfg, overlay)
+	applyOverlay(cfg, overlay, meta)
 	return nil
 }
 
-func applyOverlay(base *Config, ov Config) {
+func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if ov.API.Key != "" {
 		base.API.Key = ov.API.Key
 	}
@@ -203,11 +204,11 @@ func applyOverlay(base *Config, ov Config) {
 	// are deliberately true for Thinking and VimKeybindings. Users who
 	// want to disable must set "thinking = false" explicitly, which
 	// matches their intent.
-	base.Defaults.Thinking = ov.Defaults.Thinking || (base.Defaults.Thinking && !overlayHasKey(ov, "thinking"))
+	base.Defaults.Thinking = ov.Defaults.Thinking || (base.Defaults.Thinking && !meta.IsDefined("defaults", "thinking"))
 	if ov.Defaults.Theme != "" {
 		base.Defaults.Theme = ov.Defaults.Theme
 	}
-	base.Defaults.VimKeybindings = ov.Defaults.VimKeybindings || (base.Defaults.VimKeybindings && !overlayHasKey(ov, "vim_keybindings"))
+	base.Defaults.VimKeybindings = ov.Defaults.VimKeybindings || (base.Defaults.VimKeybindings && !meta.IsDefined("defaults", "vim_keybindings"))
 	// AutoReasoning defaults to false; opt-in semantics: either source
 	// setting it to true is sufficient (OR merge). No need for the
 	// overlayHasKey dance that Thinking/VimKeybindings require (those
@@ -222,8 +223,8 @@ func applyOverlay(base *Config, ov Config) {
 	}
 
 	// Duet
-	base.Duet.Enabled = ov.Duet.Enabled || (base.Duet.Enabled && !overlayHasKey(ov, "duet.enabled"))
-	base.Duet.RetryOnFailure = ov.Duet.RetryOnFailure || (base.Duet.RetryOnFailure && !overlayHasKey(ov, "duet.retry_on_failure"))
+	base.Duet.Enabled = ov.Duet.Enabled || (base.Duet.Enabled && !meta.IsDefined("duet", "enabled"))
+	base.Duet.RetryOnFailure = ov.Duet.RetryOnFailure || (base.Duet.RetryOnFailure && !meta.IsDefined("duet", "retry_on_failure"))
 	if ov.Duet.ValidatorTimeoutMs != 0 {
 		base.Duet.ValidatorTimeoutMs = ov.Duet.ValidatorTimeoutMs
 	}
@@ -264,23 +265,20 @@ func applyOverlay(base *Config, ov Config) {
 		base.MCPServers = ov.MCPServers
 	}
 
-	// Web config
-	base.Web.Enabled = ov.Web.Enabled || (base.Web.Enabled && !overlayHasKey(ov, "web.enabled"))
+	// Web config: Enabled defaults to true, so we need to check if explicitly set
+	if meta.IsDefined("web", "enabled") {
+		base.Web.Enabled = ov.Web.Enabled
+	}
 	if ov.Web.SearchProvider != "" {
 		base.Web.SearchProvider = ov.Web.SearchProvider
 	}
 	if ov.Web.SearXNGBaseURL != "" {
 		base.Web.SearXNGBaseURL = ov.Web.SearXNGBaseURL
 	}
-	base.Web.AllowPrivate = ov.Web.AllowPrivate || (base.Web.AllowPrivate && !overlayHasKey(ov, "web.allow_private"))
-}
-
-// overlayHasKey is a temporary stub: real toml-key-presence tracking
-// requires either a custom decoder or a re-parse. v0.1 accepts the
-// simpler "false overlays defaults only if file is non-empty" semantics
-// and documents the explicit form (`thinking = false`).
-func overlayHasKey(_ Config, _ string) bool {
-	return false
+	// AllowPrivate defaults to false, so use OR semantics
+	if ov.Web.AllowPrivate {
+		base.Web.AllowPrivate = true
+	}
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)

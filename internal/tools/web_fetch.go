@@ -106,8 +106,27 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (Resul
 		req.Header.Set("Accept", p.Accept)
 	}
 
+	// Create a client with redirect checker that validates private IPs
+	client := t.HTTPClient
+	if !t.AllowPrivate {
+		client = &http.Client{
+			Timeout:   t.HTTPClient.Timeout,
+			Transport: t.HTTPClient.Transport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if err := checkPrivateHost(req.URL.Hostname()); err != nil {
+					return fmt.Errorf("redirect to private IP blocked: %w", err)
+				}
+				// Keep default 10-redirect limit
+				if len(via) >= 10 {
+					return http.ErrUseLastResponse
+				}
+				return nil
+			},
+		}
+	}
+
 	// Execute request
-	resp, err := t.HTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		if urlErr, ok := err.(*url.Error); ok {
 			return Errf("web_fetch: request failed: %v", urlErr.Err), nil
@@ -154,8 +173,8 @@ func checkPrivateHost(hostname string) error {
 	// Try to resolve the hostname
 	ips, err := net.LookupIP(hostname)
 	if err != nil {
-		// DNS lookup failed - let the request proceed and fail naturally
-		return nil
+		// DNS lookup failed - return a dns: error as per task card
+		return fmt.Errorf("dns: %w", err)
 	}
 	for _, ip := range ips {
 		if isPrivateIP(ip) {

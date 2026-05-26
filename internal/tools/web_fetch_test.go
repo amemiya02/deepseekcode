@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,54 @@ func TestWebFetchTool_PrivateIPAllowed(t *testing.T) {
 	}
 }
 
+func TestWebFetchTool_DNSFailure(t *testing.T) {
+	tool := NewWebFetchTool(false)
+	// Use a domain that should not resolve
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"url":"http://this-domain-does-not-exist-12345.invalid/test"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error for DNS failure")
+	}
+	if !strings.Contains(result.Content, "dns:") {
+		t.Errorf("expected 'dns:' error, got %q", result.Content)
+	}
+}
+
+func TestWebFetchTool_RedirectToPrivateIP(t *testing.T) {
+	// Create a target server on loopback
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("secret"))
+	}))
+	defer targetSrv.Close()
+
+	// Extract the host:port from target server
+	targetURL, _ := url.Parse(targetSrv.URL)
+	targetHost := targetURL.Host
+
+	// Create a redirect server that redirects to the target
+	redirectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Redirect to the loopback target
+		http.Redirect(w, r, "http://"+targetHost+"/secret", http.StatusFound)
+	}))
+	defer redirectSrv.Close()
+
+	// Tool with AllowPrivate=false should block the redirect
+	tool := NewWebFetchTool(false)
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"url":"`+redirectSrv.URL+`"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error for redirect to private IP")
+	}
+	if !strings.Contains(result.Content, "private") {
+		t.Errorf("expected 'private' error, got %q", result.Content)
+	}
+}
+
 func TestWebFetchTool_HTMLToMarkdown(t *testing.T) {
 	html := `<html><head><title>Test Page</title></head><body><h1>Heading</h1><p>Hello <a href="https://example.com">link</a></p></body></html>`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,16 +197,17 @@ func TestWebFetchTool_Truncation(t *testing.T) {
 	defer srv.Close()
 
 	tool := NewWebFetchTool(true) // Allow private for test server
-	tool.MaxBytes = 1024 * 1024  // 1MB
+	tool.MaxBytes = 1024 * 1024   // 1MB
 	result, err := tool.Execute(context.Background(), json.RawMessage(`{"url":"`+srv.URL+`"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result.Content, "truncated") {
-		// Check if content length is reasonable
-		if len(result.Content) < 100 {
-			t.Errorf("result too short: %q", result.Content)
-		}
+	// Assert content is truncated (should be <= 1.1MB including status line and truncation marker)
+	if len(result.Content) >= 1100*1024 {
+		t.Fatalf("content too large: %d bytes (should be truncated to ~1MB)", len(result.Content))
+	}
+	if !strings.Contains(result.Content, "(truncated") {
+		t.Fatalf("missing truncation marker in content: %q", result.Content)
 	}
 }
 

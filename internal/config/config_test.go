@@ -227,3 +227,26 @@ func TestValidateWebConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestWebConfigEnabledFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[web]
+enabled = false
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	if !cfg.Web.Enabled {
+		t.Error("default Web.Enabled should be true")
+	}
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Web.Enabled {
+		t.Error("web.enabled = false should override the default true")
+	}
+}

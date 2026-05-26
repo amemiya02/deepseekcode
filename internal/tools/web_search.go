@@ -110,6 +110,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (Resu
 // DuckDuckGoHTML is a search provider that scrapes DuckDuckGo HTML results.
 type DuckDuckGoHTML struct {
 	HTTPClient *http.Client
+	// BaseURL is the endpoint URL (defaults to https://html.duckduckgo.com/html/)
+	BaseURL string
 }
 
 // NewDuckDuckGoHTML creates a DuckDuckGo HTML scraper provider.
@@ -118,6 +120,7 @@ func NewDuckDuckGoHTML() *DuckDuckGoHTML {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		BaseURL: "https://html.duckduckgo.com/html/",
 	}
 }
 
@@ -128,7 +131,12 @@ func (d *DuckDuckGoHTML) Search(ctx context.Context, query string, limit int) ([
 	formData := url.Values{}
 	formData.Set("q", query)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://html.duckduckgo.com/html/", strings.NewReader(formData.Encode()))
+	baseURL := d.BaseURL
+	if baseURL == "" {
+		baseURL = "https://html.duckduckgo.com/html/"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}

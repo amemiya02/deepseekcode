@@ -2,7 +2,7 @@
 
 dsc provides two web tools: `web_fetch` for retrieving content from URLs, and `web_search` for searching the web.
 
-## Enabling Web Tools
+## 启用
 
 Web tools are enabled by default. To disable them:
 
@@ -10,6 +10,19 @@ Web tools are enabled by default. To disable them:
 [web]
 enabled = false
 ```
+
+## 切换 SearXNG
+
+For better reliability and control, use a self-hosted SearXNG instance:
+
+```toml
+[web]
+enabled = true
+search_provider = "searxng"
+searxng_base_url = "https://searx.example.com"
+```
+
+SearXNG provides JSON API access and can aggregate results from multiple search engines.
 
 ## web_fetch
 

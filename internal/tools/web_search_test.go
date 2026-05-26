@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWebSearchTool_Name(t *testing.T) {
@@ -168,6 +169,54 @@ func TestDuckDuckGoHTML_Name(t *testing.T) {
 	}
 }
 
+func TestDuckDuckGoHTML_ParseHTML(t *testing.T) {
+	// Mock DDG HTML response
+	ddgHTML := `<!DOCTYPE html>
+<html>
+<body>
+<div class="result">
+	<a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2F1">Result One</a>
+	<a class="result__snippet">Snippet for result one</a>
+</div>
+<div class="result">
+	<a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2F2">Result Two</a>
+	<a class="result__snippet">Snippet for result two</a>
+</div>
+</body>
+</html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(200)
+		w.Write([]byte(ddgHTML))
+	}))
+	defer srv.Close()
+
+	provider := &DuckDuckGoHTML{
+		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		BaseURL:    srv.URL,
+	}
+
+	hits, err := provider.Search(context.Background(), "test", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hits) < 2 {
+		t.Fatalf("expected at least 2 hits, got %d", len(hits))
+	}
+	if hits[0].Title != "Result One" {
+		t.Errorf("expected title 'Result One', got %q", hits[0].Title)
+	}
+	if hits[0].URL != "https://example.com/1" {
+		t.Errorf("expected URL 'https://example.com/1', got %q", hits[0].URL)
+	}
+	if hits[0].Snippet != "Snippet for result one" {
+		t.Errorf("expected snippet 'Snippet for result one', got %q", hits[0].Snippet)
+	}
+}
+
 func TestSearXNG_Name(t *testing.T) {
 	provider := NewSearXNG("https://example.com")
 	if provider.Name() != "searxng" {
@@ -177,9 +226,9 @@ func TestSearXNG_Name(t *testing.T) {
 
 // mockSearchProvider implements WebSearchProvider for testing
 type mockSearchProvider struct {
-	hits  []SearchHit
-	err   error
-	name  string
+	hits []SearchHit
+	err  error
+	name string
 }
 
 func (m *mockSearchProvider) Name() string {

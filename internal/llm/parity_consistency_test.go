@@ -13,10 +13,10 @@ import (
 // TestParityConsistency asserts the four sources of truth for the parity
 // harness stay in sync:
 //
-//   A = scenario names from ParityScenarios()
-//   B = scenario names recorded in testdata/parity/manifest.json
-//   C = first-column scenario names listed in docs/PARITY.md
-//   D = filenames of testdata/parity/*.golden.json (sans .golden.json)
+//	A = scenario names from ParityScenarios()
+//	B = scenario names recorded in testdata/parity/manifest.json
+//	C = first-column scenario names listed in docs/PARITY.md
+//	D = filenames of testdata/parity/*.golden.json (sans .golden.json)
 //
 // A ≠ B ≠ C ≠ D means somebody added/removed/renamed a scenario in one
 // place without updating the others — the test reports each missing-side

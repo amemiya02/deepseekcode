@@ -43,7 +43,7 @@ func runPTY(ctx context.Context, command string, timeout time.Duration) (output 
 	}
 	defer ptmx.Close()
 
-	// Buffer for output
+	// Buffer for output (io.ReadAll captures all PTY output)
 	var buf []byte
 	var bufMu sync.Mutex
 	var copyErr error

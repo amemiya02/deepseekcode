@@ -19,7 +19,7 @@ func TestPTYRunnerEcho(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
-	if !containsString(output, "hello") {
+	if !strings.Contains(output, "hello") {
 		t.Fatalf("expected output to contain 'hello', got %q", output)
 	}
 }
@@ -71,18 +71,4 @@ func TestPTYRunnerMultiline(t *testing.T) {
 	if !strings.Contains(normalized, expected) {
 		t.Fatalf("expected output to contain %q, got %q (normalized: %q)", expected, output, normalized)
 	}
-}
-
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

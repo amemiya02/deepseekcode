@@ -355,8 +355,9 @@ func TestCacheGate_SubagentIsolationRequiresChildTrace(t *testing.T) {
 	}
 }
 
-// TestCacheGate_ChildEpochEvaluated: when a child (subagent) epoch is present,
-// pollution is actually evaluated rather than N/A.
+// TestCacheGate_ChildEpochEvaluated: a COMPLETE child trace — valid parent
+// link, a child usage turn, and a child agent.done — is evaluated and passes
+// the dimension under require_subagent_isolation.
 func TestCacheGate_ChildEpochEvaluated(t *testing.T) {
 	tr := parseTraceLines(t,
 		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
@@ -364,18 +365,67 @@ func TestCacheGate_ChildEpochEvaluated(t *testing.T) {
 		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
 		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
 		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"usage","turn":1,"epoch_id":"c1","cache_hit_tokens":0,"cache_miss_tokens":500,"agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"agent.done","epoch_id":"c1","agent_role":"subagent","parent_epoch_id":"e1"}`,
 	)
 	if tr.ChildEpochs != 1 {
 		t.Fatalf("ChildEpochs = %d, want 1", tr.ChildEpochs)
+	}
+	if tr.ChildUsageTurns != 1 || !tr.ChildDone {
+		t.Fatalf("expected a complete child trace: ChildUsageTurns=%d ChildDone=%v", tr.ChildUsageTurns, tr.ChildDone)
 	}
 	g := evalCacheGate(RunResult{Trace: tr},
 		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
 	if !g.ParentChildEvaluated {
 		t.Error("ParentChild must be evaluated when a child epoch is present")
 	}
-	// c1's parent_epoch_id is e1, a real root epoch → the link is valid.
+	// Valid link + complete child trace → the dimension passes.
 	if tr.ChildMissingParent != 0 || tr.ChildUnknownParent != 0 || !g.ParentChildOK {
-		t.Errorf("a child tied to a real root epoch must pass the dimension; gate=%+v", g)
+		t.Errorf("a complete child tied to a real root epoch must pass the dimension; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_PartialChildTraceFails: a child epoch with only a
+// prefix.snapshot (no child usage turn, no agent.done) is partial evidence and
+// fails closed under require_subagent_isolation.
+func TestCacheGate_PartialChildTraceFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"e1"}`,
+	)
+	if tr.ChildUsageTurns != 0 || tr.ChildDone {
+		t.Fatalf("expected a partial child trace: ChildUsageTurns=%d ChildDone=%v", tr.ChildUsageTurns, tr.ChildDone)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("a child with no usage/done must fail closed under require_subagent_isolation; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_ChildTraceIncompleteFails: a child_trace_incomplete marker
+// (WaitChildTraces timed out before the child reached EventDone) fails the
+// dimension even with an otherwise-valid child epoch.
+func TestCacheGate_ChildTraceIncompleteFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"usage","turn":1,"epoch_id":"c1","cache_hit_tokens":0,"cache_miss_tokens":500,"agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"child_trace_incomplete"}`,
+	)
+	if !tr.ChildTraceIncomplete {
+		t.Fatal("expected ChildTraceIncomplete to be set")
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("an incomplete child trace must fail closed; gate=%+v", g)
 	}
 }
 

@@ -169,7 +169,15 @@ under) so the harness can attribute each epoch to the root or a child agent.
 {"type":"pending_change","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","kind":"skill_body_changed","description":"…"}
 {"type":"drift.blocked","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","which":"tools"}
 {"type":"compaction","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","kind":"semantic","before_static_prefix_hash":"…","after_static_prefix_hash":"…"}
+{"type":"prefix.snapshot","run_id":"run_…","agent_role":"subagent","parent_epoch_id":"epoch_…","epoch_id":"epoch_child_…","static_prefix_hash":"…","tools_hash":"…"}
+{"type":"usage","run_id":"run_…","agent_role":"subagent","parent_epoch_id":"epoch_…","epoch_id":"epoch_child_…","turn":1,"cache_hit_tokens":0,"cache_miss_tokens":512,"output_tokens":8,"cost_cny":0.0006}
+{"type":"agent.done","run_id":"run_…","agent_role":"subagent","parent_epoch_id":"epoch_…","epoch_id":"epoch_child_…","reason":"model_done"}
+{"type":"agent.done","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","reason":"model_done"}
 ```
+
+`agent.done` is the per-agent terminator (one per root/subagent run). A
+`child_trace_incomplete` record is written by the harness only when a child
+trace handle timed out before its `agent.done` (the subagent was cut off).
 
 Compaction stability is **measured, not asserted**: the agent computes the
 static-prefix fingerprint of the frozen baseline (`before_static_prefix_hash`)
@@ -308,7 +316,7 @@ trace (`<task>.agent.jsonl`):
 | 2 | Post-warm cache hit rate | >= 95%, >= `min_post_warm_turns` warm turns | `usage` records (excl. first/epoch) |
 | 3 | Unauthorized drift count | 0 | `drift.blocked` records |
 | 4 | Compaction prefix hash stability | `before` == `after`; record required if `require_compaction_record` | `compaction.before/after_static_prefix_hash` |
-| 5 | Parent/subagent cache pollution | 0 pollution + valid parent link, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id` epochs |
+| 5 | Parent/subagent cache pollution | 0 pollution + valid parent link + (when required) complete child trace, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id`/child `usage`/`agent.done` |
 
 **Post-warm cache hit rate**: After the first turn warms the prompt
 cache, all subsequent turns must achieve >= 95% cache hit tokens /
@@ -333,9 +341,15 @@ present, since isolation cannot be proven. When a child epoch is
 present the harness checks it did not reuse the parent epoch **and** that
 its `parent_epoch_id` actually points at a real root epoch — a child with
 no parent link (`missing_parent`) or an unknown parent (`unknown_parent`)
-fails. Async subagents are flushed before exit: the one-shot run waits on
-tracked child trace handles (`Agent.WaitChildTraces`), so a `task` with
-`async:true` does not lose its child epoch when the process exits.
+fails. Under `require_subagent_isolation` the child trace must also be
+**complete**: at least one child `usage` turn and a child `agent.done`
+terminator. A child that only emitted a `prefix.snapshot` is partial
+evidence and fails (`partial`). Async subagents are flushed before exit:
+the one-shot run waits on tracked child trace handles
+(`Agent.WaitChildTraces`), so a `task` with `async:true` does not lose its
+child epoch when the process exits; if a child handle times out before
+`EventDone` the harness writes a `child_trace_incomplete` marker and the
+dimension fails (`incomplete`) rather than trusting a cut-off child.
 
 **Compaction prefix hash stability**: when compaction fires, the agent
 emits the measured static-prefix fingerprint before and after; the

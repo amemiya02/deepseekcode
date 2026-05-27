@@ -200,6 +200,17 @@ type AgentTrace struct {
 	// Both are isolation-evidence failures, not free passes.
 	ChildUnknownParent int
 
+	// ChildUsageTurns counts `usage` records attributed to a subagent, and
+	// ChildDone is set once a subagent emitted an `agent.done` terminator. A
+	// child trace with only a prefix.snapshot (no usage, no done) is partial:
+	// require_subagent_isolation demands at least one of each.
+	ChildUsageTurns int
+	ChildDone       bool
+	// ChildTraceIncomplete is set when the harness recorded a
+	// `child_trace_incomplete` marker — a subagent whose trace was cut off
+	// (WaitChildTraces timed out before EventDone). It fails the dimension.
+	ChildTraceIncomplete bool
+
 	// epochHashes maps an epoch_id to the set of static_prefix_hash values
 	// seen in its prefix.snapshot records. A stable epoch has exactly one.
 	epochHashes map[string]map[string]bool
@@ -290,6 +301,9 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 			tr.epochHashes[tl.EpochID][tl.StaticPrefixHash] = true
 		case "usage":
 			tr.UsageTurns++
+			if role != "root" {
+				tr.ChildUsageTurns++
+			}
 			if tl.EpochID == "" {
 				tr.UsageMissingEpoch++
 			}
@@ -317,6 +331,16 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 			if tl.BeforeStaticPrefixHash != tl.AfterStaticPrefixHash {
 				tr.CompactionUnstable++
 			}
+		case "agent.done":
+			// A subagent reaching its terminator is proof its trace is
+			// complete, not cut off mid-flight.
+			if role != "root" {
+				tr.ChildDone = true
+			}
+		case "child_trace_incomplete":
+			// The harness recorded that a child trace handle timed out before
+			// EventDone — the subagent's trace is partial.
+			tr.ChildTraceIncomplete = true
 		}
 	}
 
@@ -442,6 +466,9 @@ type CacheGateResult struct {
 	ParentChildPollution int
 	ChildMissingParent   int
 	ChildUnknownParent   int
+	ChildUsageTurns      int
+	ChildDone            bool
+	ChildTraceIncomplete bool
 	ParentChildOK        bool
 
 	UsageParsed   bool
@@ -1016,25 +1043,43 @@ func evalCacheGate(r RunResult, ts TaskSpec) CacheGateResult {
 	// dimension is N/A — it never contributes a ✅. A task that requires
 	// subagent isolation fails closed when there is no child trace to judge.
 	gate.ParentChildEvaluated = tr.ChildEpochs > 0
-	if gate.ParentChildEvaluated {
+	gate.ChildUsageTurns = tr.ChildUsageTurns
+	gate.ChildDone = tr.ChildDone
+	gate.ChildTraceIncomplete = tr.ChildTraceIncomplete
+	switch {
+	case gate.ParentChildEvaluated:
 		gate.ParentChildPollution = tr.ParentChildPollution
 		gate.ChildMissingParent = tr.ChildMissingParent
 		gate.ChildUnknownParent = tr.ChildUnknownParent
 		// A child epoch is only valid evidence when it is tied to a real root
-		// epoch. Pollution, a missing parent link, or a parent that is not a
-		// known root epoch all fail the dimension.
+		// epoch and its trace was not cut off. Pollution, a missing/unknown
+		// parent link, or an incomplete child trace all fail the dimension.
 		gate.ParentChildOK = gate.ParentChildPollution == 0 &&
-			tr.ChildMissingParent == 0 && tr.ChildUnknownParent == 0
+			tr.ChildMissingParent == 0 && tr.ChildUnknownParent == 0 &&
+			!tr.ChildTraceIncomplete
 		if tr.ChildMissingParent > 0 || tr.ChildUnknownParent > 0 {
 			gate.Notes = append(gate.Notes, fmt.Sprintf(
 				"subagent epoch parent link invalid: missing_parent=%d unknown_parent=%d",
 				tr.ChildMissingParent, tr.ChildUnknownParent))
 		}
-	} else if ts.Metrics.RequireSubagentIsolation {
+		if tr.ChildTraceIncomplete {
+			gate.Notes = append(gate.Notes,
+				"subagent trace incomplete — a child epoch did not finish (WaitChildTraces timed out)")
+		}
+		// A task that REQUIRES isolation needs a COMPLETE child trace: at least
+		// one child usage turn AND a child agent.done. A child that only emitted
+		// a prefix.snapshot is partial evidence and must not pass.
+		if ts.Metrics.RequireSubagentIsolation && (tr.ChildUsageTurns == 0 || !tr.ChildDone) {
+			gate.ParentChildOK = false
+			gate.Notes = append(gate.Notes, fmt.Sprintf(
+				"partial subagent trace: child_usage_turns=%d child_done=%v — require_subagent_isolation needs both (fail closed)",
+				tr.ChildUsageTurns, tr.ChildDone))
+		}
+	case ts.Metrics.RequireSubagentIsolation:
 		gate.ParentChildOK = false
 		gate.Notes = append(gate.Notes,
 			"no subagent/child epoch in trace — cannot prove parent/subagent isolation (fail closed)")
-	} else {
+	default:
 		gate.ParentChildOK = true // not applicable
 	}
 
@@ -1338,8 +1383,12 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 					compCell = boolMark(gate.CompactionStableOK)
 				}
 				switch {
+				case gate.ParentChildEvaluated && gate.ChildTraceIncomplete:
+					pollCell = fmt.Sprintf("incomplete %s", boolMark(gate.ParentChildOK))
 				case gate.ParentChildEvaluated && (gate.ChildMissingParent > 0 || gate.ChildUnknownParent > 0):
 					pollCell = fmt.Sprintf("badlink %s", boolMark(gate.ParentChildOK))
+				case gate.ParentChildEvaluated && !gate.ParentChildOK && (gate.ChildUsageTurns == 0 || !gate.ChildDone):
+					pollCell = fmt.Sprintf("partial %s", boolMark(gate.ParentChildOK))
 				case gate.ParentChildEvaluated:
 					pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))
 				case !gate.ParentChildOK:

@@ -229,6 +229,17 @@ func (s *TraceSink) Handle(ev Event) {
 			AfterStaticPrefixHash:  e.StaticPrefixHashAfter,
 			SummaryCostCNY:         &cost,
 		})
+	case EventDone:
+		// A terminal marker per agent. The root stamps agent_role="root"; a
+		// subagent stamps "subagent" + parent_epoch_id. The benchmark requires
+		// a child agent.done (alongside a child usage turn) before it trusts a
+		// subagent's isolation evidence — a child trace cut off before EventDone
+		// is partial and must not pass.
+		s.write(traceRecord{
+			Type:    "agent.done",
+			EpochID: s.curEpochID,
+			Reason:  e.Reason.String(),
+		})
 	}
 }
 
@@ -243,14 +254,16 @@ type TraceSinkHandle struct {
 // Wait blocks until the agent's terminating EventDone has been processed.
 func (h *TraceSinkHandle) Wait() { <-h.done }
 
-// WaitTimeout blocks until EventDone is processed or d elapses, whichever
-// is first. The timeout guards against the (unlikely) case where a burst of
-// high-frequency events overflowed the subscription buffer and EventDone was
-// dropped — the caller still makes progress and flushes whatever was written.
-func (h *TraceSinkHandle) WaitTimeout(d time.Duration) {
+// WaitTimeout blocks until EventDone is processed or d elapses, whichever is
+// first. It returns true when EventDone was processed (the agent finished
+// cleanly) and false on timeout — a timed-out child trace is partial, which the
+// caller must surface rather than silently close.
+func (h *TraceSinkHandle) WaitTimeout(d time.Duration) bool {
 	select {
 	case <-h.done:
+		return true
 	case <-time.After(d):
+		return false
 	}
 }
 
@@ -291,6 +304,10 @@ func (a *Agent) AttachChildTraceSink(child *Agent) *TraceSinkHandle {
 // one-shot run calls this before closing the root trace so an async (`task`
 // with async:true) subagent's child epoch is flushed instead of being lost when
 // the process exits. No-op when no subagent trace was attached.
+//
+// If a handle times out the child never reached EventDone — its trace is
+// partial. Rather than close it silently, a `child_trace_incomplete` record is
+// written so the gate fails closed instead of trusting a cut-off child.
 func (a *Agent) WaitChildTraces(timeout time.Duration) {
 	a.childTraceMu.Lock()
 	handles := append([]*TraceSinkHandle(nil), a.childTraceHandles...)
@@ -302,7 +319,9 @@ func (a *Agent) WaitChildTraces(timeout time.Duration) {
 		if remaining < 0 {
 			remaining = 0
 		}
-		h.WaitTimeout(remaining)
+		if !h.WaitTimeout(remaining) && a.traceSink != nil {
+			a.traceSink.write(traceRecord{Type: "child_trace_incomplete"})
+		}
 		h.Close()
 	}
 }

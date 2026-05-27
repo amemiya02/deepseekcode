@@ -113,16 +113,24 @@ gap is the billed comparison run itself.
   rather than hardcoding it. The harness validates the parent link itself: a
   child epoch that carries **no** `parent_epoch_id` (`ChildMissingParent`) or
   one pointing at an epoch the root never emitted (`ChildUnknownParent`) fails
-  the dimension — a `subagent` record cannot pass just by existing. The
-  dimension is evaluated **only when a child epoch is present** (otherwise
-  `N/A`, never a hardcoded ✅), and `require_subagent_isolation: true`
-  (`subagent-parallel`) **fails closed** with no child trace. Async subagents
-  are not lost at exit: the parent tracks child trace handles and the one-shot
-  CLI calls `Agent.WaitChildTraces` to flush in-flight child traces before
-  closing the root trace (tests: `TestE2ESubagentChildTrace`,
-  `TestWaitChildTracesFlushesAsyncChild`,
+  the dimension — a `subagent` record cannot pass just by existing. Under
+  `require_subagent_isolation` the child trace must also be **complete**: at
+  least one child `usage` turn AND a child `agent.done` terminator (every
+  `EventDone` now emits an `agent.done` record). A child that only emitted a
+  `prefix.snapshot` is partial evidence and fails. The dimension is evaluated
+  **only when a child epoch is present** (otherwise `N/A`, never a hardcoded
+  ✅), and `require_subagent_isolation: true` (`subagent-parallel`) **fails
+  closed** with no child trace. Async subagents are not lost at exit: the parent
+  tracks child trace handles and the one-shot CLI calls `Agent.WaitChildTraces`
+  to flush in-flight child traces before closing the root trace; if a child
+  handle times out (never reached `EventDone`) a `child_trace_incomplete` marker
+  is written so the gate fails closed rather than trusting a cut-off child
+  (tests: `TestE2ESubagentChildTrace`, `TestWaitChildTracesFlushesAsyncChild`,
+  `TestWaitChildTracesTimeoutEmitsIncomplete`,
   `TestCacheGate_SubagentIsolationRequiresChildTrace`,
-  `TestCacheGate_ChildEpochEvaluated`, `TestCacheGate_ChildMissingParentFails`,
+  `TestCacheGate_ChildEpochEvaluated`, `TestCacheGate_PartialChildTraceFails`,
+  `TestCacheGate_ChildTraceIncompleteFails`,
+  `TestCacheGate_ChildMissingParentFails`,
   `TestCacheGate_ChildUnknownParentFails`).
 
 **Blocked / not yet done**

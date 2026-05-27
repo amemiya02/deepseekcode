@@ -186,3 +186,31 @@ func TestWaitChildTracesFlushesAsyncChild(t *testing.T) {
 		t.Fatal("no child epoch record found in trace")
 	}
 }
+
+// TestWaitChildTracesTimeoutEmitsIncomplete proves that when a subagent never
+// reaches EventDone, WaitChildTraces times out and writes a
+// child_trace_incomplete marker instead of silently closing a partial child
+// trace — so the gate fails closed.
+func TestWaitChildTracesTimeoutEmitsIncomplete(t *testing.T) {
+	parent := New(nil, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
+	parent.System = "sys"
+	var buf bytes.Buffer
+	rootHandle := parent.AttachTraceSink(&buf)
+	defer rootHandle.Close()
+	parent.epochMgr.InitEpoch("session_start", EpochComponents{Model: "m"})
+
+	child := New(nil, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
+	if h := parent.AttachChildTraceSink(child); h == nil {
+		t.Fatal("expected a child trace handle")
+	}
+
+	// Child emits an epoch but never EventDone (simulates an async subagent the
+	// model never polled to completion).
+	child.bus.Publish(EventEpochCreated{EpochID: "epoch_child", StaticPrefixHash: "CH", ToolsHash: "CT", Reason: "session_start"})
+
+	parent.WaitChildTraces(50 * time.Millisecond)
+
+	if !strings.Contains(buf.String(), "child_trace_incomplete") {
+		t.Fatalf("expected a child_trace_incomplete marker after timeout:\n%s", buf.String())
+	}
+}

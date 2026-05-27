@@ -3,10 +3,10 @@ fixture_repo: fixtures/subagent-parallel
 commit: "HEAD"
 prompt_file: prompts/subagent-parallel.md
 timeout_seconds: 600
-# Prompt asks for analysis ("List Go files / Identify exports / Find
-# TODOs / Analyze coverage"). No writes are expected — enforce that
-# explicitly. The previous `[.]` allow-list let any write pass.
-read_only: true
+# Prompt asks for analysis using subagents/parallel processing.
+# read_only is intentionally OFF — SubagentTool.IsReadOnly() returns
+# false, so --read-only would block the very capability this task tests.
+# Post-run audit via no_changes: true catches any unintended writes.
 success:
   tests: []
   diff_invariants:

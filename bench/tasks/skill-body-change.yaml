@@ -6,8 +6,10 @@ timeout_seconds: 300
 success:
   tests:
     - test -f SKILL.md
-    - grep -q "analyze" SKILL.md
-    - grep -q -- "--verbose" SKILL.md
+    - "grep -Eq '^### `analyze`$' SKILL.md"
+    - "grep -q -- '--verbose' SKILL.md"
+    - "grep -Eiq 'file.?path|path.*input|input.*path' SKILL.md"
+    - "grep -Eiq 'JSON.*analysis|analysis.*JSON|analysis report' SKILL.md"
   diff_invariants:
     - no_changes_outside:
         - SKILL.md

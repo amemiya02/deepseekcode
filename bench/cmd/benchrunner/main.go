@@ -316,9 +316,12 @@ func prepareFixture(fixtureRepo, commit, benchDir string) (string, func(), error
 	}
 
 	// Layout 1: plain directory — materialize a single-commit repo.
-	// The commit field is ignored for plain dirs: there is no git history
-	// to reset to, so we always create a fresh single-commit repo from
-	// the copied files.
+	// Plain dirs have no git history, so only "HEAD" or empty is allowed.
+	// A specific SHA would silently run different content than intended.
+	if commit != "" && commit != "HEAD" {
+		cleanup()
+		return "", nil, fmt.Errorf("plain directory fixture %q has no git history; commit must be HEAD or empty, got %q", fixtureRepo, commit)
+	}
 	initCmds := [][]string{
 		{"git", "init", "-q", "-b", "main"},
 		{"git", "config", "user.email", "bench@deepseekcode.local"},
@@ -476,12 +479,13 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, be
 
 func runTestCommand(testCmd, workDir string) TestResult {
 	tr := TestResult{Command: testCmd}
-	parts := strings.Fields(testCmd)
-	if len(parts) == 0 {
+	if strings.TrimSpace(testCmd) == "" {
 		tr.Output = "empty command"
 		return tr
 	}
-	cmd := exec.Command(parts[0], parts[1:]...)
+	// Bench task tests are trusted repo-local assertions. Run through the
+	// shell so YAML can express quoted grep patterns and small pipelines.
+	cmd := exec.Command("sh", "-c", testCmd)
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()
 	tr.Output = string(out)

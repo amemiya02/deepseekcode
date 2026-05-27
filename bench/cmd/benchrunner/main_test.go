@@ -101,6 +101,40 @@ func TestCheckCacheGate_NoUsageParsedFails(t *testing.T) {
 	}
 }
 
+func TestRunTestCommandHonorsShellQuoting(t *testing.T) {
+	dir := t.TempDir()
+	skill := `# gozer
+
+## Subcommands
+
+### ` + "`analyze`" + `
+
+Analyze a file path input and output a JSON analysis report.
+
+Flags:
+
+- ` + "`--verbose`" + ` Include detailed output.
+`
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []string{
+		"grep -Eq '^### `analyze`$' SKILL.md",
+		"grep -Eiq 'file.?path|path.*input|input.*path' SKILL.md",
+		"grep -Eiq 'JSON.*analysis|analysis.*JSON|analysis report' SKILL.md",
+		"grep -q -- '--verbose' SKILL.md",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			result := runTestCommand(cmd, dir)
+			if !result.Passed {
+				t.Fatalf("command should pass: exit=%d output=%q", result.ExitCode, result.Output)
+			}
+		})
+	}
+}
+
 // initGitRepo turns dir into a git repo with one empty commit so
 // `git diff HEAD` is well-defined. Skips the test if git is unavailable.
 func initGitRepo(t *testing.T, dir string) {
@@ -275,18 +309,14 @@ func TestPrepareFixturePlainDirFakeSHA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	workDir, cleanup, err := prepareFixture(fixtureDir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", tmpDir)
-	if err != nil {
-		t.Fatalf("prepareFixture failed: %v", err)
+	// Plain dirs must reject non-HEAD commits — a fake SHA would silently
+	// run different content than intended, breaking reproducibility.
+	_, _, err := prepareFixture(fixtureDir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", tmpDir)
+	if err == nil {
+		t.Fatal("expected error for non-HEAD commit on plain dir, got nil")
 	}
-	defer cleanup()
-
-	data, err := os.ReadFile(filepath.Join(workDir, "hello.txt"))
-	if err != nil {
-		t.Fatalf("read copied file: %v", err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("got %q, want %q", string(data), "hello")
+	if !strings.Contains(err.Error(), "commit must be HEAD or empty") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

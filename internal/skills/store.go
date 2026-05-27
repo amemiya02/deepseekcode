@@ -5,11 +5,11 @@
 package skills
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -135,6 +135,16 @@ const maxScanDepth = 8
 // Unlike Load, LoadScan keeps skills whose description is empty: the prompt
 // previously listed name-only skills, and dropping them here would silently
 // shrink the model-visible directory.
+//
+// Session-start only (by design): callers load the Store once at session start
+// and reuse it for the whole session. The Store is NOT re-read from disk per
+// turn — editing a SKILL.md mid-session does not change the prefix the model is
+// receiving, because the cache-epoch prefix is deliberately frozen for cache
+// stability (the same way the system prompt and tool set are). A mid-session
+// edit takes effect on the next session; VersionHash()/Diff() exist to compare
+// two stores across that boundary, not to hot-reload within one. Reloading
+// every turn would re-detect the same drift against the frozen baseline on
+// every step, so it is intentionally not done.
 func LoadScan(cwd, home string) (*Store, error) {
 	if cwd == "" {
 		return nil, fmt.Errorf("LoadScan: empty cwd")
@@ -281,70 +291,102 @@ func discoverSkills(root string) ([]Skill, error) {
 	return skills, nil
 }
 
-// parseSkillFile parses a SKILL.md file's frontmatter and body. It reads
-// the file once, extracts metadata from the frontmatter, and computes the
-// body hash (everything after the closing "---") so a body-only edit is
-// detectable without keeping the body in memory.
+var headingRe = regexp.MustCompile(`(?m)^#\s+(.+)$`)
+
+// parseSkillFile parses a SKILL.md file's frontmatter and body. It reads the
+// file once, extracts metadata, and computes the body hash so a body-only edit
+// is detectable without keeping the body in memory.
+//
+// Two layouts are accepted, mirroring the prompt loader this package replaced
+// so the model-visible directory never silently shrinks:
+//
+//   - With "---" frontmatter: name/description/run_mode/allowed-tools are read
+//     from the fences (quoted values are unquoted; a colon in a value is kept).
+//     The body is everything after the closing fence.
+//   - Without frontmatter: the first "# Heading" becomes the name (falling back
+//     to the directory name when there is no heading). The whole file is the
+//     body. Such a heading-only SKILL.md is NOT rejected — it must keep showing
+//     up in the directory and stay readable via skill_read.
 func parseSkillFile(path, dirName string) (Skill, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, err
 	}
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
 
 	sk := Skill{
 		Name: dirName, // default to directory name
 		Path: path,
 	}
 
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-	inFrontmatter := false
-	frontmatterDone := false
-	bodyStart := -1
-
-	for i, line := range lines {
-		if line == "---" {
-			if !inFrontmatter {
-				inFrontmatter = true
-				continue
-			}
-			frontmatterDone = true
-			bodyStart = i + 1
-			break
+	fm, body, hasFrontmatter := splitFrontmatter(content)
+	if !hasFrontmatter {
+		if h := firstHeading(content); h != "" {
+			sk.Name = h
 		}
-		if inFrontmatter {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
+		sk.BodyHash = hashString(strings.TrimSpace(content))
+		return sk, nil
+	}
 
-			switch key {
-			case "name":
-				if value != "" {
-					sk.Name = value
-				}
-			case "description":
-				sk.Description = value
-			case "runAs", "run_mode", "run-mode":
-				sk.RunAs = value
-			case "allowed-tools", "allowed_tools", "allowedTools":
-				sk.AllowedTools = parseToolList(value)
+	for _, line := range strings.Split(fm, "\n") {
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue // blank lines and "# comment" lines without a colon
+		}
+		key := strings.TrimSpace(parts[0])
+		value := unquoteSkill(strings.TrimSpace(parts[1]))
+
+		switch key {
+		case "name":
+			if value != "" {
+				sk.Name = value
 			}
+		case "description":
+			sk.Description = value
+		case "runAs", "run_mode", "run-mode":
+			sk.RunAs = value
+		case "allowed-tools", "allowed_tools", "allowedTools":
+			sk.AllowedTools = parseToolList(value)
 		}
 	}
-
-	if !frontmatterDone {
-		return Skill{}, fmt.Errorf("no frontmatter found")
-	}
-
-	body := ""
-	if bodyStart >= 0 && bodyStart < len(lines) {
-		body = strings.TrimSpace(strings.Join(lines[bodyStart:], "\n"))
-	}
-	sk.BodyHash = hashString(body)
-
+	sk.BodyHash = hashString(strings.TrimSpace(body))
 	return sk, nil
+}
+
+// splitFrontmatter splits SKILL.md content (already \n-normalized) into its
+// frontmatter and body. hasFrontmatter is true only when an opening "---\n"
+// fence has a matching "\n---\n" close; otherwise the whole content is the body
+// (a heading-only or fence-less skill).
+func splitFrontmatter(content string) (fm, body string, hasFrontmatter bool) {
+	const open = "---\n"
+	if !strings.HasPrefix(content, open) {
+		return "", content, false
+	}
+	rest := content[len(open):]
+	if idx := strings.Index(rest, "\n---\n"); idx >= 0 {
+		return rest[:idx], rest[idx+len("\n---\n"):], true
+	}
+	return "", content, false
+}
+
+// firstHeading returns the text of the first markdown "# Heading", trimmed,
+// or "" when the content has none.
+func firstHeading(content string) string {
+	if m := headingRe.FindStringSubmatch(content); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+// unquoteSkill strips a single matching pair of surrounding single or double
+// quotes from a frontmatter value.
+func unquoteSkill(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 // parseToolList splits a comma-separated tool list, trims each entry, and
@@ -432,38 +474,19 @@ func hashString(s string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
 }
 
-// readSkillBody reads the body of a SKILL.md file (after frontmatter).
+// readSkillBody reads the body of a SKILL.md file. With frontmatter, that is
+// everything after the closing fence; without frontmatter (a heading-only
+// skill) the whole file is the body. The result is trimmed so it matches the
+// body that BodyHash was computed over in parseSkillFile.
 func readSkillBody(path string) (string, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	inFrontmatter := false
-	frontmatterDone := false
-	var body strings.Builder
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if line == "---" {
-			if !inFrontmatter {
-				inFrontmatter = true
-				continue
-			}
-			frontmatterDone = true
-			continue
-		}
-
-		if frontmatterDone {
-			if body.Len() > 0 {
-				body.WriteString("\n")
-			}
-			body.WriteString(line)
-		}
+	content := strings.ReplaceAll(string(data), "\r\n", "\n")
+	_, body, hasFrontmatter := splitFrontmatter(content)
+	if !hasFrontmatter {
+		return strings.TrimSpace(content), nil
 	}
-
-	return body.String(), nil
+	return strings.TrimSpace(body), nil
 }

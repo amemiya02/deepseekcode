@@ -94,6 +94,13 @@ type MetricsSpec struct {
 	// subagent cache isolation. When set, the gate fails closed unless the
 	// trace contains at least one child (subagent) epoch to evaluate.
 	RequireSubagentIsolation bool `yaml:"require_subagent_isolation"`
+
+	// RequireCompactionRecord marks a task whose gate must SEE a compaction
+	// happen. When set, the gate fails closed unless the trace contains at
+	// least one compaction record with before/after prefix hashes — so a
+	// compaction task that never actually triggered compaction cannot pass the
+	// "Compaction stable" dimension on the absence of evidence.
+	RequireCompactionRecord bool `yaml:"require_compaction_record"`
 }
 
 // TraceRecord is a single JSONL trace line.
@@ -396,6 +403,8 @@ type CacheGateResult struct {
 
 	CompactionStable   bool // no compaction record moved the static prefix
 	CompactionStableOK bool
+	CompactionRecords  int  // number of compaction records seen
+	CompactionRequired bool // task requires at least one compaction record
 
 	// ParentChildEvaluated is true only when the trace contained a child
 	// (subagent) epoch to judge. When false the dimension is N/A, not a pass:
@@ -926,10 +935,20 @@ func evalCacheGate(r RunResult, ts TaskSpec) CacheGateResult {
 	gate.UnauthorizedDrift = tr.DriftBlocked
 	gate.UnauthorizedDriftOK = tr.DriftBlocked == 0
 
-	// Compaction stability is now MEASURED: a compaction record is unstable
-	// when the agent's before/after static-prefix hashes differ.
+	// Compaction stability is MEASURED: a compaction record is unstable when
+	// the agent's before/after static-prefix hashes differ. A task that
+	// REQUIRES compaction evidence additionally fails when the trace has no
+	// compaction record at all — it cannot pass this dimension on the absence
+	// of a record.
+	gate.CompactionRecords = tr.CompactionRecords
+	gate.CompactionRequired = ts.Metrics.RequireCompactionRecord
 	gate.CompactionStable = tr.CompactionUnstable == 0
 	gate.CompactionStableOK = gate.CompactionStable
+	if gate.CompactionRequired && tr.CompactionRecords == 0 {
+		gate.CompactionStableOK = false
+		gate.Notes = append(gate.Notes,
+			"no compaction record in trace — task requires compaction evidence (fail closed)")
+	}
 
 	unstable := tr.unstableEpochs()
 	gate.PrefixStable = unstable == 0
@@ -1269,7 +1288,14 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 					hitCell = "n/a"
 				}
 				driftCell = fmt.Sprintf("%d %s", gate.UnauthorizedDrift, boolMark(gate.UnauthorizedDriftOK))
-				compCell = boolMark(gate.CompactionStableOK)
+				switch {
+				case gate.CompactionRequired && gate.CompactionRecords == 0:
+					compCell = "none ❌" // required but no compaction happened
+				case gate.CompactionRequired:
+					compCell = fmt.Sprintf("%d %s", gate.CompactionRecords, boolMark(gate.CompactionStableOK))
+				default:
+					compCell = boolMark(gate.CompactionStableOK)
+				}
 				switch {
 				case gate.ParentChildEvaluated:
 					pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))

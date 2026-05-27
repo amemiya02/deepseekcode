@@ -128,6 +128,13 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		subReg.Register(tools.NewSubagentTool(childSpawner))
 	}
 
+	// When the parent is emitting a JSONL trace (benchmark harness), tee this
+	// subagent's epoch/usage/compaction events into the same trace, stamped as
+	// a child epoch (agent_role="subagent", parent_epoch_id=<parent epoch>).
+	// No-op for normal runs. The child's own EpochManager mints a distinct
+	// epoch_id, so the benchmark can prove the child did not reuse the parent's.
+	childTrace := s.Parent.AttachChildTraceSink(child)
+
 	// Drain child events to prevent goroutine deadlock when the
 	// 256-capacity buffer fills up.
 	go func() {
@@ -149,6 +156,10 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 				defer wtRelease()
 			}
 			_, err := child.Run(jobCtx, req.Description)
+			if childTrace != nil {
+				childTrace.WaitTimeout(2 * time.Second)
+				childTrace.Close()
+			}
 
 			state := JobSucceeded
 			summary := extractFinalText(child)
@@ -189,6 +200,10 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 	s.Parent.bus.Publish(EventSubagentStart{Agent: req.Agent, Description: req.Description})
 
 	_, err := child.Run(ctx, req.Description)
+	if childTrace != nil {
+		childTrace.WaitTimeout(2 * time.Second)
+		childTrace.Close()
+	}
 
 	result := tools.SpawnResult{
 		Summary:   extractFinalText(child),

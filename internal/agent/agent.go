@@ -55,6 +55,11 @@ type Agent struct {
 	// consumers subscribe via Bus().Subscribe.
 	bus *Bus
 
+	// traceSink is the root JSONL trace sink set by AttachTraceSink, retained
+	// so spawned subagents can tee their epoch/usage events into the same
+	// trace via AttachChildTraceSink. nil when no trace is being emitted.
+	traceSink *TraceSink
+
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
 	// (the -p one-shot mode runs this way).
@@ -473,6 +478,42 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		Summary:      res.Summary,
 		RemovedCount: res.RemovedCount,
 	})
+	// Emit a MEASURED compaction record on the deterministic path too, so a
+	// task that requires compaction evidence (require_compaction_record) sees a
+	// real record rather than passing on the absence of one. Deterministic
+	// compaction only collapses messages — it never rebuilds the static
+	// prefix — so before/after are computed from the same frozen baseline and
+	// equal by construction. The benchmark still MEASURES them; a regression
+	// that let the live prompt drift away from the frozen baseline would make
+	// them diverge and fail the gate.
+	before, after := a.compactionPrefixHashes()
+	a.bus.Publish(EventSemanticCompaction{
+		FromIdx:                res.FromIdx,
+		ToIdx:                  res.ToIdx,
+		UsedSemantic:           false,
+		StaticPrefixHashBefore: before,
+		StaticPrefixHashAfter:  after,
+	})
+}
+
+// compactionPrefixHashes returns the measured static-prefix fingerprints for a
+// compaction record: "before" is the frozen baseline the model has been
+// receiving; "after" is the prefix the next request will use. When the epoch is
+// frozen both come from the freeze override and are equal by construction; the
+// benchmark fails the gate if a regression makes them diverge.
+func (a *Agent) compactionPrefixHashes() (before, after string) {
+	system := a.staticSystem()
+	var toolSpecs []llm.Tool
+	if a.Tools != nil {
+		toolSpecs = a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+	}
+	beforeSystem, beforeTools := system, toolSpecs
+	afterSystem, afterTools := system, toolSpecs
+	if epoch := a.epochMgr.CurrentEpoch(); epoch != nil && a.epochMgr.IsFrozen() {
+		beforeSystem, beforeTools = epoch.FrozenSystem, epoch.FrozenTools
+		afterSystem, afterTools = epoch.FrozenSystem, epoch.FrozenTools
+	}
+	return staticPrefixHash(beforeSystem, beforeTools), staticPrefixHash(afterSystem, afterTools)
 }
 
 // stepContext returns (ctx, cancel) for one step. When timeout is zero
@@ -510,6 +551,16 @@ func staticPrefixOf(system string) string {
 // rather than the agent asserting it with a hardcoded boolean.
 func staticPrefixHash(system string, toolSpecs []llm.Tool) string {
 	return llm.ComputeFingerprint(llm.PrefixInput{SystemPrompt: system, Tools: toolSpecs}).CombinedSHA256
+}
+
+// CurrentEpochID returns the current epoch's ID, or "" when no epoch has been
+// initialized yet. Used to stamp a subagent's child trace with the parent
+// epoch it ran under.
+func (a *Agent) CurrentEpochID() string {
+	if e := a.epochMgr.CurrentEpoch(); e != nil {
+		return e.EpochID
+	}
+	return ""
 }
 
 // currentProfileID returns the active agent-profile name, or "default"

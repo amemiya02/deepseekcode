@@ -15,3 +15,9 @@ success:
     - no_changes: true
 metrics:
   require_cache_gate: true
+  # This task's whole point is compaction. The gate must SEE a compaction
+  # record (with before/after prefix hashes) — otherwise "Compaction ✅" would
+  # be passing on the absence of evidence. Both the semantic and deterministic
+  # paths emit a measurable record, so a run that genuinely compacts produces
+  # one; a run that never crossed the threshold fails closed here.
+  require_compaction_record: true

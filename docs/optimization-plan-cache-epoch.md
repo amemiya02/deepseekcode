@@ -64,14 +64,34 @@ gap is the billed comparison run itself.
   body-only edit moves the actual request bytes, not just an internal hash
   (test: `prompt.TestBuildPrefixReflectsSkillBodyEdit`). No local absolute
   paths or bodies enter the prefix; bodies load on demand via `skill_read`.
-  The old `prompt.LoadSkills` dual loader was deleted.
+  The old `prompt.LoadSkills` dual loader was deleted, and its full parsing
+  semantics were migrated into `skills.parseSkillFile` so nothing the prompt
+  loader accepted is dropped: heading-only `SKILL.md` files (no frontmatter,
+  first `# Heading` is the name), quoted frontmatter values, and a colon inside
+  a description all still parse, and heading-only skills stay readable via
+  `skill_read` (tests: `skills.TestParseSkillFile_Semantics`,
+  `skills.TestHeadingOnlySkillReadable`). Skill discovery is **session-start
+  only** by design — the Store is loaded once and not re-read per turn, so a
+  mid-session `SKILL.md` edit does not move the frozen prefix (it takes effect
+  on the next session); this matches how the system prompt and tool set are
+  frozen, and is documented on `skills.LoadScan`.
 - **Compaction stability is measured, not asserted.** The agent computes the
   static-prefix fingerprint of the frozen baseline and of the request
   compaction actually fed the model, and emits both as
   `before_static_prefix_hash`/`after_static_prefix_hash`. The harness compares
   them — the hardcoded `static_prefix_hash_changed=false` is gone (tests:
   `TestCacheGate_CompactionMovedPrefixFails`,
-  `TestCacheGate_CompactionMissingHashFails`).
+  `TestCacheGate_CompactionMissingHashFails`). **Both** compaction paths emit a
+  measured record now: the deterministic fallback also publishes
+  `EventSemanticCompaction` with before/after hashes (`UsedSemantic=false`,
+  before == after since it never rebuilds the prefix), so a compaction-required
+  task always sees a record when compaction actually ran (test:
+  `TestDeterministicCompactionEmitsMeasuredRecord`). A task can set
+  `require_compaction_record: true` (enabled on `ctx-compaction`) to **fail
+  closed** when no compaction record exists at all — the "Compaction" dimension
+  can no longer pass on the absence of evidence (tests:
+  `TestCacheGate_RequireCompactionRecordMissingFails`,
+  `TestCacheGate_RequireCompactionRecordPresentPasses`).
 - **Post-warm minimum.** A cache-gated task must produce at least
   `min_post_warm_turns` warm turns (default 1); one that never measured a warm
   turn fails instead of passing on N/A (test:
@@ -82,18 +102,21 @@ gap is the billed comparison run itself.
   active profile name, and `Agent.SwitchProfile` creates/switches an epoch and
   records one expected cache miss (test:
   `TestSwitchProfileCreatesEpochAndExpectsCacheMiss`).
+- **Parent/subagent isolation evidence (was P1).** Subagent runs (in-process
+  via `LoopSpawner`) now tee their own epoch/usage/compaction events into the
+  parent's trace through `Agent.AttachChildTraceSink`, stamped
+  `agent_role="subagent"` and `parent_epoch_id=<parent epoch>`, over a shared
+  synchronized writer. The child's own `EpochManager` mints a distinct
+  `epoch_id`, so the harness can prove a child did not reuse the parent epoch
+  rather than hardcoding it. The harness evaluates parent/subagent pollution
+  **only when a child epoch is present** — otherwise `N/A`, never a hardcoded
+  ✅ — and `require_subagent_isolation: true` (`subagent-parallel`) **fails
+  closed** with no child trace (tests: `TestE2ESubagentChildTrace`,
+  `TestCacheGate_SubagentIsolationRequiresChildTrace`,
+  `TestCacheGate_ChildEpochEvaluated`).
 
 **Blocked / not yet done**
 
-- **Parent/subagent isolation evidence (P1).** Traces now carry
-  `run_id`/`agent_role`/`parent_epoch_id`, and the harness evaluates
-  parent/subagent pollution **only when a child (subagent) epoch is present** —
-  otherwise the dimension is reported `N/A`, never a hardcoded ✅. A task that
-  sets `require_subagent_isolation: true` (`subagent-parallel`) **fails closed**
-  with no child trace. Cross-process child-trace emission from subagents is not
-  yet wired, so that task is expected to fail the gate until it is (tests:
-  `TestCacheGate_SubagentIsolationRequiresChildTrace`,
-  `TestCacheGate_ChildEpochEvaluated`).
 - **M1 / M5 real reports + Reasonix comparison (P0-2).** The harness can now
   run `current + optimized + reasonix` and produce a real gate, but a genuine
   billed matrix run has not been executed here, and a token-level Reasonix

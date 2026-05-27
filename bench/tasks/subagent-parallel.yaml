@@ -13,9 +13,11 @@ success:
     - no_changes: true
 metrics:
   require_cache_gate: true
-  # This task's whole point is parent/subagent cache isolation. The gate
-  # must FAIL closed unless the trace actually contains a child (subagent)
-  # epoch to judge — no hardcoded ✅. Until cross-process child-trace
-  # emission is wired, this task reports the pollution dimension as N/A and
-  # fails the gate rather than fake a pass.
+  # This task's whole point is parent/subagent cache isolation. Subagents run
+  # in-process via LoopSpawner and tee their own epoch/usage events into the
+  # parent's trace (agent_role="subagent", parent_epoch_id=<parent>, distinct
+  # child epoch_id). The gate evaluates the pollution dimension from those real
+  # child epochs and passes only when the child did not reuse the parent epoch;
+  # if the run produced no child epoch at all it still FAILS closed (N/A, never
+  # a hardcoded ✅) rather than fake a pass.
   require_subagent_isolation: true

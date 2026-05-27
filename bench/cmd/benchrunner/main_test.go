@@ -391,6 +391,45 @@ func TestCacheGate_InsufficientPostWarmFails(t *testing.T) {
 	}
 }
 
+// TestCacheGate_RequireCompactionRecordMissingFails: a task that requires
+// compaction evidence must fail when the run never emitted a compaction record,
+// even if every other dimension is healthy — no passing on the absence of one.
+func TestCacheGate_RequireCompactionRecordMissingFails(t *testing.T) {
+	tr := traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 1000, 0}})
+	// Baseline: this otherwise-healthy trace passes without the requirement.
+	base := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if !base.Passed {
+		t.Fatalf("baseline trace should pass without the compaction requirement; gate=%+v", base)
+	}
+	// With require_compaction_record and no compaction record → fail closed.
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireCompactionRecord: true}})
+	if g.CompactionStableOK || g.Passed {
+		t.Fatalf("require_compaction_record with no record must fail closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_RequireCompactionRecordPresentPasses: a stable compaction
+// record (before == after, as the deterministic path emits) satisfies the
+// requirement and the gate passes.
+func TestCacheGate_RequireCompactionRecordPresentPasses(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0}`,
+		`{"type":"compaction","epoch_id":"e1","kind":"deterministic","before_static_prefix_hash":"P","after_static_prefix_hash":"P"}`,
+	)
+	if tr.CompactionRecords != 1 {
+		t.Fatalf("CompactionRecords = %d, want 1", tr.CompactionRecords)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireCompactionRecord: true}})
+	if !g.CompactionStableOK || !g.Passed {
+		t.Fatalf("a stable compaction record must satisfy require_compaction_record; gate=%+v", g)
+	}
+}
+
 func TestRunTestCommandHonorsShellQuoting(t *testing.T) {
 	dir := t.TempDir()
 	skill := `# gozer

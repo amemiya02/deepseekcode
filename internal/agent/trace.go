@@ -54,20 +54,38 @@ type traceRecord struct {
 	SummaryCostCNY         *float64 `json:"summary_cost_cny,omitempty"`
 }
 
-// TraceSink converts the agent's event stream into JSONL trace records.
-// It subscribes to the bus and writes one record per epoch lifecycle
+// traceWriter is the synchronized JSONL sink shared by a root TraceSink and
+// any subagent child sinks. Sharing one mutex+encoder keeps records from the
+// parent and child goroutines from interleaving into corrupt half-lines.
+type traceWriter struct {
+	mu  sync.Mutex
+	enc *json.Encoder
+}
+
+func (w *traceWriter) encode(r traceRecord) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_ = w.enc.Encode(r)
+}
+
+// TraceSink converts an agent's event stream into JSONL trace records.
+// It subscribes to a bus and writes one record per epoch lifecycle
 // event, per turn (prefix snapshot + usage), per compaction, and per
 // blocked drift. The trace is the source of truth for the benchmark's
 // cache-reliability gate.
 //
-// Construct via Agent.AttachTraceSink, which wires the subscription and a
-// drain goroutine and returns a handle the caller waits on after Run.
+// Construct the root via Agent.AttachTraceSink (wires the subscription, a
+// drain goroutine, and a handle the caller waits on after Run). Subagent
+// child sinks are derived via newChildTraceSink and share the root's writer.
 type TraceSink struct {
-	mu    sync.Mutex
-	enc   *json.Encoder
+	w     *traceWriter
 	model string
 	runID string
 	role  string
+	// parentEpochID is set only on a subagent child sink; it stamps every
+	// child record with the epoch the parent was running under, so the
+	// benchmark can attribute the child epoch to its parent.
+	parentEpochID string
 
 	turn          int
 	curEpochID    string
@@ -75,16 +93,31 @@ type TraceSink struct {
 	curToolsHash  string
 }
 
-// NewTraceSink builds a sink writing JSONL to w. model is used to price
+// NewTraceSink builds a root sink writing JSONL to w. model is used to price
 // usage records (cost_cny). Every record is stamped with a per-run run_id and
 // agent_role="root" so the benchmark can distinguish the root epoch from any
 // subagent epochs when judging parent/subagent cache pollution.
 func NewTraceSink(w io.Writer, model string) *TraceSink {
 	return &TraceSink{
-		enc:   json.NewEncoder(w),
+		w:     &traceWriter{enc: json.NewEncoder(w)},
 		model: model,
 		runID: fmt.Sprintf("run_%d", time.Now().UnixNano()),
 		role:  "root",
+	}
+}
+
+// newChildTraceSink derives a subagent sink that shares the parent's
+// synchronized writer and run_id but stamps every record with
+// agent_role="subagent" and parentEpochID. The child agent's own EpochManager
+// mints a distinct epoch_id, so a child epoch never reuses the parent's — which
+// is exactly what the benchmark's parent/subagent isolation check verifies.
+func newChildTraceSink(parent *TraceSink, parentEpochID string) *TraceSink {
+	return &TraceSink{
+		w:             parent.w,
+		model:         parent.model,
+		runID:         parent.runID,
+		role:          "subagent",
+		parentEpochID: parentEpochID,
 	}
 }
 
@@ -95,9 +128,10 @@ func (s *TraceSink) write(r traceRecord) {
 	if r.AgentRole == "" {
 		r.AgentRole = s.role
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_ = s.enc.Encode(r)
+	if r.ParentEpochID == "" {
+		r.ParentEpochID = s.parentEpochID
+	}
+	s.w.encode(r)
 }
 
 // Handle processes a single agent event, emitting trace records. Exported
@@ -223,13 +257,36 @@ func (h *TraceSinkHandle) WaitTimeout(d time.Duration) {
 // Close unsubscribes the sink from the bus. Safe to call after Wait.
 func (h *TraceSinkHandle) Close() { h.bus.Unsubscribe(h.sub) }
 
-// AttachTraceSink subscribes a TraceSink to the agent's bus and starts a
+// AttachTraceSink subscribes a root TraceSink to the agent's bus and starts a
 // drain goroutine. The returned handle's Wait blocks until the run's
-// EventDone is processed, so callers can flush a JSONL file before exit.
+// EventDone is processed, so callers can flush a JSONL file before exit. The
+// sink is also retained on the agent so spawned subagents can tee their own
+// epoch/usage events into the same trace (see AttachChildTraceSink).
 func (a *Agent) AttachTraceSink(w io.Writer) *TraceSinkHandle {
 	sink := NewTraceSink(w, a.Model)
-	sub := a.bus.Subscribe(512)
-	h := &TraceSinkHandle{bus: a.bus, sub: sub, done: make(chan struct{})}
+	a.traceSink = sink
+	return attachSinkToBus(a.bus, sink)
+}
+
+// AttachChildTraceSink wires a subagent's event bus into the parent's trace
+// writer, stamping every child record with agent_role="subagent" and the
+// parent's current epoch_id. It is a no-op (returns nil) when the parent has no
+// trace sink attached, so normal interactive/CLI runs are unaffected. The
+// returned handle's Wait blocks until the child's EventDone is processed; the
+// caller closes it after the subagent's Run returns.
+func (a *Agent) AttachChildTraceSink(child *Agent) *TraceSinkHandle {
+	if a.traceSink == nil || child == nil {
+		return nil
+	}
+	sink := newChildTraceSink(a.traceSink, a.CurrentEpochID())
+	return attachSinkToBus(child.bus, sink)
+}
+
+// attachSinkToBus subscribes sink to bus and drains it in a goroutine,
+// returning a handle whose done channel closes once EventDone is processed.
+func attachSinkToBus(bus *Bus, sink *TraceSink) *TraceSinkHandle {
+	sub := bus.Subscribe(512)
+	h := &TraceSinkHandle{bus: bus, sub: sub, done: make(chan struct{})}
 	go func() {
 		closed := false
 		for env := range sub.C {

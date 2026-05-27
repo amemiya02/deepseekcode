@@ -122,7 +122,10 @@ metrics:
 - **success.diff_invariants**: Constraints on file changes
   - `no_changes: true` — no file modifications allowed (read-only tasks)
   - `no_changes_outside: [path]` — only changes under the listed paths are allowed
-- **metrics.require_cache_gate**: Whether cache hit rate is required for this task
+- **metrics.require_cache_gate**: Whether the Cache Reliability gate is enforced for this task
+- **metrics.min_post_warm_turns**: Minimum warm (non-cold-start) turns required before the post-warm hit rate is trusted (default 1 for cache-gated tasks)
+- **metrics.require_subagent_isolation**: Fail closed unless the trace contains a child (subagent) epoch to judge parent/subagent isolation
+- **metrics.require_compaction_record**: Fail closed unless the trace contains at least one compaction record (with before/after prefix hashes)
 
 ## Output Format
 
@@ -304,7 +307,7 @@ trace (`<task>.agent.jsonl`):
 | 1 | Within-epoch prefix stability | 1 hash per epoch | `prefix.snapshot.static_prefix_hash` |
 | 2 | Post-warm cache hit rate | >= 95%, >= `min_post_warm_turns` warm turns | `usage` records (excl. first/epoch) |
 | 3 | Unauthorized drift count | 0 | `drift.blocked` records |
-| 4 | Compaction prefix hash stability | `before` == `after` on every compaction | `compaction.before/after_static_prefix_hash` |
+| 4 | Compaction prefix hash stability | `before` == `after`; record required if `require_compaction_record` | `compaction.before/after_static_prefix_hash` |
 | 5 | Parent/subagent cache pollution | 0, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id` epochs |
 
 **Post-warm cache hit rate**: After the first turn warms the prompt
@@ -318,19 +321,27 @@ definitions) must not change between turns within a single epoch. Any
 change indicates a bug in prefix stability.
 
 **Parent/subagent cache pollution**: a child epoch must not reuse or
-mutate its parent's epoch. This is only **evaluable when the trace
-contains a child (subagent) epoch** (a record with `agent_role` other
-than `root`, or a `parent_epoch_id`). The single-process root trace has
-none, so the dimension is reported **N/A** — never a hardcoded ✅. A task
-that sets `require_subagent_isolation: true` (e.g. `subagent-parallel`)
-**fails closed** when no child epoch is present, since isolation cannot
-be proven. (Cross-process child-trace emission is not yet wired, so this
-task is expected to fail the gate until it is.)
+mutate its parent's epoch. Subagents run in-process (via `LoopSpawner`)
+and now tee their own epoch/usage events into the parent's trace,
+stamped `agent_role="subagent"` and `parent_epoch_id=<parent epoch>`,
+with a distinct child `epoch_id` minted by the child's own epoch
+manager. The dimension is **evaluable only when the trace contains a
+child (subagent) epoch**; a run that spawned none reports **N/A** —
+never a hardcoded ✅. A task that sets `require_subagent_isolation: true`
+(e.g. `subagent-parallel`) **fails closed** when no child epoch is
+present, since isolation cannot be proven; when a child epoch is present
+the harness checks it did not reuse the parent epoch.
 
 **Compaction prefix hash stability**: when compaction fires, the agent
 emits the measured static-prefix fingerprint before and after; the
 harness fails the gate if they differ. Compaction rewrites conversation
-history, not the system prompt, so the two must match.
+history, not the system prompt, so the two must match. **Both** the
+semantic and deterministic paths emit a measured record (the
+deterministic fallback emits `before == after`, since it never rebuilds
+the prefix). A task can set `require_compaction_record: true` (enabled on
+`ctx-compaction`) to additionally **fail closed** when the trace contains
+**no** compaction record at all — so this dimension cannot pass on the
+absence of evidence when compaction was the whole point of the task.
 
 ### Agentic Engineering Score
 

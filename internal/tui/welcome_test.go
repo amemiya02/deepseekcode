@@ -24,7 +24,7 @@ func TestWelcome(t *testing.T) {
 		if !strings.Contains(plain, "deepseekcode") {
 			t.Fatal("expected brand in meta row")
 		}
-		if !strings.Contains(plain, "terminal coding agent") {
+		if !strings.Contains(plain, "Terminal coding agent") {
 			t.Fatal("expected tagline in output")
 		}
 	})

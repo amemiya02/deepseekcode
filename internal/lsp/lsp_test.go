@@ -449,8 +449,9 @@ func TestPathToURIRoundtrip(t *testing.T) {
 		t.Errorf("URI should start with file://, got %q", uri)
 	}
 	path := URIToPath(uri)
-	if path != "/home/user/project/main.go" {
-		t.Errorf("roundtrip: got %q, want /home/user/project/main.go", path)
+	want := filepath.FromSlash("/home/user/project/main.go")
+	if path != want {
+		t.Errorf("roundtrip: got %q, want %q", path, want)
 	}
 }
 
@@ -614,8 +615,9 @@ func TestPathToURIWindowsDrive(t *testing.T) {
 		t.Errorf("got %q", uri)
 	}
 	path := URIToPath(uri)
-	if path != "/Users/test/main.go" {
-		t.Errorf("roundtrip: got %q, want /Users/test/main.go", path)
+	want := filepath.FromSlash("/Users/test/main.go")
+	if path != want {
+		t.Errorf("roundtrip: got %q, want %q", path, want)
 	}
 }
 

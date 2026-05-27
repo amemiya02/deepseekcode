@@ -1,12 +1,15 @@
 id: skill-body-change
 fixture_repo: fixtures/skill-body-change
-commit: "4ce9e56b09c8adbe16d53a4e226f79c357bf5b82"
+commit: "HEAD"
 prompt_file: prompts/skill-body-change.md
 timeout_seconds: 300
 success:
-  tests: []
+  tests:
+    - test -f SKILL.md
+    - grep -q "analyze" SKILL.md
+    - grep -q -- "--verbose" SKILL.md
   diff_invariants:
     - no_changes_outside:
-        - .
+        - SKILL.md
 metrics:
   require_cache_gate: false

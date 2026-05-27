@@ -137,11 +137,8 @@ func TestRenderSkillsBlockNoDescription(t *testing.T) {
 	got := RenderSkillsBlock([]Skill{
 		{Name: "bare", Path: "/x/SKILL.md"},
 	})
-	if !strings.Contains(got, "- bare\n") {
-		t.Errorf("missing bare skill line; got: %s", got)
-	}
-	if strings.Contains(got, "file:") {
-		t.Error("skill prefix should not include file path")
+	if !strings.Contains(got, "- bare (path: /x/SKILL.md)") {
+		t.Errorf("missing bare skill line with path; got: %s", got)
 	}
 }
 

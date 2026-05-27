@@ -40,14 +40,16 @@ import (
 
 // AgentConfig represents an agent adapter configuration loaded from YAML.
 type AgentConfig struct {
-	ID         string                 `yaml:"id"`
-	Command    string                 `yaml:"command"`
-	Args       []string               `yaml:"args"`
-	InputMode  string                 `yaml:"input_mode"` // "prompt_arg" or "stdin"
-	Env        map[string]string      `yaml:"env"`
-	TracePath  string                 `yaml:"trace_path"`
-	UsageParse string                 `yaml:"usage_parser"`
-	Features   map[string]interface{} `yaml:"features"`
+	ID          string                 `yaml:"id"`
+	Command     string                 `yaml:"command"`
+	Args        []string               `yaml:"args"`
+	InputMode   string                 `yaml:"input_mode"` // "prompt_arg" or "stdin"
+	Env         map[string]string      `yaml:"env"`
+	TracePath   string                 `yaml:"trace_path"`
+	UsageParse  string                 `yaml:"usage_parser"`
+	WarmupRuns  int                    `yaml:"warmup_runs"`
+	Features    map[string]interface{} `yaml:"features"`
+	EnforceGate bool                   `yaml:"enforce_cache_gate"` // if false, gate is reported but not used for CI exit code
 }
 
 // TaskSpec represents a task specification loaded from YAML.
@@ -57,6 +59,7 @@ type TaskSpec struct {
 	Commit        string       `yaml:"commit"`
 	PromptFile    string       `yaml:"prompt_file"`
 	TimeoutSec    int          `yaml:"timeout_seconds"`
+	ReadOnly      bool         `yaml:"read_only"`
 	Success       SuccessSpec  `yaml:"success"`
 	Metrics       MetricsSpec  `yaml:"metrics"`
 }
@@ -70,6 +73,11 @@ type SuccessSpec struct {
 // DiffInvariant represents a constraint on file changes.
 type DiffInvariant struct {
 	NoChangesOutside []string `yaml:"no_changes_outside"`
+	// NoChanges: when true, the workdir must be byte-identical to the
+	// fixture commit. Any modified tracked file, untracked file, or
+	// .gitignore-ignored file (e.g. build/, dist/) counts as a violation.
+	// Used by read-only tasks to catch agents that "secretly" wrote files.
+	NoChanges bool `yaml:"no_changes"`
 }
 
 // MetricsSpec defines metrics requirements.
@@ -238,47 +246,60 @@ func loadTaskSpecs(dir string) ([]TaskSpec, error) {
 // Fixture management
 // ---------------------------------------------------------------------------
 
-// prepareFixture copies the fixture repo to a temp dir and resets to the
-// frozen commit. Returns the temp dir path and a cleanup function.
+// prepareFixture copies the fixture to a temp dir and makes sure it is a
+// git repo with a single committed snapshot of its frozen state. Returns
+// the temp dir path and a cleanup function.
+//
+// Two fixture layouts are supported:
+//
+//  1. Plain directory (preferred for committed fixtures): the repository
+//     does not contain any nested .git. After copying, we init a fresh
+//     repo and commit everything as the frozen baseline. The yaml `commit`
+//     field is ignored in this mode — there is only one commit, HEAD.
+//
+//  2. Embedded git repo (legacy): the fixture itself ships with .git.
+//     We checkout the requested `commit` and run `git clean -fdx`. This
+//     mode is discouraged because nested .git inside the outer repo
+//     either becomes an embedded repo/submodule or fails to commit at
+//     all — but the path is kept for fixtures that genuinely need
+//     multi-commit history.
+//
+// In both modes the post-condition is the same: `git diff HEAD` is
+// well-defined and returns empty for a clean workdir, which is what the
+// no_changes audit relies on.
 func prepareFixture(fixtureRepo, commit, benchDir string) (string, func(), error) {
 	absFixture := fixtureRepo
 	if !filepath.IsAbs(absFixture) {
 		absFixture = filepath.Join(benchDir, absFixture)
 	}
 
-	// Check fixture exists
 	if _, err := os.Stat(absFixture); os.IsNotExist(err) {
 		return "", nil, fmt.Errorf("fixture repo not found: %s", absFixture)
 	}
 
-	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "bench-fixture-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
-
 	cleanup := func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
 			log.Printf("WARNING: cleanup temp dir %s: %v", tmpDir, err)
 		}
 	}
 
-	// Copy fixture repo to temp dir using cp -a
 	cpCmd := exec.Command("cp", "-a", absFixture+"/.", tmpDir)
 	if out, err := cpCmd.CombinedOutput(); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("copy fixture: %s: %w", string(out), err)
 	}
 
-	// Reset to frozen commit if it's a git repo
-	commitArg := commit
-	if commitArg == "" || commitArg == "HEAD" {
-		commitArg = "HEAD"
-	}
-
 	gitDir := filepath.Join(tmpDir, ".git")
 	if _, err := os.Stat(gitDir); err == nil {
-		// It's a git repo — reset to the specified commit
+		// Layout 2: existing git repo — reset to the frozen commit.
+		commitArg := commit
+		if commitArg == "" {
+			commitArg = "HEAD"
+		}
 		cmds := [][]string{
 			{"git", "checkout", "--force", commitArg},
 			{"git", "clean", "-fdx"},
@@ -291,8 +312,31 @@ func prepareFixture(fixtureRepo, commit, benchDir string) (string, func(), error
 				return "", nil, fmt.Errorf("git reset (%s): %s: %w", strings.Join(args, " "), string(out), err)
 			}
 		}
+		return tmpDir, cleanup, nil
 	}
 
+	// Layout 1: plain directory — materialize a single-commit repo.
+	// The commit field is ignored for plain dirs: there is no git history
+	// to reset to, so we always create a fresh single-commit repo from
+	// the copied files.
+	initCmds := [][]string{
+		{"git", "init", "-q", "-b", "main"},
+		{"git", "config", "user.email", "bench@deepseekcode.local"},
+		{"git", "config", "user.name", "bench"},
+		{"git", "config", "commit.gpgsign", "false"},
+		{"git", "add", "-A"},
+		// --allow-empty keeps the audit valid for fixtures that ship no files.
+		{"git", "commit", "-q", "--allow-empty", "-m", "bench fixture frozen"},
+	}
+	for _, args := range initCmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = tmpDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("materialize fixture (%s): %s: %w",
+				strings.Join(args, " "), string(out), err)
+		}
+	}
 	return tmpDir, cleanup, nil
 }
 
@@ -332,6 +376,10 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, be
 	// Build command args
 	args := make([]string, len(agent.Args))
 	copy(args, agent.Args)
+
+	if task.ReadOnly {
+		args = append([]string{"--read-only"}, args...)
+	}
 
 	var cmd *exec.Cmd
 	switch agent.InputMode {
@@ -389,7 +437,7 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, be
 	}
 
 	combined := stdout.String() + "\n" + stderr.String()
-	result.CacheHits, result.CacheMisses, result.OutputTokens, result.CostCNY = parseUsage(combined)
+	result.CacheHits, result.CacheMisses, result.OutputTokens, result.CostCNY = parseUsageForAgent(combined, agent.UsageParse)
 	result.UsageParsed = result.CacheHits+result.CacheMisses+result.OutputTokens > 0
 	result.Turns = 1
 
@@ -450,65 +498,135 @@ func runTestCommand(testCmd, workDir string) TestResult {
 func checkDiffInvariants(invariants []DiffInvariant, workDir string) []string {
 	var violations []string
 	for _, inv := range invariants {
-		if len(inv.NoChangesOutside) == 0 {
-			continue
-		}
-		cmd := exec.Command("git", "diff", "--name-only", "HEAD")
-		cmd.Dir = workDir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			continue
-		}
-		changed := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for _, f := range changed {
-			if f == "" {
-				continue
-			}
-			allowed := false
-			for _, prefix := range inv.NoChangesOutside {
-				if prefix == "." || strings.HasPrefix(f, prefix+"/") || f == prefix {
-					allowed = true
-					break
+		switch {
+		case inv.NoChanges:
+			files, errs := changedFiles(workDir)
+			violations = append(violations, errs...)
+			violations = append(violations, files...)
+		case len(inv.NoChangesOutside) > 0:
+			files, errs := changedFiles(workDir)
+			// Errors are violations in this branch too — silently skipping
+			// turned the audit into a fail-open check whenever git was
+			// broken (non-repo workdir, corrupted checkout).
+			violations = append(violations, errs...)
+			for _, f := range files {
+				if !pathAllowedByPrefixes(f, inv.NoChangesOutside) {
+					violations = append(violations, f)
 				}
-			}
-			if !allowed {
-				violations = append(violations, f)
 			}
 		}
 	}
 	return violations
 }
 
-func checkCacheGate(results []RunResult) CacheGateResult {
-	gate := CacheGateResult{
-		CompactionStable:  true,
-		CompactionStableOK: true,
-		UnauthorizedDriftOK: true,
-		ParentChildOK:     true,
-	}
-
-	var totalHits, totalMisses int
-	parsedCount := 0
-	for _, r := range results {
-		if r.UsageParsed {
-			parsedCount++
-			totalHits += r.CacheHits
-			totalMisses += r.CacheMisses
+// pathAllowedByPrefixes reports whether path is under one of the given
+// allow-list prefixes. The "." prefix matches everything (used to say
+// "the entire workdir is allowed").
+func pathAllowedByPrefixes(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if p == "." || path == p || strings.HasPrefix(path, p+"/") {
+			return true
 		}
 	}
+	return false
+}
 
-	gate.UsageParsed = parsedCount > 0
-	gate.UsageParsedOK = gate.UsageParsed
-
-	if totalHits+totalMisses > 0 {
-		gate.PostWarmHitRate = float64(totalHits) / float64(totalHits+totalMisses)
+// changedFiles returns every file in workDir that differs from the
+// committed baseline: tracked-but-modified, untracked, AND .gitignore-
+// ignored generated artifacts (build/, dist/, __pycache__/, etc.).
+//
+// The returned errs slice is non-empty when git itself fails — caller
+// must treat each entry as a violation, not silently skip. Pre-fix
+// behavior dropped these errors and let non-git fixtures appear clean.
+func changedFiles(workDir string) (files, errs []string) {
+	// Tracked modifications vs HEAD.
+	diffOut, err := runGit(workDir, "diff", "--name-only", "HEAD")
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("no_changes audit: git diff failed: %v: %s",
+			err, strings.TrimSpace(diffOut)))
+	} else {
+		files = append(files, splitNonEmptyLines(diffOut)...)
 	}
-	gate.PostWarmHitRateOK = gate.PostWarmHitRate >= 0.95
+	// Every untracked path. Crucially we do NOT pass --exclude-standard:
+	// generated files matched by .gitignore must surface so a "read-only"
+	// run that secretly wrote into dist/ still fails the audit.
+	lsOut, err := runGit(workDir, "ls-files", "--others")
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("no_changes audit: git ls-files failed: %v: %s",
+			err, strings.TrimSpace(lsOut)))
+	} else {
+		files = append(files, splitNonEmptyLines(lsOut)...)
+	}
+	return files, errs
+}
 
-	gate.Passed = gate.UsageParsedOK && gate.PostWarmHitRateOK &&
-		gate.UnauthorizedDriftOK && gate.CompactionStableOK && gate.ParentChildOK
+func runGit(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
 
-	return gate
+func splitNonEmptyLines(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, "\n")
+	out := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// checkCacheGate returns Cache Reliability gate results keyed by agent ID
+// and then task ID. Per-(agent, task) granularity prevents a high-hit task
+// from masking another task's failure. Only tasks with require_cache_gate=true
+// are included; agents whose RequireCacheGate tasks did not run produce an
+// empty inner map.
+func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string]CacheGateResult {
+	taskLookup := make(map[string]TaskSpec)
+	for _, t := range tasks {
+		taskLookup[t.ID] = t
+	}
+
+	gates := make(map[string]map[string]CacheGateResult)
+	for _, r := range results {
+		ts, ok := taskLookup[r.Task]
+		if !ok || !ts.Metrics.RequireCacheGate {
+			continue
+		}
+
+		gate := CacheGateResult{
+			CompactionStable:     true,
+			CompactionStableOK:   true,
+			UnauthorizedDrift:    0,
+			UnauthorizedDriftOK:  true,
+			ParentChildPollution: 0,
+			ParentChildOK:        true,
+		}
+
+		gate.UsageParsed = r.UsageParsed
+		gate.UsageParsedOK = r.UsageParsed
+
+		total := r.CacheHits + r.CacheMisses
+		if total > 0 {
+			gate.PostWarmHitRate = float64(r.CacheHits) / float64(total)
+		}
+		gate.PostWarmHitRateOK = gate.PostWarmHitRate >= 0.95
+
+		gate.Passed = gate.UsageParsedOK && gate.PostWarmHitRateOK &&
+			gate.UnauthorizedDriftOK && gate.CompactionStableOK && gate.ParentChildOK
+
+		if gates[r.Agent] == nil {
+			gates[r.Agent] = make(map[string]CacheGateResult)
+		}
+		gates[r.Agent][r.Task] = gate
+	}
+	return gates
 }
 
 func countLines(s string) int {
@@ -544,6 +662,67 @@ func parseUsage(output string) (cacheHits, cacheMisses, outputTokens int, costCN
 	costCNY = (float64(cacheHits)*p[0] + float64(cacheMisses)*p[1] + float64(outputTokens)*p[2]) / million
 
 	return cacheHits, cacheMisses, outputTokens, costCNY
+}
+
+// reasonix output patterns. Reasonix CLI is third-party and its exact format
+// is not vendored; this parser is best-effort and falls back to zeros when
+// nothing matches. The Reasonix adapter is *not* gated for CI exit (see
+// enforce_cache_gate in agent config); it is included for side-by-side
+// reporting only. When Reasonix output stabilizes, tighten these patterns.
+var (
+	reasonixInputRE     = regexp.MustCompile(`(?i)(?:prompt|input)[_\s-]*tokens?\s*[:=]\s*(\d+)`)
+	reasonixOutputRE    = regexp.MustCompile(`(?i)(?:completion|output)[_\s-]*tokens?\s*[:=]\s*(\d+)`)
+	reasonixCachedRE    = regexp.MustCompile(`(?i)(?:cached|cache[_\s-]*hit)[_\s-]*tokens?\s*[:=]\s*(\d+)`)
+	reasonixCacheRateRE = regexp.MustCompile(`(?i)cache[_\s-]*(?:hit[_\s-]*)?(?:rate|pct|percent|%)\s*[:=]\s*([\d.]+)\s*%?`)
+	reasonixCostUSDRE   = regexp.MustCompile(`(?i)(?:cost|usd)[_\s-]*[:=]\s*\$?([\d.]+)`)
+	reasonixCostCNYRE   = regexp.MustCompile(`(?i)(?:cost|cny|rmb|¥)\s*[:=]?\s*¥?([\d.]+)`)
+)
+
+// parseUsageReasonix attempts to extract usage from Reasonix CLI stdout/stderr.
+// Returns zero values when nothing matches; the report will show "no usage
+// metrics parsed" rather than fabricating data.
+func parseUsageReasonix(output string) (cacheHits, cacheMisses, outputTokens int, costCNY float64) {
+	var totalInput int
+	if m := reasonixInputRE.FindStringSubmatch(output); m != nil {
+		totalInput, _ = strconv.Atoi(m[1])
+	}
+	if m := reasonixOutputRE.FindStringSubmatch(output); m != nil {
+		outputTokens, _ = strconv.Atoi(m[1])
+	}
+	if m := reasonixCachedRE.FindStringSubmatch(output); m != nil {
+		cacheHits, _ = strconv.Atoi(m[1])
+	} else if m := reasonixCacheRateRE.FindStringSubmatch(output); m != nil && totalInput > 0 {
+		rate, _ := strconv.ParseFloat(m[1], 64)
+		cacheHits = int(float64(totalInput) * rate / 100)
+	}
+	if totalInput > 0 {
+		cacheMisses = totalInput - cacheHits
+		if cacheMisses < 0 {
+			cacheMisses = 0
+		}
+	}
+
+	// Cost is reported only when Reasonix explicitly emits one (CNY or USD).
+	// Estimating with DeepSeek pricing would inflate the comparison and make
+	// the gate evidence look stronger than it is, so we leave costCNY=0 and
+	// let the report render it as N/A.
+	if m := reasonixCostCNYRE.FindStringSubmatch(output); m != nil {
+		costCNY, _ = strconv.ParseFloat(m[1], 64)
+	} else if m := reasonixCostUSDRE.FindStringSubmatch(output); m != nil {
+		usd, _ := strconv.ParseFloat(m[1], 64)
+		const approxUSDtoCNY = 7.2
+		costCNY = usd * approxUSDtoCNY
+	}
+	return cacheHits, cacheMisses, outputTokens, costCNY
+}
+
+func parseUsageForAgent(output string, parserName string) (cacheHits, cacheMisses, outputTokens int, costCNY float64) {
+	switch parserName {
+	case "reasonix":
+		return parseUsageReasonix(output)
+	default:
+		return parseUsage(output)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -611,7 +790,7 @@ func buildTraceRecords(result RunResult) []TraceRecord {
 // Report generation
 // ---------------------------------------------------------------------------
 
-func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec, gate CacheGateResult) string {
+func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec, gates map[string]map[string]CacheGateResult) string {
 	var b strings.Builder
 
 	b.WriteString("# Benchmark Report\n\n")
@@ -694,70 +873,75 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 		b.WriteString("No errors.\n")
 	}
 
-	// Cache Reliability Gate
-	b.WriteString("\n## Cache Reliability Gate\n\n")
-	b.WriteString("| Check | Required | Actual | Verdict |\n")
-	b.WriteString("|-------|----------|--------|---------|\n")
-
-	usageActual, usageVerdict := "no", "❌"
-	if gate.UsageParsed {
-		usageActual, usageVerdict = "yes", "✅"
-	}
-	b.WriteString(fmt.Sprintf("| Usage metrics parsed | yes | %s | %s |\n", usageActual, usageVerdict))
-
-	hitPct := fmt.Sprintf("%.1f%%", gate.PostWarmHitRate*100)
-	hitVerdict := "❌"
-	if gate.PostWarmHitRateOK {
-		hitVerdict = "✅"
-	}
-	b.WriteString(fmt.Sprintf("| Post-warm cache hit rate | >= 95%% | %s | %s |\n", hitPct, hitVerdict))
-
-	driftVerdict := "✅"
-	if !gate.UnauthorizedDriftOK {
-		driftVerdict = "❌"
-	}
-	b.WriteString(fmt.Sprintf("| Unauthorized drift | 0 | %d | %s |\n", gate.UnauthorizedDrift, driftVerdict))
-
-	compVerdict := "✅"
-	if !gate.CompactionStableOK {
-		compVerdict = "❌"
-	}
-	compActual := "yes"
-	if !gate.CompactionStable {
-		compActual = "no"
-	}
-	b.WriteString(fmt.Sprintf("| Compaction prefix stable | yes | %s | %s |\n", compActual, compVerdict))
-
-	pollVerdict := "✅"
-	if !gate.ParentChildOK {
-		pollVerdict = "❌"
-	}
-	b.WriteString(fmt.Sprintf("| Parent/subagent pollution | 0 | %d | %s |\n", gate.ParentChildPollution, pollVerdict))
-
-	b.WriteString("\n")
-	if gate.Passed {
-		b.WriteString("**Gate verdict: PASS**\n")
-	} else {
-		reasons := []string{}
-		if !gate.UsageParsedOK {
-			reasons = append(reasons, "no usage metrics parsed")
+	// Cache Reliability Gate — per (agent, task)
+	for _, agent := range agents {
+		taskGates, ok := gates[agent.ID]
+		if !ok || len(taskGates) == 0 {
+			continue
 		}
-		if !gate.PostWarmHitRateOK {
-			reasons = append(reasons, fmt.Sprintf("post-warm hit rate %.1f%% below 95%% threshold", gate.PostWarmHitRate*100))
+
+		enforcedLabel := "report-only"
+		if agent.EnforceGate {
+			enforcedLabel = "ENFORCED (CI gate)"
 		}
-		if !gate.UnauthorizedDriftOK {
-			reasons = append(reasons, "unauthorized drift detected")
+		b.WriteString(fmt.Sprintf("\n## Cache Reliability Gate — %s (%s)\n\n", agent.ID, enforcedLabel))
+
+		b.WriteString("| Task | Usage Parsed | Hit Rate | Drift | Compaction | Pollution | Verdict |\n")
+		b.WriteString("|------|--------------|----------|-------|------------|-----------|---------|\n")
+
+		// Sort tasks for stable output
+		taskIDs := make([]string, 0, len(taskGates))
+		for tID := range taskGates {
+			taskIDs = append(taskIDs, tID)
 		}
-		if !gate.CompactionStableOK {
-			reasons = append(reasons, "compaction prefix hash changed")
+		sort.Strings(taskIDs)
+
+		agentAllPassed := true
+		for _, tID := range taskIDs {
+			gate := taskGates[tID]
+
+			usageCell := "❌ no"
+			if gate.UsageParsed {
+				usageCell = "✅ yes"
+			}
+			hitCell := fmt.Sprintf("%.1f%% %s", gate.PostWarmHitRate*100, boolMark(gate.PostWarmHitRateOK))
+			driftCell := "N/A ⏭️"  // no event data yet
+			compCell := "N/A ⏭️"
+			if !gate.CompactionStableOK {
+				compCell = "FAIL ❌"
+			}
+			pollCell := "N/A ⏭️"
+			if !gate.ParentChildOK {
+				pollCell = "FAIL ❌"
+			}
+			verdictCell := "✅ PASS"
+			if !gate.Passed {
+				verdictCell = "❌ FAIL"
+				agentAllPassed = false
+			}
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
+				tID, usageCell, hitCell, driftCell, compCell, pollCell, verdictCell))
 		}
-		if !gate.ParentChildOK {
-			reasons = append(reasons, "parent/subagent cache pollution detected")
+
+		b.WriteString("\n_Note: drift/compaction/pollution checks require event-level instrumentation in agent traces._\n")
+		switch {
+		case agentAllPassed:
+			b.WriteString("**Agent verdict: PASS**\n")
+		case agent.EnforceGate:
+			b.WriteString("**Agent verdict: FAIL (enforced — will fail CI)**\n")
+		default:
+			b.WriteString("**Agent verdict: FAIL (report-only — does not fail CI)**\n")
 		}
-		b.WriteString(fmt.Sprintf("**Gate verdict: FAIL** (%s)\n", strings.Join(reasons, "; ")))
 	}
 
 	return b.String()
+}
+
+func boolMark(ok bool) string {
+	if ok {
+		return "✅"
+	}
+	return "❌"
 }
 
 // ---------------------------------------------------------------------------
@@ -868,6 +1052,23 @@ func main() {
 			runIdx++
 			log.Printf("[%d/%d] agent=%s task=%s", runIdx, totalRuns, agent.ID, task.ID)
 
+			// Warmup runs (not measured)
+			if agent.WarmupRuns > 0 {
+				log.Printf("  warmup: %d runs", agent.WarmupRuns)
+				for w := 0; w < agent.WarmupRuns; w++ {
+					warmupDir, warmupCleanup, err := prepareFixture(task.FixtureRepo, task.Commit, absBenchDir)
+					if err != nil {
+						log.Printf("  warmup %d: fixture error: %v", w+1, err)
+						continue
+					}
+					warmupCtx, warmupCancel := context.WithTimeout(context.Background(),
+						time.Duration(task.TimeoutSec)*time.Second)
+					runAgent(warmupCtx, agent, task, warmupDir, absBenchDir)
+					warmupCancel()
+					warmupCleanup()
+				}
+			}
+
 			// Prepare fixture
 			fixtureDir, cleanup, err := prepareFixture(task.FixtureRepo, task.Commit, absBenchDir)
 			if err != nil {
@@ -920,8 +1121,8 @@ func main() {
 	}
 
 	// Generate and write report
-	gate := checkCacheGate(results)
-	report := generateReport(results, agents, tasks, gate)
+	gates := checkCacheGate(results, tasks)
+	report := generateReport(results, agents, tasks, gates)
 	reportPath := filepath.Join(reportsDir, fmt.Sprintf("bench-%s.md",
 		time.Now().UTC().Format("20060102-150405")))
 	if err := os.WriteFile(reportPath, []byte(report), 0o644); err != nil {
@@ -931,4 +1132,29 @@ func main() {
 
 	// Print summary to stdout
 	fmt.Println("\n" + report)
+
+	// Exit non-zero if any *enforced* agent has any failing per-task gate.
+	// Agents with enforce_cache_gate=false are report-only — useful for the
+	// `current` baseline (intentionally below threshold) and external agents
+	// like Reasonix (best-effort usage parsing).
+	enforcedAgents := make(map[string]bool)
+	for _, a := range agents {
+		enforcedAgents[a.ID] = a.EnforceGate
+	}
+	anyEnforcedFailed := false
+	for agentID, taskGates := range gates {
+		if !enforcedAgents[agentID] {
+			continue
+		}
+		for _, gate := range taskGates {
+			if !gate.Passed {
+				log.Printf("ENFORCED gate FAIL: agent=%s", agentID)
+				anyEnforcedFailed = true
+				break
+			}
+		}
+	}
+	if anyEnforcedFailed {
+		os.Exit(1)
+	}
 }

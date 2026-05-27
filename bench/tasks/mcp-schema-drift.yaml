@@ -1,12 +1,15 @@
 id: mcp-schema-drift
 fixture_repo: fixtures/mcp-schema-drift
-commit: "308fbf9c695e278ae9396fcf27b17f0220dbc00c"
+commit: "HEAD"
 prompt_file: prompts/mcp-schema-drift.md
 timeout_seconds: 300
+# Prompt says "Do NOT modify any files. Only provide analysis." Enforce
+# via --read-only and a byte-level audit. The previous `[.]` allow-list
+# matched everything and made the invariant a no-op.
+read_only: true
 success:
   tests: []
   diff_invariants:
-    - no_changes_outside:
-        - .
+    - no_changes: true
 metrics:
   require_cache_gate: false

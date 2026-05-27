@@ -7,3 +7,7 @@ env:
   REASONIX_API_KEY: required
 trace_path: bench/traces/reasonix-current/
 usage_parser: reasonix
+# Reasonix is an external agent; its CLI output format isn't vendored here.
+# The usage parser is best-effort (see parseUsageReasonix). Verdicts are
+# reported for side-by-side comparison but do not affect the CI exit code.
+enforce_cache_gate: false

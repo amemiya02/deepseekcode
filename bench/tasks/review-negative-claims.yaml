@@ -1,10 +1,12 @@
 id: review-negative-claims
 fixture_repo: fixtures/review-negative-claims
-commit: "7000dce738ac78f11df5b1b2b16bdedd59f04dba"
+commit: "HEAD"
 prompt_file: prompts/review-negative-claims.md
 timeout_seconds: 300
+read_only: true
 success:
   tests: []
-  diff_invariants: []
+  diff_invariants:
+    - no_changes: true
 metrics:
   require_cache_gate: false

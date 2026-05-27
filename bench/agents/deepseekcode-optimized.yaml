@@ -7,8 +7,16 @@ env:
   DEEPSEEK_API_KEY: required
 trace_path: bench/traces/deepseekcode-optimized/
 usage_parser: deepseekcode
+warmup_runs: 2
+# Only the optimized adapter is gated for CI exit. The current baseline is
+# intentionally below threshold (it disables cache optimization to provide
+# a regression reference), and Reasonix uses a best-effort usage parser.
+enforce_cache_gate: true
 features:
   prefix_epoch: true
   semantic_compaction: true
-  tool_tiers: true
+  # Restrict the model-visible tool list to core only. The regression
+  # baseline ("current") uses "all" so a difference in cache hit-rate
+  # actually attributable to the tier reduction is observable.
+  tool_tiers: core
   cache_reliable: true

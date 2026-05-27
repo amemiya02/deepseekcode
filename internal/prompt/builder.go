@@ -164,7 +164,7 @@ func RenderSkillsBlock(skills []Skill) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n## Skills\n")
-	b.WriteString("(Use the skill name to reference skills; load full instructions via read_file when needed)\n")
+	b.WriteString("(Use the skill path to load full instructions via read_file)\n")
 	total := 0
 	omitted := 0
 	for _, s := range skills {
@@ -174,9 +174,17 @@ func RenderSkillsBlock(skills []Skill) string {
 		}
 		var line string
 		if desc != "" {
-			line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
+			if s.Path != "" {
+				line = fmt.Sprintf("- %s: %s (path: %s)\n", s.Name, desc, s.Path)
+			} else {
+				line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
+			}
 		} else {
-			line = fmt.Sprintf("- %s\n", s.Name)
+			if s.Path != "" {
+				line = fmt.Sprintf("- %s (path: %s)\n", s.Name, s.Path)
+			} else {
+				line = fmt.Sprintf("- %s\n", s.Name)
+			}
 		}
 		if total+len(line) > maxSkillsBlockChars {
 			omitted++

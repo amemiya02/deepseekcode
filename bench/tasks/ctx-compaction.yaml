@@ -1,13 +1,17 @@
 id: ctx-compaction
 fixture_repo: fixtures/ctx-compaction
-commit: "17fd22dc8a3ee786c6f228ae9a8a5dc2c2e14340"
+commit: "HEAD"
 prompt_file: prompts/ctx-compaction.md
 timeout_seconds: 900
+# Prompt is analysis-only ("No file modifications"). Enforce that by
+# disabling write/edit/bash via --read-only AND auditing afterward
+# that the workdir matches HEAD byte-for-byte. The prior
+# `no_changes_outside: [.]` allowed every modification — a no-op.
+read_only: true
 success:
   tests:
     - go test ./...
   diff_invariants:
-    - no_changes_outside:
-        - .
+    - no_changes: true
 metrics:
   require_cache_gate: true

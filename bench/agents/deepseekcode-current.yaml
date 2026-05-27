@@ -7,3 +7,13 @@ env:
   DEEPSEEK_API_KEY: required
 trace_path: bench/traces/deepseekcode-current/
 usage_parser: deepseekcode
+# Current is a regression baseline; it intentionally disables the cache
+# optimizations and is below the post-warm hit-rate threshold. Gate verdicts
+# are reported but do not affect the CI exit code.
+enforce_cache_gate: false
+features:
+  disable_prefix_epoch: true
+  disable_semantic_compaction: true
+  # "all" disables tier filtering so the regression baseline sees every
+  # registered tool — matching pre-tiering behavior. Optimized uses "core".
+  tool_tiers: all

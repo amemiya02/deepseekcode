@@ -97,15 +97,15 @@ Each task is defined in `bench/tasks/*.yaml`:
 
 ```yaml
 id: ctx-long-readonly
-fixture_repo: bench/fixtures/ctx-long-readonly
+fixture_repo: fixtures/ctx-long-readonly
 commit: HEAD
-prompt_file: bench/prompts/ctx-long-readonly.md
+prompt_file: prompts/ctx-long-readonly.md
 timeout_seconds: 300
+read_only: true
 success:
   tests: []  # no tests for read-only
   diff_invariants:
-    - no_changes_outside:
-        - bench/fixtures/ctx-long-readonly
+    - no_changes: true
 metrics:
   require_cache_gate: true
 ```
@@ -113,13 +113,16 @@ metrics:
 ### Fields
 
 - **id**: Unique task identifier
-- **fixture_repo**: Path to fixture git repo (relative to bench dir)
-- **commit**: Git commit to reset to (HEAD, specific hash, etc.)
-- **prompt_file**: Path to prompt markdown file
+- **fixture_repo**: Path to fixture (relative to bench dir). Can be a git repo or plain directory.
+- **commit**: Git commit to reset to (HEAD, specific hash, etc.). Ignored for plain directories.
+- **prompt_file**: Path to prompt markdown file (relative to bench dir)
 - **timeout_seconds**: Maximum execution time (default: 300)
-- **success.tests**: Test commands to run (empty for read-only tasks)
+- **read_only**: If true, pass `--read-only` to the agent (default: false)
+- **success.tests**: Test commands to run after the agent exits
 - **success.diff_invariants**: Constraints on file changes
-- **metrics.require_cache_gate**: Whether cache hit rate is required
+  - `no_changes: true` — no file modifications allowed (read-only tasks)
+  - `no_changes_outside: [path]` — only changes under the listed paths are allowed
+- **metrics.require_cache_gate**: Whether cache hit rate is required for this task
 
 ## Output Format
 
@@ -173,10 +176,12 @@ Generated: 2026-05-27T10:00:00Z
 
 ## Adding New Tasks
 
-1. Create a fixture repo in `bench/fixtures/`
+1. Create a fixture in `bench/fixtures/` (git repo or plain directory)
 2. Write a prompt file in `bench/prompts/`
 3. Create a task YAML in `bench/tasks/`
-4. Run the benchmark
+4. For read-only tasks, use `read_only: true` and `no_changes: true`
+5. For write tasks, use `no_changes_outside` with specific allowed paths
+6. Run `go run ./bench/cmd/benchrunner/ --task <id>` to verify
 
 ## Adding New Agents
 

@@ -72,6 +72,12 @@ type Agent struct {
 	prefixMon *llm.PrefixMonitor
 	epochMgr  *EpochManager
 
+	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
+	DisablePrefixEpoch bool
+
+	// DisableSemanticCompaction disables semantic (LLM) compaction (for benchmarking).
+	DisableSemanticCompaction bool
+
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
 
@@ -149,9 +155,10 @@ type Agent struct {
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	MCPRegistry *mcp.Registry
 
-	// ActiveTiers controls which tool tiers are sent to the model.
-	// Default: [TierCore, TierProfile]. The agent uses
-	// Tools.AsLLMToolsFiltered(ActiveTiers...) when building requests.
+	// ActiveTiers controls which tool tiers are sent to the model. The
+	// agent uses Tools.AsLLMToolsFiltered(ActiveTiers...) when building
+	// requests; a nil/empty slice means "no filter" (all registered tools
+	// are exposed). The constructor defaults this to [TierCore] (see New).
 	ActiveTiers []tools.ToolTier
 
 	toolCallCount int
@@ -380,53 +387,55 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		maxCtx = MaxContextTokens
 	}
 
-	// Check context pressure for semantic compaction thresholds.
-	pressure := ContextPressure(a.Messages, maxCtx)
-	action := ShouldSemanticCompact(pressure, a.SemanticCfg)
+	if !a.DisableSemanticCompaction {
+		// Check context pressure for semantic compaction thresholds.
+		pressure := ContextPressure(a.Messages, maxCtx)
+		action := ShouldSemanticCompact(pressure, a.SemanticCfg)
 
-	if action == "warn" {
-		a.bus.Publish(EventCompactionWarning{
-			Pressure:  pressure,
-			Threshold: a.SemanticCfg.WarnThreshold,
-		})
-	}
-
-	if action == "compact" || action == "protect" {
-		systemPrompt := a.System
-		tools := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
-		if epoch := a.epochMgr.CurrentEpoch(); epoch != nil && a.epochMgr.IsFrozen() {
-			systemPrompt = epoch.FrozenSystem
-			tools = epoch.FrozenTools
+		if action == "warn" {
+			a.bus.Publish(EventCompactionWarning{
+				Pressure:  pressure,
+				Threshold: a.SemanticCfg.WarnThreshold,
+			})
 		}
-		res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, tools, a.SemanticCfg)
-		if res.Summary != "" {
-			if a.Persister != nil {
-				if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
-					a.bus.Publish(EventInfo{Text: "semantic compaction persistence failed: " + err.Error()})
-					return
+
+		if action == "compact" || action == "protect" {
+			systemPrompt := a.System
+			tools := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+			if epoch := a.epochMgr.CurrentEpoch(); epoch != nil && a.epochMgr.IsFrozen() {
+				systemPrompt = epoch.FrozenSystem
+				tools = epoch.FrozenTools
+			}
+			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, tools, a.SemanticCfg)
+			if res.Summary != "" {
+				if a.Persister != nil {
+					if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
+						a.bus.Publish(EventInfo{Text: "semantic compaction persistence failed: " + err.Error()})
+						return
+					}
 				}
+				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				a.bus.Publish(EventCompaction{
+					FromIdx:      res.FromIdx,
+					ToIdx:        res.ToIdx,
+					Summary:      res.Summary,
+					RemovedCount: res.RemovedCount,
+				})
+				a.bus.Publish(EventSemanticCompaction{
+					FromIdx:        res.FromIdx,
+					ToIdx:          res.ToIdx,
+					UsedSemantic:   res.UsedSemantic,
+					SummaryCost:    res.SummaryCost,
+					FallbackReason: res.FallbackReason,
+				})
+				if res.UsedSemantic && res.SummaryCost > 0 {
+					a.BudgetState.SpentCNY += res.SummaryCost
+				}
+				return
 			}
-			a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
-			a.bus.Publish(EventCompaction{
-				FromIdx:      res.FromIdx,
-				ToIdx:        res.ToIdx,
-				Summary:      res.Summary,
-				RemovedCount: res.RemovedCount,
-			})
-			a.bus.Publish(EventSemanticCompaction{
-				FromIdx:        res.FromIdx,
-				ToIdx:          res.ToIdx,
-				UsedSemantic:   res.UsedSemantic,
-				SummaryCost:    res.SummaryCost,
-				FallbackReason: res.FallbackReason,
-			})
-			if res.UsedSemantic && res.SummaryCost > 0 {
-				a.BudgetState.SpentCNY += res.SummaryCost
-			}
-			return
+			// SemanticCompact returned empty (too few messages or no compaction needed).
+			// Fall through to deterministic path below.
 		}
-		// SemanticCompact returned empty (too few messages or no compaction needed).
-		// Fall through to deterministic path below.
 	}
 
 	// Deterministic fallback path.
@@ -504,36 +513,38 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		})
 	}
 
-	if !a.epochMgr.IsFrozen() {
-		driftChanges := a.epochMgr.DetectDrift(epochComps)
-		for _, ch := range driftChanges {
-			a.bus.Publish(EventPendingChange{
-				EpochID:     epoch.EpochID,
-				Kind:        ch.Kind,
-				Description: ch.Description,
-			})
+	if !a.DisablePrefixEpoch {
+		if !a.epochMgr.IsFrozen() {
+			driftChanges := a.epochMgr.DetectDrift(epochComps)
+			for _, ch := range driftChanges {
+				a.bus.Publish(EventPendingChange{
+					EpochID:     epoch.EpochID,
+					Kind:        ch.Kind,
+					Description: ch.Description,
+				})
+			}
+			a.epochMgr.FreezeEpoch()
+			a.bus.Publish(EventEpochFrozen{EpochID: epoch.EpochID})
+		} else {
+			driftChanges := a.epochMgr.DetectDrift(epochComps)
+			for _, ch := range driftChanges {
+				a.bus.Publish(EventPendingChange{
+					EpochID:     epoch.EpochID,
+					Kind:        ch.Kind,
+					Description: ch.Description,
+				})
+			}
 		}
-		a.epochMgr.FreezeEpoch()
-		a.bus.Publish(EventEpochFrozen{EpochID: epoch.EpochID})
-	} else {
-		driftChanges := a.epochMgr.DetectDrift(epochComps)
-		for _, ch := range driftChanges {
-			a.bus.Publish(EventPendingChange{
-				EpochID:     epoch.EpochID,
-				Kind:        ch.Kind,
-				Description: ch.Description,
-			})
-		}
-	}
 
-	// CRITICAL-1: When the epoch is frozen, use the frozen snapshot
-	// for tools and system prompt. This guarantees cache-stable
-	// prefixes even when live tools/system drift between turns.
-	if a.epochMgr.IsFrozen() {
-		epoch = a.epochMgr.CurrentEpoch()
-		req.Tools = epoch.FrozenTools
-		req.Messages = a.fullMessagesWithFrozenSystem(epoch.FrozenSystem)
-		staticSys = epoch.FrozenSystem
+		// CRITICAL-1: When the epoch is frozen, use the frozen snapshot
+		// for tools and system prompt. This guarantees cache-stable
+		// prefixes even when live tools/system drift between turns.
+		if a.epochMgr.IsFrozen() {
+			epoch = a.epochMgr.CurrentEpoch()
+			req.Tools = epoch.FrozenTools
+			req.Messages = a.fullMessagesWithFrozenSystem(epoch.FrozenSystem)
+			staticSys = epoch.FrozenSystem
+		}
 	}
 
 	expectedCacheMiss := a.epochMgr.ExpectedCacheMiss()

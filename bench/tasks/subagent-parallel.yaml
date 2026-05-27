@@ -1,12 +1,15 @@
 id: subagent-parallel
 fixture_repo: fixtures/subagent-parallel
-commit: "3312268bf414f587735782a6880839de4aabba06"
+commit: "HEAD"
 prompt_file: prompts/subagent-parallel.md
 timeout_seconds: 600
+# Prompt asks for analysis ("List Go files / Identify exports / Find
+# TODOs / Analyze coverage"). No writes are expected — enforce that
+# explicitly. The previous `[.]` allow-list let any write pass.
+read_only: true
 success:
   tests: []
   diff_invariants:
-    - no_changes_outside:
-        - .
+    - no_changes: true
 metrics:
   require_cache_gate: true

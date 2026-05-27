@@ -2,6 +2,9 @@
 /bin/
 /dist/
 /dsc
+# Root-only: an unanchored `benchrunner` also matches paths like
+# bench/cmd/benchrunner/main_test.go, which silently drops tests from PRs.
+/benchrunner
 *.exe
 *.test
 *.out

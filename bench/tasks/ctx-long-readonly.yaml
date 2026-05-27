@@ -1,10 +1,12 @@
 id: ctx-long-readonly
 fixture_repo: fixtures/ctx-long-readonly
-commit: "cc5c9e97057d0f272c3ae51f3c9d430a945a7e5c"
+commit: "HEAD"
 prompt_file: prompts/ctx-long-readonly.md
 timeout_seconds: 300
+read_only: true
 success:
   tests: []
-  diff_invariants: []
+  diff_invariants:
+    - no_changes: true
 metrics:
   require_cache_gate: true

@@ -65,6 +65,69 @@ func envFlagEnabled(key string) bool {
 	return v == "1" || v == "true"
 }
 
+// parseToolTiersEnv reads a tool-tier spec from the named env var.
+//
+// Returns (tiers, true) when the caller should override Agent.ActiveTiers.
+// A nil slice with applyOverride=true means "no filter" — i.e. expose every
+// registered tool, regardless of tier (used by the regression baseline).
+//
+// Accepted values (comma-separated, case-insensitive):
+//
+//	"all"                  -> nil          (no filter, all tools)
+//	"core"                 -> [TierCore]
+//	"core,profile"         -> [TierCore, TierProfile]
+//	"core,profile,lazy"    -> all three tiers explicitly
+//	"1" or "true"          -> [TierCore]   (legacy bool — kept for compat)
+//	""                     -> (_, false)   (caller keeps default)
+//
+// Unknown tier names are dropped with a slog warning.
+func parseToolTiersEnv(key string) (tiers []tools.ToolTier, applyOverride bool) {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return nil, false
+	}
+	switch v {
+	case "all":
+		return nil, true
+	case "1", "true":
+		return []tools.ToolTier{tools.TierCore}, true
+	}
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		switch part {
+		case "core":
+			tiers = append(tiers, tools.TierCore)
+		case "profile":
+			tiers = append(tiers, tools.TierProfile)
+		case "lazy":
+			tiers = append(tiers, tools.TierLazy)
+		case "":
+			// trailing/duplicate comma; ignore
+		default:
+			slog.Warn("unknown tool tier in env", "env", key, "value", part)
+		}
+	}
+	if len(tiers) == 0 {
+		// Spec was set but all entries were unknown — fall back to the
+		// caller's default rather than silently exposing everything.
+		return nil, false
+	}
+	return tiers, true
+}
+
+// applyToolTiersFromEnv reads DEEPSEEKCODE_TOOL_TIERS and, when set,
+// overrides a.ActiveTiers. Shared between the TUI and one-shot wiring
+// paths so the runtime behavior is identical and testable on its own,
+// instead of being duplicated twice through copy-paste.
+func applyToolTiersFromEnv(a *agent.Agent) {
+	tiers, ok := parseToolTiersEnv("DEEPSEEKCODE_TOOL_TIERS")
+	if !ok {
+		return
+	}
+	a.ActiveTiers = tiers
+	slog.Info("feature flag: tool_tiers set via env", "active_tiers", tiers)
+}
+
 func run() error {
 	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
 	if len(os.Args) > 1 && os.Args[1] == "init" {
@@ -121,14 +184,14 @@ func run() error {
 		return nil
 	}
 
+	disablePrefixEpoch := envFlagEnabled("DEEPSEEKCODE_DISABLE_PREFIX_EPOCH")
+	disableSemanticCompaction := envFlagEnabled("DEEPSEEKCODE_DISABLE_SEMANTIC_COMPACTION")
+
 	if envFlagEnabled("DEEPSEEKCODE_PREFIX_EPOCH") {
 		slog.Info("feature flag: prefix_epoch enabled via env")
 	}
 	if envFlagEnabled("DEEPSEEKCODE_SEMANTIC_COMPACTION") {
 		slog.Info("feature flag: semantic_compaction enabled via env")
-	}
-	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
-		slog.Info("feature flag: tool_tiers enabled via env")
 	}
 
 	cfg, err := config.Load()
@@ -175,10 +238,10 @@ func run() error {
 	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
 
 	if !tuiMode {
-		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll})
+		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction})
 	}
 
-	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll}, newSession, continueSes, resumeSes)
+	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction}, newSession, continueSes, resumeSes)
 }
 
 // runTUI launches the Bubble Tea TUI. Persistence (session store +
@@ -271,9 +334,16 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
-	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
-		a.ActiveTiers = []tools.ToolTier{tools.TierCore}
+	if mf.disablePrefixEpoch {
+		a.DisablePrefixEpoch = true
+		slog.Info("feature flag: prefix_epoch DISABLED via env")
 	}
+	if mf.disableSemanticCompaction {
+		a.DisableSemanticCompaction = true
+		slog.Info("feature flag: semantic_compaction DISABLED via env")
+	}
+
+	applyToolTiersFromEnv(a)
 
 	skillStore, _ := skillspkg.Load([]string{
 		filepath.Join(cwd, ".deepseek/skills"),
@@ -492,7 +562,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 }
 
 type modeFlags struct {
-	yolo, readOnly, askAll bool
+	yolo, readOnly, askAll            bool
+	disablePrefixEpoch                bool
+	disableSemanticCompaction         bool
 }
 
 type providerRuntime struct {
@@ -621,9 +693,16 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
 
-	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
-		a.ActiveTiers = []tools.ToolTier{tools.TierCore}
+	if mf.disablePrefixEpoch {
+		a.DisablePrefixEpoch = true
+		slog.Info("feature flag: prefix_epoch DISABLED via env")
 	}
+	if mf.disableSemanticCompaction {
+		a.DisableSemanticCompaction = true
+		slog.Info("feature flag: semantic_compaction DISABLED via env")
+	}
+
+	applyToolTiersFromEnv(a)
 
 	skillStore, _ := skillspkg.Load([]string{
 		filepath.Join(cwd, ".deepseek/skills"),

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
@@ -18,6 +19,14 @@ import (
 )
 
 var errPTYUnsupported = errors.New("bash_pty is not supported on this platform")
+
+// isPTYClose reports whether err marks the normal end of a PTY master
+// read. On macOS the master read returns io.EOF when the slave closes;
+// on Linux the same event surfaces as syscall.EIO (read /dev/ptmx:
+// input/output error). Both mean "child closed the PTY", not failure.
+func isPTYClose(err error) bool {
+	return err == nil || err == io.EOF || errors.Is(err, syscall.EIO)
+}
 
 // runPTY runs cmd via $SHELL -c inside a PTY, copies stdout/stderr into
 // a single buffer, and returns the trimmed/truncated output. ctx cancels
@@ -102,7 +111,7 @@ func runPTYWithSandbox(ctx context.Context, command string, timeout time.Duratio
 		return truncateOutput(output, 10_000), -1, fmt.Errorf("pty: %w", waitErr)
 	}
 
-	if copyErrFinal != nil && copyErrFinal != io.EOF {
+	if !isPTYClose(copyErrFinal) {
 		return truncateOutput(output, 10_000), -1, fmt.Errorf("pty: %w", copyErrFinal)
 	}
 
@@ -206,7 +215,7 @@ func RunPTYForJobWithSandbox(ctx context.Context, command string, timeout time.D
 		return truncateOutput(output, 10_000), -1, fmt.Errorf("pty: %w", waitErr)
 	}
 
-	if copyErrFinal != nil && copyErrFinal != io.EOF {
+	if !isPTYClose(copyErrFinal) {
 		return truncateOutput(output, 10_000), -1, fmt.Errorf("pty: %w", copyErrFinal)
 	}
 

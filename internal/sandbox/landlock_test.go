@@ -13,13 +13,20 @@ import (
 func TestLandlockWrap(t *testing.T) {
 	sb := landlock{}
 	cmd := exec.Command("sh", "-c", "echo hi")
+	// exec.Command resolves "sh" via LookPath into cmd.Path (e.g.
+	// /bin/sh or /usr/bin/sh) — Wrap forwards that resolved path as the
+	// fourth arg, so the assertion has to use the same resolved value.
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("sh not on PATH: %v", err)
+	}
 	if err := sb.Wrap(context.Background(), Profile{AllowReadPaths: []string{"/tmp"}}, cmd); err != nil {
 		t.Fatalf("Wrap() error = %v", err)
 	}
 	if cmd.Path != "/proc/self/exe" {
 		t.Fatalf("cmd.Path = %q, want /proc/self/exe", cmd.Path)
 	}
-	wantPrefix := []string{"dsc", "__sandbox_run", "--", "sh"}
+	wantPrefix := []string{"dsc", "__sandbox_run", "--", shPath}
 	if len(cmd.Args) < len(wantPrefix) {
 		t.Fatalf("cmd.Args too short: %#v", cmd.Args)
 	}

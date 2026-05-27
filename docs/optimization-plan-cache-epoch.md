@@ -114,10 +114,16 @@ gap is the billed comparison run itself.
   child epoch that carries **no** `parent_epoch_id` (`ChildMissingParent`) or
   one pointing at an epoch the root never emitted (`ChildUnknownParent`) fails
   the dimension — a `subagent` record cannot pass just by existing. Under
-  `require_subagent_isolation` the child trace must also be **complete**: at
-  least one child `usage` turn AND a child `agent.done` terminator (every
-  `EventDone` now emits an `agent.done` record). A child that only emitted a
-  `prefix.snapshot` is partial evidence and fails. The dimension is evaluated
+  `require_subagent_isolation` the child trace must also be **complete**, and
+  completeness is judged **per child epoch**, never in aggregate: a single
+  `epoch_id` only counts when its own records show a valid parent link, at least
+  one `usage` turn, AND an `agent.done` terminator (every `EventDone` now emits
+  an `agent.done` record stamped with its `epoch_id`). The gate requires **≥1
+  complete child epoch and 0 incomplete child epochs** — so a two-child trace
+  where `c1` has usage-but-no-done and `c2` has done-but-no-usage fails, even
+  though the aggregate "some child had usage" and "some child finished" both
+  look satisfied. A child that only emitted a `prefix.snapshot` is partial
+  evidence and fails. The dimension is evaluated
   **only when a child epoch is present** (otherwise `N/A`, never a hardcoded
   ✅), and `require_subagent_isolation: true` (`subagent-parallel`) **fails
   closed** with no child trace. Async subagents are not lost at exit: the parent
@@ -129,6 +135,7 @@ gap is the billed comparison run itself.
   `TestWaitChildTracesTimeoutEmitsIncomplete`,
   `TestCacheGate_SubagentIsolationRequiresChildTrace`,
   `TestCacheGate_ChildEpochEvaluated`, `TestCacheGate_PartialChildTraceFails`,
+  `TestCacheGate_PerChildCompletenessFails`,
   `TestCacheGate_ChildTraceIncompleteFails`,
   `TestCacheGate_ChildMissingParentFails`,
   `TestCacheGate_ChildUnknownParentFails`).

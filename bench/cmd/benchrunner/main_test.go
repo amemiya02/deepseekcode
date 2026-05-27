@@ -371,8 +371,8 @@ func TestCacheGate_ChildEpochEvaluated(t *testing.T) {
 	if tr.ChildEpochs != 1 {
 		t.Fatalf("ChildEpochs = %d, want 1", tr.ChildEpochs)
 	}
-	if tr.ChildUsageTurns != 1 || !tr.ChildDone {
-		t.Fatalf("expected a complete child trace: ChildUsageTurns=%d ChildDone=%v", tr.ChildUsageTurns, tr.ChildDone)
+	if tr.CompleteChildEpochs != 1 || tr.IncompleteChildEpochs != 0 {
+		t.Fatalf("expected one complete child epoch: complete=%d incomplete=%d", tr.CompleteChildEpochs, tr.IncompleteChildEpochs)
 	}
 	g := evalCacheGate(RunResult{Trace: tr},
 		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
@@ -396,13 +396,49 @@ func TestCacheGate_PartialChildTraceFails(t *testing.T) {
 		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
 		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"e1"}`,
 	)
-	if tr.ChildUsageTurns != 0 || tr.ChildDone {
-		t.Fatalf("expected a partial child trace: ChildUsageTurns=%d ChildDone=%v", tr.ChildUsageTurns, tr.ChildDone)
+	if tr.CompleteChildEpochs != 0 || tr.IncompleteChildEpochs != 1 {
+		t.Fatalf("expected one incomplete child epoch: complete=%d incomplete=%d", tr.CompleteChildEpochs, tr.IncompleteChildEpochs)
 	}
 	g := evalCacheGate(RunResult{Trace: tr},
 		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
 	if g.ParentChildOK || g.Passed {
 		t.Fatalf("a child with no usage/done must fail closed under require_subagent_isolation; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_PerChildCompletenessFails: completeness is judged PER child
+// epoch, not in aggregate. c1 has a usage turn but no agent.done; c2 has an
+// agent.done but no usage turn — both tied to the same real root epoch. The
+// aggregate ("some child had usage" AND "some child finished") looks satisfied,
+// yet NO single child trace ran end to end, so require_subagent_isolation must
+// fail closed. Before per-epoch binding this trace would have passed.
+func TestCacheGate_PerChildCompletenessFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		// c1: a usage turn but never reaches agent.done.
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH1","agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"usage","turn":1,"epoch_id":"c1","cache_hit_tokens":0,"cache_miss_tokens":500,"agent_role":"subagent","parent_epoch_id":"e1"}`,
+		// c2: an agent.done but never produced a usage turn.
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c2","static_prefix_hash":"CH2","agent_role":"subagent","parent_epoch_id":"e1"}`,
+		`{"type":"agent.done","epoch_id":"c2","agent_role":"subagent","parent_epoch_id":"e1"}`,
+	)
+	// Both children have a valid parent link, so the badlink dimension is clean…
+	if tr.ChildMissingParent != 0 || tr.ChildUnknownParent != 0 {
+		t.Fatalf("both children should have valid parent links: missing=%d unknown=%d",
+			tr.ChildMissingParent, tr.ChildUnknownParent)
+	}
+	// …but neither is COMPLETE: c1 lacks done, c2 lacks usage.
+	if tr.CompleteChildEpochs != 0 || tr.IncompleteChildEpochs != 2 {
+		t.Fatalf("expected 0 complete / 2 incomplete child epochs, got complete=%d incomplete=%d",
+			tr.CompleteChildEpochs, tr.IncompleteChildEpochs)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("c1-usage-only + c2-done-only must fail closed under require_subagent_isolation; gate=%+v", g)
 	}
 }
 

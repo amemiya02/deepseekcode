@@ -342,9 +342,13 @@ present the harness checks it did not reuse the parent epoch **and** that
 its `parent_epoch_id` actually points at a real root epoch — a child with
 no parent link (`missing_parent`) or an unknown parent (`unknown_parent`)
 fails. Under `require_subagent_isolation` the child trace must also be
-**complete**: at least one child `usage` turn and a child `agent.done`
-terminator. A child that only emitted a `prefix.snapshot` is partial
-evidence and fails (`partial`). Async subagents are flushed before exit:
+**complete**, judged **per child epoch**: a single `epoch_id` counts only
+when its own records carry a valid parent link, ≥1 `usage` turn, and an
+`agent.done` terminator. The gate needs ≥1 complete child epoch and 0
+incomplete ones, so a `c1` with usage-but-no-done plus a `c2` with
+done-but-no-usage fails even though usage and done each appear *somewhere*.
+A child that only emitted a `prefix.snapshot` is partial evidence and fails
+(`partial`). Async subagents are flushed before exit:
 the one-shot run waits on tracked child trace handles
 (`Agent.WaitChildTraces`), so a `task` with `async:true` does not lose its
 child epoch when the process exits; if a child handle times out before

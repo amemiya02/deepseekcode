@@ -280,9 +280,12 @@ func parseDefinitions(raw json.RawMessage) ([]Definition, error) {
 
 // PathToURI converts a filesystem path to a file:// URI.
 func PathToURI(path string) string {
-	// On non-Windows, drive-letter paths (e.g. "C:/foo") won't be
-	// resolved by filepath.Abs; treat them as already absolute.
-	isAbs := filepath.IsAbs(path)
+	// A path starting with "/" is a POSIX-style absolute path; on Windows
+	// filepath.IsAbs would say false and filepath.Abs would prepend the
+	// current drive letter (D:\home/... → file:///D:/home/...), breaking
+	// the roundtrip. Forward-slash-rooted paths are treated as absolute
+	// regardless of OS.
+	isAbs := filepath.IsAbs(path) || strings.HasPrefix(path, "/")
 	if !isAbs {
 		abs, err := filepath.Abs(path)
 		if err == nil {
@@ -299,6 +302,11 @@ func PathToURI(path string) string {
 // URIToPath converts a file:// URI to a filesystem path.
 func URIToPath(uri string) string {
 	path := strings.TrimPrefix(uri, "file://")
+	// Windows drive-letter URIs look like file:///C:/foo, which strips
+	// to "/C:/foo" — drop the leading slash so FromSlash yields C:\foo.
+	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
 	return filepath.FromSlash(path)
 }
 

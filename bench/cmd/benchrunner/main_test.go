@@ -373,6 +373,50 @@ func TestCacheGate_ChildEpochEvaluated(t *testing.T) {
 	if !g.ParentChildEvaluated {
 		t.Error("ParentChild must be evaluated when a child epoch is present")
 	}
+	// c1's parent_epoch_id is e1, a real root epoch → the link is valid.
+	if tr.ChildMissingParent != 0 || tr.ChildUnknownParent != 0 || !g.ParentChildOK {
+		t.Errorf("a child tied to a real root epoch must pass the dimension; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_ChildMissingParentFails: a subagent epoch that never carried a
+// parent_epoch_id is not isolation evidence and fails the dimension.
+func TestCacheGate_ChildMissingParentFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent"}`,
+	)
+	if tr.ChildMissingParent != 1 {
+		t.Fatalf("ChildMissingParent = %d, want 1", tr.ChildMissingParent)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("child epoch with no parent_epoch_id must fail closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_ChildUnknownParentFails: a subagent epoch whose parent_epoch_id
+// is not a known root epoch fails — the link points at nothing the root emitted.
+func TestCacheGate_ChildUnknownParentFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"ghost"}`,
+	)
+	if tr.ChildUnknownParent != 1 {
+		t.Fatalf("ChildUnknownParent = %d, want 1", tr.ChildUnknownParent)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("child epoch with unknown parent_epoch_id must fail closed; gate=%+v", g)
+	}
 }
 
 // TestCacheGate_InsufficientPostWarmFails: a cache-gated task whose run never

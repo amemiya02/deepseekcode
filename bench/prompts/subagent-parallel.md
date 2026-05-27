@@ -10,7 +10,9 @@ Tasks to complete:
 3. Find all TODO/FIXME comments in the codebase
 4. Analyze test coverage patterns
 
-Complete all tasks and provide a consolidated report.
+Complete all tasks and provide a consolidated report. Wait for each subagent
+to finish and fold its result into the report before you finish — do not leave
+a subagent running in the background unattended.
 
 ## Expected Behavior
 

@@ -184,14 +184,21 @@ type AgentTrace struct {
 	UsageWithoutSnapshot  int // usage records whose epoch had no valid snapshot
 	CompactionMissingHash int // compaction records missing a before/after hash
 
-	// ChildEpochs counts epochs attributed to a subagent (agent_role other
-	// than ""/"root", or carrying a parent_epoch_id). Parent/subagent cache
-	// isolation can only be judged when at least one child epoch is present.
+	// ChildEpochs counts epochs attributed to a subagent (an epoch_id seen
+	// under a non-root agent_role). Parent/subagent cache isolation can only be
+	// judged when at least one child epoch is present.
 	ChildEpochs int
 	// ParentChildPollution counts isolation violations: an epoch_id seen under
 	// both a root and a subagent role (a child reused the parent's epoch), or a
 	// child whose parent_epoch_id equals its own epoch_id (self-parented).
 	ParentChildPollution int
+	// ChildMissingParent counts child (subagent) epochs that never carried a
+	// parent_epoch_id — the child cannot be tied back to its parent at all.
+	ChildMissingParent int
+	// ChildUnknownParent counts child epochs whose parent_epoch_id is not a
+	// known root epoch — the parent link points at nothing the root emitted.
+	// Both are isolation-evidence failures, not free passes.
+	ChildUnknownParent int
 
 	// epochHashes maps an epoch_id to the set of static_prefix_hash values
 	// seen in its prefix.snapshot records. A stable epoch has exactly one.
@@ -230,7 +237,9 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 		epochHashes: map[string]map[string]bool{},
 		epochUsage:  map[string][]usageTurn{},
 	}
-	childEpochs := map[string]bool{}
+	rootEpochs := map[string]bool{}            // epoch_id seen under role "root"
+	childEpochs := map[string]bool{}           // epoch_id seen under a non-root role
+	childParent := map[string]string{}         // child epoch_id -> first parent_epoch_id seen
 	epochRoles := map[string]map[string]bool{} // epoch_id -> set of roles seen
 	selfParented := 0
 	for _, line := range strings.Split(string(data), "\n") {
@@ -254,10 +263,15 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 				epochRoles[tl.EpochID] = map[string]bool{}
 			}
 			epochRoles[tl.EpochID][role] = true
-			// A record attributed to a subagent marks its epoch as a child
-			// epoch, which enables real parent/child pollution evaluation.
-			if role != "root" || tl.ParentEpochID != "" {
+			if role == "root" {
+				rootEpochs[tl.EpochID] = true
+			} else {
+				// A record attributed to a subagent marks its epoch as a child
+				// epoch, which enables real parent/child pollution evaluation.
 				childEpochs[tl.EpochID] = true
+				if tl.ParentEpochID != "" && childParent[tl.EpochID] == "" {
+					childParent[tl.EpochID] = tl.ParentEpochID
+				}
 			}
 			// A child whose parent epoch is itself is an isolation violation.
 			if tl.ParentEpochID == tl.EpochID && tl.ParentEpochID != "" {
@@ -323,6 +337,20 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 		}
 	}
 	tr.ParentChildPollution = pollution
+	// Validate every child epoch's parent link: it must carry a parent_epoch_id
+	// AND that id must be a real root epoch. A subagent record with no parent,
+	// or one pointing at an epoch the root never emitted, is not isolation
+	// evidence — it must not pass the dimension just by existing.
+	for ce := range childEpochs {
+		p := childParent[ce]
+		if p == "" {
+			tr.ChildMissingParent++
+			continue
+		}
+		if !rootEpochs[p] {
+			tr.ChildUnknownParent++
+		}
+	}
 	return tr, nil
 }
 
@@ -412,6 +440,8 @@ type CacheGateResult struct {
 	// fails closed.
 	ParentChildEvaluated bool
 	ParentChildPollution int
+	ChildMissingParent   int
+	ChildUnknownParent   int
 	ParentChildOK        bool
 
 	UsageParsed   bool
@@ -988,7 +1018,18 @@ func evalCacheGate(r RunResult, ts TaskSpec) CacheGateResult {
 	gate.ParentChildEvaluated = tr.ChildEpochs > 0
 	if gate.ParentChildEvaluated {
 		gate.ParentChildPollution = tr.ParentChildPollution
-		gate.ParentChildOK = gate.ParentChildPollution == 0
+		gate.ChildMissingParent = tr.ChildMissingParent
+		gate.ChildUnknownParent = tr.ChildUnknownParent
+		// A child epoch is only valid evidence when it is tied to a real root
+		// epoch. Pollution, a missing parent link, or a parent that is not a
+		// known root epoch all fail the dimension.
+		gate.ParentChildOK = gate.ParentChildPollution == 0 &&
+			tr.ChildMissingParent == 0 && tr.ChildUnknownParent == 0
+		if tr.ChildMissingParent > 0 || tr.ChildUnknownParent > 0 {
+			gate.Notes = append(gate.Notes, fmt.Sprintf(
+				"subagent epoch parent link invalid: missing_parent=%d unknown_parent=%d",
+				tr.ChildMissingParent, tr.ChildUnknownParent))
+		}
 	} else if ts.Metrics.RequireSubagentIsolation {
 		gate.ParentChildOK = false
 		gate.Notes = append(gate.Notes,
@@ -1297,6 +1338,8 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 					compCell = boolMark(gate.CompactionStableOK)
 				}
 				switch {
+				case gate.ParentChildEvaluated && (gate.ChildMissingParent > 0 || gate.ChildUnknownParent > 0):
+					pollCell = fmt.Sprintf("badlink %s", boolMark(gate.ParentChildOK))
 				case gate.ParentChildEvaluated:
 					pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))
 				case !gate.ParentChildOK:

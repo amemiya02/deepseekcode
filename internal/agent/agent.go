@@ -60,6 +60,14 @@ type Agent struct {
 	// trace via AttachChildTraceSink. nil when no trace is being emitted.
 	traceSink *TraceSink
 
+	// childTraceHandles tracks subagent trace handles so a one-shot run can
+	// wait for in-flight (async) subagent traces to flush before it closes the
+	// root trace and exits — otherwise an async `task` whose completion the
+	// model never polled would be killed at process exit and its child epoch
+	// lost. Guarded by childTraceMu.
+	childTraceMu      sync.Mutex
+	childTraceHandles []*TraceSinkHandle
+
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
 	// (the -p one-shot mode runs this way).

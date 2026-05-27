@@ -67,9 +67,11 @@ gap is the billed comparison run itself.
   The old `prompt.LoadSkills` dual loader was deleted, and its full parsing
   semantics were migrated into `skills.parseSkillFile` so nothing the prompt
   loader accepted is dropped: heading-only `SKILL.md` files (no frontmatter,
-  first `# Heading` is the name), quoted frontmatter values, and a colon inside
-  a description all still parse, and heading-only skills stay readable via
-  `skill_read` (tests: `skills.TestParseSkillFile_Semantics`,
+  first `# Heading` is the name), quoted frontmatter values, a colon inside a
+  description, and **case-insensitive** frontmatter keys (`Name:` /
+  `Description:` / `Allowed-Tools:`) all still parse, and heading-only skills
+  stay readable via `skill_read` (tests: `skills.TestParseSkillFile_Semantics`,
+  `skills.TestParseSkillFile_CapitalizedAllowedTools`,
   `skills.TestHeadingOnlySkillReadable`). Skill discovery is **session-start
   only** by design — the Store is loaded once and not re-read per turn, so a
   mid-session `SKILL.md` edit does not move the frozen prefix (it takes effect
@@ -108,12 +110,20 @@ gap is the billed comparison run itself.
   `agent_role="subagent"` and `parent_epoch_id=<parent epoch>`, over a shared
   synchronized writer. The child's own `EpochManager` mints a distinct
   `epoch_id`, so the harness can prove a child did not reuse the parent epoch
-  rather than hardcoding it. The harness evaluates parent/subagent pollution
-  **only when a child epoch is present** — otherwise `N/A`, never a hardcoded
-  ✅ — and `require_subagent_isolation: true` (`subagent-parallel`) **fails
-  closed** with no child trace (tests: `TestE2ESubagentChildTrace`,
+  rather than hardcoding it. The harness validates the parent link itself: a
+  child epoch that carries **no** `parent_epoch_id` (`ChildMissingParent`) or
+  one pointing at an epoch the root never emitted (`ChildUnknownParent`) fails
+  the dimension — a `subagent` record cannot pass just by existing. The
+  dimension is evaluated **only when a child epoch is present** (otherwise
+  `N/A`, never a hardcoded ✅), and `require_subagent_isolation: true`
+  (`subagent-parallel`) **fails closed** with no child trace. Async subagents
+  are not lost at exit: the parent tracks child trace handles and the one-shot
+  CLI calls `Agent.WaitChildTraces` to flush in-flight child traces before
+  closing the root trace (tests: `TestE2ESubagentChildTrace`,
+  `TestWaitChildTracesFlushesAsyncChild`,
   `TestCacheGate_SubagentIsolationRequiresChildTrace`,
-  `TestCacheGate_ChildEpochEvaluated`).
+  `TestCacheGate_ChildEpochEvaluated`, `TestCacheGate_ChildMissingParentFails`,
+  `TestCacheGate_ChildUnknownParentFails`).
 
 **Blocked / not yet done**
 

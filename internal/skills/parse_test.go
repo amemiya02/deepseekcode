@@ -96,6 +96,15 @@ func TestParseSkillFile_Semantics(t *testing.T) {
 			input:    "---\n# comment\n\nname: test-skill\n---\nbody text",
 			wantName: "test-skill",
 		},
+		{
+			// Keys are case-insensitive: capitalized frontmatter keys must
+			// still populate name/description rather than being ignored.
+			name:        "capitalized keys",
+			dirName:     "cap",
+			input:       "---\nName: Cap Skill\nDescription: edits things\n---\nbody",
+			wantName:    "Cap Skill",
+			wantDescrip: "edits things",
+		},
 	}
 
 	for _, tt := range tests {
@@ -111,6 +120,15 @@ func TestParseSkillFile_Semantics(t *testing.T) {
 				t.Error("BodyHash should never be empty")
 			}
 		})
+	}
+}
+
+// TestParseSkillFile_CapitalizedAllowedTools confirms a capitalized
+// `Allowed-Tools:` key still populates the allowed-tools list.
+func TestParseSkillFile_CapitalizedAllowedTools(t *testing.T) {
+	sk := parseTmp(t, "t", "---\nName: t\nAllowed-Tools: read_file, grep\n---\nbody")
+	if len(sk.AllowedTools) != 2 || sk.AllowedTools[0] != "grep" || sk.AllowedTools[1] != "read_file" {
+		t.Errorf("AllowedTools = %v, want sorted [grep read_file]", sk.AllowedTools)
 	}
 }
 

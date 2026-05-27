@@ -333,7 +333,10 @@ func parseSkillFile(path, dirName string) (Skill, error) {
 		if len(parts) != 2 {
 			continue // blank lines and "# comment" lines without a colon
 		}
-		key := strings.TrimSpace(parts[0])
+		// Keys are matched case-insensitively, mirroring the prompt loader this
+		// package replaced — `Name:`/`Description:`/`Allowed-Tools:` must parse,
+		// not silently fall back to the directory name with an empty description.
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
 		value := unquoteSkill(strings.TrimSpace(parts[1]))
 
 		switch key {
@@ -343,9 +346,9 @@ func parseSkillFile(path, dirName string) (Skill, error) {
 			}
 		case "description":
 			sk.Description = value
-		case "runAs", "run_mode", "run-mode":
+		case "runas", "run_mode", "run-mode":
 			sk.RunAs = value
-		case "allowed-tools", "allowed_tools", "allowedTools":
+		case "allowed-tools", "allowed_tools", "allowedtools":
 			sk.AllowedTools = parseToolList(value)
 		}
 	}

@@ -783,6 +783,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	reason, err := a.Run(ctx, prompt)
 	if traceHandle != nil {
+		// Wait for any in-flight (async) subagent traces to flush before
+		// closing the root trace, so their child epochs are not lost at exit.
+		a.WaitChildTraces(10 * time.Second)
 		traceHandle.WaitTimeout(2 * time.Second)
 		traceHandle.Close()
 	}

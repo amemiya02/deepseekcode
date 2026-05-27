@@ -308,7 +308,7 @@ trace (`<task>.agent.jsonl`):
 | 2 | Post-warm cache hit rate | >= 95%, >= `min_post_warm_turns` warm turns | `usage` records (excl. first/epoch) |
 | 3 | Unauthorized drift count | 0 | `drift.blocked` records |
 | 4 | Compaction prefix hash stability | `before` == `after`; record required if `require_compaction_record` | `compaction.before/after_static_prefix_hash` |
-| 5 | Parent/subagent cache pollution | 0, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id` epochs |
+| 5 | Parent/subagent cache pollution | 0 pollution + valid parent link, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id` epochs |
 
 **Post-warm cache hit rate**: After the first turn warms the prompt
 cache, all subsequent turns must achieve >= 95% cache hit tokens /
@@ -329,8 +329,13 @@ manager. The dimension is **evaluable only when the trace contains a
 child (subagent) epoch**; a run that spawned none reports **N/A** —
 never a hardcoded ✅. A task that sets `require_subagent_isolation: true`
 (e.g. `subagent-parallel`) **fails closed** when no child epoch is
-present, since isolation cannot be proven; when a child epoch is present
-the harness checks it did not reuse the parent epoch.
+present, since isolation cannot be proven. When a child epoch is
+present the harness checks it did not reuse the parent epoch **and** that
+its `parent_epoch_id` actually points at a real root epoch — a child with
+no parent link (`missing_parent`) or an unknown parent (`unknown_parent`)
+fails. Async subagents are flushed before exit: the one-shot run waits on
+tracked child trace handles (`Agent.WaitChildTraces`), so a `task` with
+`async:true` does not lose its child epoch when the process exits.
 
 **Compaction prefix hash stability**: when compaction fires, the agent
 emits the measured static-prefix fingerprint before and after; the

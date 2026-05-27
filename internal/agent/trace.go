@@ -279,7 +279,32 @@ func (a *Agent) AttachChildTraceSink(child *Agent) *TraceSinkHandle {
 		return nil
 	}
 	sink := newChildTraceSink(a.traceSink, a.CurrentEpochID())
-	return attachSinkToBus(child.bus, sink)
+	h := attachSinkToBus(child.bus, sink)
+	a.childTraceMu.Lock()
+	a.childTraceHandles = append(a.childTraceHandles, h)
+	a.childTraceMu.Unlock()
+	return h
+}
+
+// WaitChildTraces blocks until every tracked subagent trace handle has flushed
+// its child's EventDone, or the shared deadline elapses, then closes them. A
+// one-shot run calls this before closing the root trace so an async (`task`
+// with async:true) subagent's child epoch is flushed instead of being lost when
+// the process exits. No-op when no subagent trace was attached.
+func (a *Agent) WaitChildTraces(timeout time.Duration) {
+	a.childTraceMu.Lock()
+	handles := append([]*TraceSinkHandle(nil), a.childTraceHandles...)
+	a.childTraceMu.Unlock()
+
+	deadline := time.Now().Add(timeout)
+	for _, h := range handles {
+		remaining := time.Until(deadline)
+		if remaining < 0 {
+			remaining = 0
+		}
+		h.WaitTimeout(remaining)
+		h.Close()
+	}
 }
 
 // attachSinkToBus subscribes sink to bus and drains it in a goroutine,

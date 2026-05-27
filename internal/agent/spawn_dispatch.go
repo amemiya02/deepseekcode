@@ -155,11 +155,12 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 			if wtRelease != nil {
 				defer wtRelease()
 			}
+			// The child trace handle (childTrace) is owned by the parent's
+			// WaitChildTraces, which the one-shot CLI calls before closing the
+			// root trace. Closing it here on a short timeout would drop a slow
+			// async child's later epoch/usage records — exactly the loss we are
+			// preventing — so the goroutine does not touch it.
 			_, err := child.Run(jobCtx, req.Description)
-			if childTrace != nil {
-				childTrace.WaitTimeout(2 * time.Second)
-				childTrace.Close()
-			}
 
 			state := JobSucceeded
 			summary := extractFinalText(child)

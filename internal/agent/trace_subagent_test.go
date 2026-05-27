@@ -124,3 +124,65 @@ func TestE2ESubagentChildTrace(t *testing.T) {
 		t.Errorf("child parent_epoch_id %q is not a known root epoch %v", childParent, rootEpochs)
 	}
 }
+
+// TestWaitChildTracesFlushesAsyncChild proves WaitChildTraces blocks until an
+// in-flight (async) subagent's trace has flushed its records, so a one-shot run
+// does not lose the child epoch at process exit. The child publishes its epoch
+// and a usage turn, then EventDone after a delay; WaitChildTraces must not
+// return until those records are on the shared writer.
+func TestWaitChildTracesFlushesAsyncChild(t *testing.T) {
+	parent := New(nil, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
+	parent.System = "sys"
+	var buf bytes.Buffer
+	rootHandle := parent.AttachTraceSink(&buf)
+	defer rootHandle.Close()
+
+	// Give the parent a real epoch so the child has a root parent to point at.
+	pe := parent.epochMgr.InitEpoch("session_start", EpochComponents{Model: "m"})
+
+	child := New(nil, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "m")
+	if h := parent.AttachChildTraceSink(child); h == nil {
+		t.Fatal("expected a child trace handle when a root trace is attached")
+	}
+
+	go func() {
+		child.bus.Publish(EventEpochCreated{EpochID: "epoch_child", StaticPrefixHash: "CH", ToolsHash: "CT", Reason: "session_start"})
+		child.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: llm.Usage{PromptCacheHitTokens: 10}})
+		time.Sleep(40 * time.Millisecond)
+		child.bus.Publish(EventDone{Reason: StopModelDone})
+	}()
+
+	parent.WaitChildTraces(2 * time.Second)
+
+	if !strings.Contains(buf.String(), "epoch_child") {
+		t.Fatalf("child epoch not flushed before WaitChildTraces returned:\n%s", buf.String())
+	}
+
+	type rec struct {
+		EpochID       string `json:"epoch_id"`
+		AgentRole     string `json:"agent_role"`
+		ParentEpochID string `json:"parent_epoch_id"`
+	}
+	var sawChild bool
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var rr rec
+		if err := json.Unmarshal([]byte(line), &rr); err != nil {
+			t.Fatalf("malformed trace line %q: %v", line, err)
+		}
+		if rr.EpochID == "epoch_child" {
+			sawChild = true
+			if rr.AgentRole != "subagent" {
+				t.Errorf("child record agent_role = %q, want subagent", rr.AgentRole)
+			}
+			if rr.ParentEpochID != pe.EpochID {
+				t.Errorf("child parent_epoch_id = %q, want parent epoch %q", rr.ParentEpochID, pe.EpochID)
+			}
+		}
+	}
+	if !sawChild {
+		t.Fatal("no child epoch record found in trace")
+	}
+}

@@ -26,3 +26,9 @@ go.work.sum
 
 # Per-project Claude state (parent dir uses this; we don't ship it)
 .omc/
+
+.pxr/
+
+# Benchmark output
+bench/traces/
+bench/reports/

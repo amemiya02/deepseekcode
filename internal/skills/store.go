@@ -6,6 +6,7 @@ package skills
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,6 +186,71 @@ func parseSkillFile(path, dirName string) (Skill, error) {
 	}
 
 	return sk, nil
+}
+
+// SkillChange describes a mutation between two skill stores.
+type SkillChange struct {
+	Kind    string // "added", "removed", "body_changed"
+	Name    string
+	OldHash string // for body_changed
+	NewHash string // for body_changed
+}
+
+// VersionHash returns a SHA-256 hex digest of IndexText(). This is
+// suitable for epoch hash computation — same skills produce same hash.
+func (s *Store) VersionHash() string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(s.IndexText())))
+}
+
+// Diff compares this store against an older store and returns the list
+// of changes. Nil old means everything in s is "added".
+func (s *Store) Diff(old *Store) []SkillChange {
+	if old == nil {
+		var changes []SkillChange
+		for _, sk := range s.skills {
+			changes = append(changes, SkillChange{Kind: "added", Name: sk.Name})
+		}
+		return changes
+	}
+
+	oldByName := make(map[string]Skill, len(old.skills))
+	for _, sk := range old.skills {
+		oldByName[sk.Name] = sk
+	}
+	newByName := make(map[string]Skill, len(s.skills))
+	for _, sk := range s.skills {
+		newByName[sk.Name] = sk
+	}
+
+	var changes []SkillChange
+
+	for _, sk := range s.skills {
+		oldSk, existed := oldByName[sk.Name]
+		if !existed {
+			changes = append(changes, SkillChange{Kind: "added", Name: sk.Name})
+			continue
+		}
+		if oldSk.Description != sk.Description {
+			changes = append(changes, SkillChange{
+				Kind:    "body_changed",
+				Name:    sk.Name,
+				OldHash: hashString(oldSk.Description),
+				NewHash: hashString(sk.Description),
+			})
+		}
+	}
+
+	for _, sk := range old.skills {
+		if _, exists := newByName[sk.Name]; !exists {
+			changes = append(changes, SkillChange{Kind: "removed", Name: sk.Name})
+		}
+	}
+
+	return changes
+}
+
+func hashString(s string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
 }
 
 // readSkillBody reads the body of a SKILL.md file (after frontmatter).

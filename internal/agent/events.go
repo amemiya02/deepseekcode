@@ -192,3 +192,68 @@ type EventRepair struct {
 }
 
 func (EventRepair) isAgentEvent() {}
+
+// EventEpochCreated signals that a new PrefixEpoch was created.
+type EventEpochCreated struct {
+	EpochID         string
+	StaticPrefixHash string
+	Reason          string
+}
+
+// EventEpochFrozen signals that the current PrefixEpoch was frozen
+// after the first model request.
+type EventEpochFrozen struct {
+	EpochID string
+}
+
+// EventPendingChange signals that a component change was detected
+// after the epoch was frozen. The change is recorded but not applied.
+type EventPendingChange struct {
+	EpochID     string
+	Kind        PendingChangeKind
+	Description string
+}
+
+// EventEpochSwitched signals an explicit epoch switch.
+type EventEpochSwitched struct {
+	OldEpochID       string
+	NewEpochID       string
+	StaticPrefixHash string
+	Reason           string
+}
+
+// EventDriftBlocked signals that an unauthorized prefix drift was
+// detected and blocked within a frozen epoch.
+type EventDriftBlocked struct {
+	EpochID string
+	Which   string
+}
+
+func (EventEpochCreated) isAgentEvent()  {}
+func (EventEpochFrozen) isAgentEvent()   {}
+func (EventPendingChange) isAgentEvent() {}
+func (EventEpochSwitched) isAgentEvent() {}
+func (EventDriftBlocked) isAgentEvent()  {}
+
+// EventCompactionWarning is emitted when context pressure crosses the
+// warning threshold (default 75%). The UI can show a status indicator
+// or prepare pinned facts for an upcoming compaction.
+type EventCompactionWarning struct {
+	Pressure  float64
+	Threshold float64
+}
+
+// EventSemanticCompaction reports that semantic compaction ran.
+// UsedSemantic is true when the LLM summary was used; false when
+// deterministic fallback was used. SummaryCost is the cost of the
+// LLM call (0 when fallback). FallbackReason is set when the LLM
+// call failed and deterministic compaction was used instead.
+type EventSemanticCompaction struct {
+	FromIdx, ToIdx int
+	UsedSemantic   bool
+	SummaryCost    float64
+	FallbackReason string
+}
+
+func (EventCompactionWarning) isAgentEvent()  {}
+func (EventSemanticCompaction) isAgentEvent() {}

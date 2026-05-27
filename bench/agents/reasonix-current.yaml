@@ -1,0 +1,9 @@
+id: reasonix-current
+command: reasonix
+args:
+  - --prompt
+input_mode: prompt_arg
+env:
+  REASONIX_API_KEY: required
+trace_path: bench/traces/reasonix-current/
+usage_parser: reasonix

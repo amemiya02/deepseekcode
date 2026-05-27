@@ -7,6 +7,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"strconv"
 
@@ -257,4 +258,50 @@ func DefaultCompactionConfig() CompactionConfig {
 		}
 	}
 	return cfg
+}
+
+// MaxContextTokens is the default maximum context window size for
+// DeepSeek V4 models. Used by ContextPressure to compute the
+// usage ratio. Override via Agent.MaxContextTokens.
+const MaxContextTokens = 128_000
+
+// CompactWithSemantic checks context pressure and decides between
+// no compaction, a warning, semantic compaction (LLM), or
+// deterministic fallback. It returns a SemanticCompactionResult with
+// Summary == "" when no compaction was performed.
+//
+// The action decision:
+//   - "none": below all thresholds → no compaction
+//   - "warn": above warn threshold → warning only
+//   - "compact": above compact threshold → semantic compaction
+//   - "protect": above protection threshold → semantic compaction (same as compact for now)
+//
+// When semantic compaction fails, it falls back to the deterministic
+// CompactSession. The caller should check UsedSemantic and
+// FallbackReason to report the outcome.
+func CompactWithSemantic(
+	ctx context.Context,
+	messages []llm.Message,
+	client *llm.Client,
+	systemPrompt string,
+	tools []llm.Tool,
+	compCfg CompactionConfig,
+	semanticCfg SemanticCompactionConfig,
+	maxContextTokens int,
+) SemanticCompactionResult {
+	if semanticCfg.WarnThreshold <= 0 {
+		semanticCfg = defaultSemanticCompactionConfig()
+	}
+
+	pressure := ContextPressure(messages, maxContextTokens)
+	action := ShouldSemanticCompact(pressure, semanticCfg)
+
+	switch action {
+	case "none", "warn":
+		return SemanticCompactionResult{}
+	case "compact", "protect":
+		return SemanticCompact(ctx, messages, client, systemPrompt, tools, semanticCfg)
+	default:
+		return SemanticCompactionResult{}
+	}
 }

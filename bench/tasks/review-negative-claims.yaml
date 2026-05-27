@@ -1,0 +1,12 @@
+id: review-negative-claims
+fixture_repo: bench/fixtures/review-negative-claims
+commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
+prompt_file: bench/prompts/review-negative-claims.md
+timeout_seconds: 300
+success:
+  tests: []
+  diff_invariants:
+    - no_changes_outside:
+        - bench/fixtures/review-negative-claims
+metrics:
+  require_cache_gate: false

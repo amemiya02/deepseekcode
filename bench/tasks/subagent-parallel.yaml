@@ -1,0 +1,12 @@
+id: subagent-parallel
+fixture_repo: bench/fixtures/subagent-parallel
+commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
+prompt_file: bench/prompts/subagent-parallel.md
+timeout_seconds: 600
+success:
+  tests: []
+  diff_invariants:
+    - no_changes_outside:
+        - bench/fixtures/subagent-parallel
+metrics:
+  require_cache_gate: true

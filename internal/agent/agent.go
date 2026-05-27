@@ -15,11 +15,13 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/repair"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/skills"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -68,6 +70,7 @@ type Agent struct {
 	AutoReasoning bool
 
 	prefixMon *llm.PrefixMonitor
+	epochMgr  *EpochManager
 
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
@@ -82,6 +85,16 @@ type Agent struct {
 	// collapsed into a synthetic summary. Initialized to
 	// DefaultCompactionConfig in New; override fields before Run.
 	CompactionCfg CompactionConfig
+
+	// SemanticCfg controls semantic (LLM-powered) compaction.
+	// Initialized to defaultSemanticCompactionConfig in New;
+	// override fields before Run. Zero value disables semantic
+	// compaction (falls back to deterministic only).
+	SemanticCfg SemanticCompactionConfig
+
+	// MaxContextTokens is the maximum context window size for
+	// context pressure computation. Default: 128_000.
+	MaxContextTokens int
 
 	// HookRunner dispatches lifecycle hooks (PreToolUse, PostToolUse,
 	// SessionStart, SessionEnd). nil = hooks disabled.
@@ -130,6 +143,12 @@ type Agent struct {
 	BudgetPolicy BudgetPolicy
 	BudgetState  BudgetState
 
+	// Skills is the skill metadata store. nil = no skills loaded.
+	Skills *skills.Store
+
+	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
+	MCPRegistry *mcp.Registry
+
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
@@ -150,9 +169,12 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		Model:         model,
 		Thinking:      true,
 		prefixMon:     llm.NewPrefixMonitor(),
+		epochMgr:      NewEpochManager(),
 		System:        DefaultSystemPrompt,
 		MaxToolCalls:  200,
-		CompactionCfg: DefaultCompactionConfig(),
+		CompactionCfg:      DefaultCompactionConfig(),
+		SemanticCfg:        defaultSemanticCompactionConfig(),
+		MaxContextTokens:   MaxContextTokens,
 		Jobs:          NewJobRegistry(),
 		stormBreaker:  repair.NewStormBreaker(6, 3),
 		StopWhen: []StopCondition{
@@ -162,6 +184,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 	}
 
 	a.bus = NewBus()
+	a.epochMgr.SetBus(a.bus)
 	def := a.bus.Subscribe(256)
 	go func() {
 		defer func() {
@@ -346,6 +369,55 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 // collapse. Errors surface via EventInfo so the user sees them
 // without crashing the Run.
 func (a *Agent) maybeCompact(ctx context.Context) {
+	maxCtx := a.MaxContextTokens
+	if maxCtx <= 0 {
+		maxCtx = MaxContextTokens
+	}
+
+	// Check context pressure for semantic compaction thresholds.
+	pressure := ContextPressure(a.Messages, maxCtx)
+	action := ShouldSemanticCompact(pressure, a.SemanticCfg)
+
+	if action == "warn" {
+		a.bus.Publish(EventCompactionWarning{
+			Pressure:  pressure,
+			Threshold: a.SemanticCfg.WarnThreshold,
+		})
+	}
+
+	if action == "compact" || action == "protect" {
+		res := SemanticCompact(ctx, a.Messages, a.Client, a.System, a.Tools.AsLLMTools(), a.SemanticCfg)
+		if res.Summary != "" {
+			if a.Persister != nil {
+				if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
+					a.bus.Publish(EventInfo{Text: "semantic compaction persistence failed: " + err.Error()})
+					return
+				}
+			}
+			a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+			a.bus.Publish(EventCompaction{
+				FromIdx:      res.FromIdx,
+				ToIdx:        res.ToIdx,
+				Summary:      res.Summary,
+				RemovedCount: res.RemovedCount,
+			})
+			a.bus.Publish(EventSemanticCompaction{
+				FromIdx:        res.FromIdx,
+				ToIdx:          res.ToIdx,
+				UsedSemantic:   res.UsedSemantic,
+				SummaryCost:    res.SummaryCost,
+				FallbackReason: res.FallbackReason,
+			})
+			if res.UsedSemantic && res.SummaryCost > 0 {
+				a.BudgetState.SpentCNY += res.SummaryCost
+			}
+			return
+		}
+		// SemanticCompact returned empty (too few messages or no compaction needed).
+		// Fall through to deterministic path below.
+	}
+
+	// Deterministic fallback path.
 	res := CompactSession(a.Messages, a.CompactionCfg)
 	if res.Summary == "" {
 		return
@@ -396,9 +468,63 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
 		staticSys = a.System[:i]
 	}
+
+	epochComps := EpochComponents{
+		StaticSystem:   staticSys,
+		ToolSpecs:      req.Tools,
+		Model:          a.Model,
+		AgentProfileID: "default",
+	}
+	if a.Skills != nil {
+		epochComps.StableSkillDir = a.Skills.VersionHash()
+	}
+	if a.MCPRegistry != nil {
+		epochComps.MCPSchemaSnapshot = a.MCPRegistry.SchemaHash()
+	}
+
+	epoch := a.epochMgr.CurrentEpoch()
+	if epoch == nil {
+		epoch = a.epochMgr.InitEpoch("session_start", epochComps)
+		a.bus.Publish(EventEpochCreated{
+			EpochID:          epoch.EpochID,
+			StaticPrefixHash: epoch.StaticPrefixHash,
+			Reason:           "session_start",
+		})
+	}
+
+	if !a.epochMgr.IsFrozen() {
+		driftChanges := a.epochMgr.DetectDrift(epochComps)
+		for _, ch := range driftChanges {
+			a.bus.Publish(EventPendingChange{
+				EpochID:     epoch.EpochID,
+				Kind:        ch.Kind,
+				Description: ch.Description,
+			})
+		}
+		a.epochMgr.FreezeEpoch()
+		a.bus.Publish(EventEpochFrozen{EpochID: epoch.EpochID})
+	} else {
+		driftChanges := a.epochMgr.DetectDrift(epochComps)
+		for _, ch := range driftChanges {
+			a.bus.Publish(EventPendingChange{
+				EpochID:     epoch.EpochID,
+				Kind:        ch.Kind,
+				Description: ch.Description,
+			})
+		}
+	}
+
+	expectedCacheMiss := a.epochMgr.ExpectedCacheMiss()
+
 	prefixChanged, prefixWhich := a.prefixMon.Check(staticSys, req.Tools)
 	if prefixChanged {
 		a.bus.Publish(EventInfo{Text: "prefix cache invalidated: " + prefixWhich})
+		if a.epochMgr.IsFrozen() {
+			a.bus.Publish(EventDriftBlocked{
+				EpochID: epoch.EpochID,
+				Which:   prefixWhich,
+			})
+		}
 	}
 
 	// Session budget gate: check before model streaming starts.
@@ -477,7 +603,6 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
 
-		// Persist model_final transcript receipt with usage and prefix hash.
 		if rp, ok := a.Persister.(ReceiptAppender); ok {
 			fp := llm.ComputeFingerprint(llm.PrefixInput{
 				SystemPrompt: staticSys,
@@ -491,8 +616,23 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 				"prefix_tools_hash":    fp.ToolsSHA256,
 				"prefix_cache_changed": prefixChanged,
 				"prefix_cache_reason":  prefixWhich,
+				"epoch_id":             epoch.EpochID,
+				"static_prefix_hash":   epoch.StaticPrefixHash,
+				"expected_cache_miss":  expectedCacheMiss,
 			})
 			_, _ = rp.AppendReceipt(context.Background(), session.ReceiptModelFinal, payload)
+		}
+		if rp, ok := a.Persister.(ReceiptAppender); ok {
+			if len(a.epochMgr.PendingChanges()) > 0 {
+				for _, pc := range a.epochMgr.PendingChanges() {
+					pcpayload, _ := json.Marshal(map[string]any{
+						"epoch_id":    epoch.EpochID,
+						"kind":        string(pc.Kind),
+						"description": pc.Description,
+					})
+					_, _ = rp.AppendReceipt(context.Background(), session.ReceiptEpoch, pcpayload)
+				}
+			}
 		}
 	}
 
@@ -502,9 +642,12 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	}
 
 	return StepRecord{
-		FinishReason: finish,
-		Usage:        usage,
-		ToolCalls:    assembledCall,
+		FinishReason:      finish,
+		Usage:             usage,
+		ToolCalls:         assembledCall,
+		EpochID:           epoch.EpochID,
+		StaticPrefixHash:  epoch.StaticPrefixHash,
+		ExpectedCacheMiss: expectedCacheMiss,
 	}, nil
 }
 

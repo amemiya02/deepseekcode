@@ -1,0 +1,14 @@
+id: deepseekcode-optimized
+command: ./bin/dsc
+args:
+  - -p
+input_mode: prompt_arg
+env:
+  DEEPSEEK_API_KEY: required
+trace_path: bench/traces/deepseekcode-optimized/
+usage_parser: deepseekcode
+features:
+  prefix_epoch: true
+  semantic_compaction: true
+  tool_tiers: true
+  cache_reliable: true

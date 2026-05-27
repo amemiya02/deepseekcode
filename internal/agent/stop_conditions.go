@@ -10,9 +10,12 @@ import (
 // StepRecord captures one step's outcome so stop conditions can reason
 // across history.
 type StepRecord struct {
-	FinishReason string
-	Usage        llm.Usage
-	ToolCalls    []llm.ToolCall
+	FinishReason      string
+	Usage             llm.Usage
+	ToolCalls         []llm.ToolCall
+	EpochID           string
+	StaticPrefixHash  string
+	ExpectedCacheMiss bool
 }
 
 // StopReason describes why the loop terminated.

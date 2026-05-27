@@ -1,0 +1,9 @@
+id: deepseekcode-current
+command: ./bin/dsc
+args:
+  - -p
+input_mode: prompt_arg
+env:
+  DEEPSEEK_API_KEY: required
+trace_path: bench/traces/deepseekcode-current/
+usage_parser: deepseekcode

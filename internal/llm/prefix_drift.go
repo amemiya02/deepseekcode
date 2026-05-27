@@ -104,3 +104,25 @@ func (m *PrefixMonitor) StabilityRatio() float64 {
 	}
 	return float64(m.checkCount-m.changeCount) / float64(m.checkCount)
 }
+
+// EpochComponentHashes holds individual SHA-256 hashes for the
+// components that constitute a static prefix epoch.
+type EpochComponentHashes struct {
+	SystemSHA256       string
+	ToolsSHA256        string
+	SkillDirSHA256     string
+	MCPSchemaSHA256    string
+	AgentProfileSHA256 string
+	FewShotsSHA256     string
+}
+
+// ComputeEpochHash returns sha256hex(sys:tools:skill:mcp:profile:fewshots).
+func ComputeEpochHash(components EpochComponentHashes) string {
+	combined := components.SystemSHA256 + ":" +
+		components.ToolsSHA256 + ":" +
+		components.SkillDirSHA256 + ":" +
+		components.MCPSchemaSHA256 + ":" +
+		components.AgentProfileSHA256 + ":" +
+		components.FewShotsSHA256
+	return sha256hex(combined)
+}

@@ -2,8 +2,10 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -179,4 +181,76 @@ func (r *Registry) SetTimeout(name string, seconds int) {
 	r.mu.Lock()
 	r.timeouts[name] = seconds
 	r.mu.Unlock()
+}
+
+// MCPChange describes a tool-level mutation detected between two schema snapshots.
+type MCPChange struct {
+	Kind     string // "tool_added", "tool_removed", "tool_schema_changed"
+	ToolName string
+}
+
+// SchemaHash returns a deterministic SHA-256 hex digest of all current
+// MCP tool schemas (sorted by fully-qualified name). Same tools with
+// same schemas produce the same hash regardless of connection order.
+func (r *Registry) SchemaHash() string {
+	tools := r.Tools()
+	if len(tools) == 0 {
+		return sha256hex("")
+	}
+	sort.Slice(tools, func(i, j int) bool {
+		return tools[i].Name < tools[j].Name
+	})
+	var sb strings.Builder
+	for _, t := range tools {
+		sb.WriteString(t.Name)
+		sb.WriteByte(':')
+		sb.WriteString(t.Description)
+		sb.WriteByte(':')
+		sb.Write(t.InputSchema)
+		sb.WriteByte('\n')
+	}
+	return sha256hex(sb.String())
+}
+
+// PendingSchemaChanges compares the current tool set against a previous
+// tool list snapshot and returns the list of MCP-level changes.
+func (r *Registry) PendingSchemaChanges(oldTools []McpToolMeta) []MCPChange {
+	currentTools := r.Tools()
+
+	oldByName := make(map[string]McpToolMeta, len(oldTools))
+	for _, t := range oldTools {
+		oldByName[t.Name] = t
+	}
+	currentByName := make(map[string]McpToolMeta, len(currentTools))
+	for _, t := range currentTools {
+		currentByName[t.Name] = t
+	}
+
+	var changes []MCPChange
+	for name := range currentByName {
+		if _, existed := oldByName[name]; !existed {
+			changes = append(changes, MCPChange{Kind: "tool_added", ToolName: name})
+		}
+	}
+	for name := range oldByName {
+		if _, exists := currentByName[name]; !exists {
+			changes = append(changes, MCPChange{Kind: "tool_removed", ToolName: name})
+		}
+	}
+	for name, cur := range currentByName {
+		if old, existed := oldByName[name]; existed {
+			if old.Description != cur.Description || !schemasEqualBytes(old.InputSchema, cur.InputSchema) {
+				changes = append(changes, MCPChange{Kind: "tool_schema_changed", ToolName: name})
+			}
+		}
+	}
+	return changes
+}
+
+func schemasEqualBytes(a, b json.RawMessage) bool {
+	return schemasEqual(a, b)
+}
+
+func sha256hex(s string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
 }

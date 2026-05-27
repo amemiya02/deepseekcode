@@ -24,6 +24,29 @@ import (
 // agent loop so that a single tool call cannot flood the context window.
 const DefaultMaxResultBytes = 50000
 
+// ToolTier classifies when a tool is loaded into the agent.
+type ToolTier string
+
+const (
+	TierCore    ToolTier = "core"    // always available
+	TierProfile ToolTier = "profile" // available per profile
+	TierLazy    ToolTier = "lazy"    // loaded on demand
+)
+
+// defaultTier returns the tier for a built-in tool name.
+func defaultTier(name string) ToolTier {
+	switch name {
+	case "read_file", "write_file", "edit_file", "apply_patch",
+		"bash", "bash_pty", "glob", "grep", "ls", "todo_write":
+		return TierCore
+	case "git_diff", "git_show", "git_blame", "git_log",
+		"web_fetch", "web_search", "lsp", "question", "plan":
+		return TierProfile
+	default:
+		return TierProfile
+	}
+}
+
 // Tool is the abstract built-in or MCP tool. Implementations are
 // expected to be safe to call from arbitrary goroutines.
 type Tool interface {
@@ -65,20 +88,43 @@ type PathAware interface {
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
+	tiers map[string]ToolTier
 }
 
 // New returns an empty registry.
 func New() *Registry {
-	return &Registry{tools: make(map[string]Tool)}
+	return &Registry{tools: make(map[string]Tool), tiers: make(map[string]ToolTier)}
 }
 
 // Register installs a tool. Later registrations of the same name
 // overwrite earlier ones; intentional, so MCP can shadow a built-in
-// if a user wants.
+// if a user wants. The tier is auto-detected from the tool name.
 func (r *Registry) Register(t Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[t.Name()] = t
+	name := t.Name()
+	r.tools[name] = t
+	if _, exists := r.tiers[name]; !exists {
+		r.tiers[name] = defaultTier(name)
+	}
+}
+
+// RegisterWithTier installs a tool with an explicit tier, overriding
+// the auto-detected default.
+func (r *Registry) RegisterWithTier(t Tool, tier ToolTier) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	name := t.Name()
+	r.tools[name] = t
+	r.tiers[name] = tier
+}
+
+// TierOf returns the tier for a named tool, or ("", false) if not found.
+func (r *Registry) TierOf(name string) (ToolTier, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tier, ok := r.tiers[name]
+	return tier, ok
 }
 
 // Get returns the named tool or (nil, false).
@@ -139,6 +185,43 @@ func (r *Registry) Subset(names []string) *Registry {
 	return sub
 }
 
+// ByTier returns all tools belonging to the given tier, sorted by name.
+func (r *Registry) ByTier(tier ToolTier) []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var names []string
+	for name, t := range r.tiers {
+		if t == tier {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]Tool, 0, len(names))
+	for _, n := range names {
+		out = append(out, r.tools[n])
+	}
+	return out
+}
+
+// TierTools returns a new Registry containing only tools from the
+// specified tiers. Unknown tiers produce an empty subset.
+func (r *Registry) TierTools(tiers ...ToolTier) *Registry {
+	tierSet := make(map[ToolTier]bool, len(tiers))
+	for _, t := range tiers {
+		tierSet[t] = true
+	}
+	sub := New()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for name, tool := range r.tools {
+		if tierSet[r.tiers[name]] {
+			sub.tools[name] = tool
+			sub.tiers[name] = r.tiers[name]
+		}
+	}
+	return sub
+}
+
 // CloneForCWD returns a new Registry where every cwd-aware tool has been
 // cloned with its working directory rebound to cwd. Tools without a cwd
 // dependency are shared with the original registry.
@@ -148,6 +231,7 @@ func (r *Registry) CloneForCWD(cwd string) *Registry {
 	defer r.mu.RUnlock()
 	for name, t := range r.tools {
 		cloned.tools[name] = CloneForCWD(t, cwd)
+		cloned.tiers[name] = r.tiers[name]
 	}
 	return cloned
 }

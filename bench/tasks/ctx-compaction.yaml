@@ -1,0 +1,13 @@
+id: ctx-compaction
+fixture_repo: bench/fixtures/ctx-compaction
+commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
+prompt_file: bench/prompts/ctx-compaction.md
+timeout_seconds: 900
+success:
+  tests:
+    - go test ./...
+  diff_invariants:
+    - no_changes_outside:
+        - .
+metrics:
+  require_cache_gate: true

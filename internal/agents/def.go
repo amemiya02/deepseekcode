@@ -16,6 +16,74 @@ type AgentDef struct {
 	Path        string   // absolute path (filled by Load)
 }
 
+// AgentProfile is a first-class runtime unit that governs tool tiers,
+// permissions, and context policies for an agent session.
+type AgentProfile struct {
+	Name             string
+	Model            string
+	ReasoningEffort  string
+	SystemOverlay    string
+	ToolTiers        []string // "core", "profile", "lazy"
+	AllowedTools     []string // explicit tool whitelist; nil = all from tiers
+	PermissionPolicy string
+	ContextPolicy    string
+	CompactionPolicy string
+	SubagentPolicy   string
+	CachePolicy      string
+}
+
+// DefaultProfiles returns the built-in agent profiles.
+func DefaultProfiles() map[string]AgentProfile {
+	return map[string]AgentProfile{
+		"coding-default": {
+			Name:            "coding-default",
+			Model:           "deepseek-v4-flash",
+			ReasoningEffort: "medium",
+			ToolTiers:       []string{"core"},
+		},
+		"explore": {
+			Name:            "explore",
+			Model:           "deepseek-v4-flash",
+			ReasoningEffort: "low",
+			ToolTiers:       []string{"core", "profile"},
+			AllowedTools: []string{
+				"read_file", "glob", "grep", "ls",
+				"git_diff", "git_show", "git_blame", "git_log",
+				"web_fetch", "web_search",
+			},
+		},
+		"implement": {
+			Name:            "implement",
+			Model:           "deepseek-v4-flash",
+			ReasoningEffort: "high",
+			ToolTiers:       []string{"core", "profile"},
+			AllowedTools: []string{
+				"read_file", "write_file", "edit_file", "apply_patch",
+				"bash", "bash_pty", "glob", "grep", "ls", "todo_write",
+				"git_diff", "git_show", "git_blame", "git_log",
+			},
+		},
+		"review": {
+			Name:            "review",
+			Model:           "deepseek-v4-flash",
+			ReasoningEffort: "medium",
+			ToolTiers:       []string{"core"},
+			AllowedTools: []string{
+				"read_file", "glob", "grep", "ls",
+				"git_diff", "git_show", "git_blame", "git_log",
+			},
+		},
+		"autonomous": {
+			Name:            "autonomous",
+			Model:           "deepseek-v4-flash",
+			ReasoningEffort: "high",
+			ToolTiers:       []string{"core", "profile", "lazy"},
+			PermissionPolicy: "auto-approve",
+			SubagentPolicy:   "allow",
+		},
+	}
+}
+
 // ParseAgent parses a .md file into an AgentDef. If the content starts
 // with "---\n", the block between the first and second "---" is parsed
 // as frontmatter; otherwise the entire content becomes Prompt.

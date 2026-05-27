@@ -19,12 +19,6 @@ import (
 
 var errPTYUnsupported = errors.New("bash_pty is not supported on this platform")
 
-// OutputAppender is an interface for appending output to a buffer.
-// Implemented by the agent's Job type.
-type OutputAppender interface {
-	AppendOutput(p []byte)
-}
-
 // runPTY runs cmd via $SHELL -c inside a PTY, copies stdout/stderr into
 // a single buffer, and returns the trimmed/truncated output. ctx cancels
 // the child; timeout caps the total duration.

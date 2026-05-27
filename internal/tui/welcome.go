@@ -24,7 +24,7 @@ func renderWelcome(t Theme, width int) string {
 	b.WriteByte('\n')
 	b.WriteString(renderLogo(t, "deepseek", "deepseekcode", "v"+version.Version, width))
 	b.WriteByte('\n')
-	b.WriteString(t.Hint.Render("  terminal coding agent for DeepSeek"))
+	b.WriteString(t.Hint.Render("  Terminal coding agent for DeepSeek"))
 	b.WriteByte('\n')
 	b.WriteString(t.Hint.Render("  ⏎ send · ⇧⏎ newline · /help · ^D quit"))
 	b.WriteByte('\n')

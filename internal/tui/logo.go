@@ -40,7 +40,7 @@ var letterforms = map[rune][]string{
 	'K': {
 		"█ ▄▀",
 		"█▀▄ ",
-		"▀ ▀▄",
+		"▀  ▀",
 	},
 	'C': {
 		"▄▀▀▀",

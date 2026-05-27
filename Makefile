@@ -3,7 +3,7 @@
 BIN_NAME := dsc
 BIN_DIR := bin
 PKG := github.com/amemiya02/deepseekcode
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 

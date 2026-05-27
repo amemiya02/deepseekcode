@@ -54,20 +54,20 @@ type AgentConfig struct {
 
 // TaskSpec represents a task specification loaded from YAML.
 type TaskSpec struct {
-	ID            string       `yaml:"id"`
-	FixtureRepo   string       `yaml:"fixture_repo"`
-	Commit        string       `yaml:"commit"`
-	PromptFile    string       `yaml:"prompt_file"`
-	TimeoutSec    int          `yaml:"timeout_seconds"`
-	ReadOnly      bool         `yaml:"read_only"`
-	Success       SuccessSpec  `yaml:"success"`
-	Metrics       MetricsSpec  `yaml:"metrics"`
+	ID          string      `yaml:"id"`
+	FixtureRepo string      `yaml:"fixture_repo"`
+	Commit      string      `yaml:"commit"`
+	PromptFile  string      `yaml:"prompt_file"`
+	TimeoutSec  int         `yaml:"timeout_seconds"`
+	ReadOnly    bool        `yaml:"read_only"`
+	Success     SuccessSpec `yaml:"success"`
+	Metrics     MetricsSpec `yaml:"metrics"`
 }
 
 // SuccessSpec defines what constitutes a successful run.
 type SuccessSpec struct {
-	Tests          []string         `yaml:"tests"`
-	DiffInvariants []DiffInvariant  `yaml:"diff_invariants"`
+	Tests          []string        `yaml:"tests"`
+	DiffInvariants []DiffInvariant `yaml:"diff_invariants"`
 }
 
 // DiffInvariant represents a constraint on file changes.
@@ -87,26 +87,26 @@ type MetricsSpec struct {
 
 // TraceRecord is a single JSONL trace line.
 type TraceRecord struct {
-	Type             string   `json:"type"`
-	Agent            string   `json:"agent,omitempty"`
-	Task             string   `json:"task,omitempty"`
-	Timestamp        string   `json:"timestamp,omitempty"`
-	Turn             *int     `json:"turn,omitempty"`
-	CacheHitTokens   *int     `json:"cache_hit_tokens"`
-	CacheMissTokens  *int     `json:"cache_miss_tokens"`
-	OutputTokens     *int     `json:"output_tokens"`
-	CostCNY          *float64 `json:"cost_cny"`
-	Success          *bool    `json:"success,omitempty"`
-	DurationMs       *int64   `json:"duration_ms,omitempty"`
-	Error            string   `json:"error,omitempty"`
-	ExitCode         *int     `json:"exit_code,omitempty"`
-	StdoutLines      *int     `json:"stdout_lines,omitempty"`
-	StderrLines      *int     `json:"stderr_lines,omitempty"`
+	Type            string   `json:"type"`
+	Agent           string   `json:"agent,omitempty"`
+	Task            string   `json:"task,omitempty"`
+	Timestamp       string   `json:"timestamp,omitempty"`
+	Turn            *int     `json:"turn,omitempty"`
+	CacheHitTokens  *int     `json:"cache_hit_tokens"`
+	CacheMissTokens *int     `json:"cache_miss_tokens"`
+	OutputTokens    *int     `json:"output_tokens"`
+	CostCNY         *float64 `json:"cost_cny"`
+	Success         *bool    `json:"success,omitempty"`
+	DurationMs      *int64   `json:"duration_ms,omitempty"`
+	Error           string   `json:"error,omitempty"`
+	ExitCode        *int     `json:"exit_code,omitempty"`
+	StdoutLines     *int     `json:"stdout_lines,omitempty"`
+	StderrLines     *int     `json:"stderr_lines,omitempty"`
 
 	// prefix.snapshot fields
-	EpochID         *string `json:"epoch_id"`
+	EpochID          *string `json:"epoch_id"`
 	StaticPrefixHash *string `json:"static_prefix_hash"`
-	ToolsHash       *string `json:"tools_hash"`
+	ToolsHash        *string `json:"tools_hash"`
 
 	// compaction fields
 	Kind                    *string `json:"kind"`
@@ -140,6 +140,133 @@ type RunResult struct {
 	Turns          int
 	TestResults    []TestResult
 	DiffViolations []string
+
+	// Trace is the parsed agent JSONL trace (--trace-jsonl) when the agent
+	// emitted one. nil means no trace was requested or it was unparseable.
+	Trace     *AgentTrace
+	TracePath string
+}
+
+// AgentTrace is the parsed epoch/usage/compaction/drift evidence emitted by
+// a deepseekcode agent via --trace-jsonl. The Cache Reliability gate is
+// computed entirely from this — no fabricated placeholders.
+type AgentTrace struct {
+	Found              bool
+	UsageTurns         int
+	DriftBlocked       int // count of drift.blocked records (unauthorized drift)
+	PendingChanges     int
+	CompactionUnstable int // compaction records that changed the static prefix
+
+	// epochHashes maps an epoch_id to the set of static_prefix_hash values
+	// seen in its prefix.snapshot records. A stable epoch has exactly one.
+	epochHashes map[string]map[string]bool
+	// epochUsage maps epoch_id to its per-turn usage, in arrival order.
+	epochUsage map[string][]usageTurn
+}
+
+type usageTurn struct {
+	turn, hit, miss int
+}
+
+type traceLine struct {
+	Type                    string `json:"type"`
+	EpochID                 string `json:"epoch_id"`
+	StaticPrefixHash        string `json:"static_prefix_hash"`
+	Turn                    *int   `json:"turn"`
+	CacheHitTokens          *int   `json:"cache_hit_tokens"`
+	CacheMissTokens         *int   `json:"cache_miss_tokens"`
+	StaticPrefixHashChanged *bool  `json:"static_prefix_hash_changed"`
+}
+
+// parseAgentTrace reads a JSONL trace emitted by `dsc -p --trace-jsonl`.
+// Returns (nil, err) when the file cannot be read; an empty-but-Found trace
+// when the file exists but had no records.
+func parseAgentTrace(path string) (*AgentTrace, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	tr := &AgentTrace{
+		Found:       true,
+		epochHashes: map[string]map[string]bool{},
+		epochUsage:  map[string][]usageTurn{},
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var tl traceLine
+		if err := json.Unmarshal([]byte(line), &tl); err != nil {
+			continue // tolerate stray non-JSON lines
+		}
+		switch tl.Type {
+		case "prefix.snapshot":
+			if tl.EpochID != "" && tl.StaticPrefixHash != "" {
+				if tr.epochHashes[tl.EpochID] == nil {
+					tr.epochHashes[tl.EpochID] = map[string]bool{}
+				}
+				tr.epochHashes[tl.EpochID][tl.StaticPrefixHash] = true
+			}
+		case "usage":
+			tr.UsageTurns++
+			hit, miss, turn := 0, 0, 0
+			if tl.CacheHitTokens != nil {
+				hit = *tl.CacheHitTokens
+			}
+			if tl.CacheMissTokens != nil {
+				miss = *tl.CacheMissTokens
+			}
+			if tl.Turn != nil {
+				turn = *tl.Turn
+			}
+			tr.epochUsage[tl.EpochID] = append(tr.epochUsage[tl.EpochID], usageTurn{turn, hit, miss})
+		case "drift.blocked":
+			tr.DriftBlocked++
+		case "pending_change":
+			tr.PendingChanges++
+		case "compaction":
+			if tl.StaticPrefixHashChanged != nil && *tl.StaticPrefixHashChanged {
+				tr.CompactionUnstable++
+			}
+		}
+	}
+	return tr, nil
+}
+
+// unstableEpochs returns how many epochs showed more than one distinct
+// static_prefix_hash across their snapshots (i.e. mid-epoch prefix drift).
+func (t *AgentTrace) unstableEpochs() int {
+	n := 0
+	for _, hashes := range t.epochHashes {
+		if len(hashes) > 1 {
+			n++
+		}
+	}
+	return n
+}
+
+// postWarmHitRate computes the cache hit ratio across all turns EXCEPT the
+// first (cold-start) turn of each epoch, which is expected to miss. Returns
+// the ratio and the number of eligible (warm) turns counted.
+func (t *AgentTrace) postWarmHitRate() (rate float64, eligibleTurns int) {
+	var hit, total int
+	for _, turns := range t.epochUsage {
+		ordered := append([]usageTurn(nil), turns...)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i].turn < ordered[j].turn })
+		for i, u := range ordered {
+			if i == 0 {
+				continue // cold start of this epoch
+			}
+			eligibleTurns++
+			hit += u.hit
+			total += u.hit + u.miss
+		}
+	}
+	if total == 0 {
+		return 0, eligibleTurns
+	}
+	return float64(hit) / float64(total), eligibleTurns
 }
 
 // TestResult holds the outcome of a single test command execution.
@@ -150,19 +277,40 @@ type TestResult struct {
 	Passed   bool
 }
 
-// CacheGateResult holds the evaluated Cache Reliability gate verdict.
+// CacheGateResult holds the evaluated Cache Reliability gate verdict. Every
+// dimension is now derived from the agent's emitted JSONL trace
+// (--trace-jsonl); when the trace is absent the gate fails closed for
+// enforced agents instead of silently passing the N/A dimensions.
 type CacheGateResult struct {
-	Passed               bool
-	PostWarmHitRate      float64
-	PostWarmHitRateOK    bool
-	UnauthorizedDrift    int
-	UnauthorizedDriftOK  bool
-	CompactionStable     bool
-	CompactionStableOK   bool
+	Passed bool
+
+	// TraceFound is true when the agent emitted a parseable epoch/usage
+	// trace. Missing instrumentation fails an enforced gate.
+	TraceFound   bool
+	TraceFoundOK bool
+
+	// PrefixStable: every prefix.snapshot within an epoch shares the same
+	// static_prefix_hash.
+	PrefixStable   bool
+	PrefixStableOK bool
+
+	PostWarmHitRate   float64
+	PostWarmHitRateOK bool
+	PostWarmEligible  bool // had >=1 warm (non-cold-start) turn
+
+	UnauthorizedDrift   int // count of drift.blocked records
+	UnauthorizedDriftOK bool
+
+	CompactionStable   bool // no compaction record changed the static prefix
+	CompactionStableOK bool
+
 	ParentChildPollution int
 	ParentChildOK        bool
-	UsageParsed          bool
-	UsageParsedOK        bool
+
+	UsageParsed   bool
+	UsageParsedOK bool
+
+	Notes []string
 }
 
 // Pricing mirrors internal/llm/cache_metrics.go pricing table.
@@ -347,12 +495,16 @@ func prepareFixture(fixtureRepo, commit, benchDir string) (string, func(), error
 // Agent execution
 // ---------------------------------------------------------------------------
 
-// runAgent executes an agent against a task and returns the result.
-func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, benchDir string) RunResult {
+// runAgent executes an agent against a task and returns the result. When
+// traceOut is non-empty the agent is asked (via DEEPSEEKCODE_TRACE_JSONL) to
+// write a JSONL epoch/usage trace there, which is parsed back into
+// result.Trace and feeds the Cache Reliability gate.
+func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, benchDir, traceOut string) RunResult {
 	result := RunResult{
 		Agent:         agent.ID,
 		Task:          task.ID,
 		TestsExpected: len(task.Success.Tests) > 0,
+		TracePath:     traceOut,
 	}
 
 	// Resolve agent command relative to project root (parent of benchDir).
@@ -420,6 +572,13 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, be
 		cmd.Env = append(cmd.Env, envKey+"="+fmt.Sprintf("%v", v))
 	}
 
+	// Ask the agent to emit a real epoch/usage trace at traceOut. The agent
+	// honors DEEPSEEKCODE_TRACE_JSONL regardless of positional arg ordering.
+	if traceOut != "" {
+		_ = os.Remove(traceOut) // start clean so a stale trace can't pass the gate
+		cmd.Env = append(cmd.Env, "DEEPSEEKCODE_TRACE_JSONL="+traceOut)
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -443,6 +602,14 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, be
 	result.CacheHits, result.CacheMisses, result.OutputTokens, result.CostCNY = parseUsageForAgent(combined, agent.UsageParse)
 	result.UsageParsed = result.CacheHits+result.CacheMisses+result.OutputTokens > 0
 	result.Turns = 1
+
+	// Parse the JSONL trace the agent emitted (real epoch/usage evidence).
+	if traceOut != "" {
+		if tr, perr := parseAgentTrace(traceOut); perr == nil {
+			result.Trace = tr
+			result.Turns = tr.UsageTurns
+		}
+	}
 
 	result.Success = result.ExitCode == 0
 
@@ -591,6 +758,11 @@ func splitNonEmptyLines(s string) []string {
 // from masking another task's failure. Only tasks with require_cache_gate=true
 // are included; agents whose RequireCacheGate tasks did not run produce an
 // empty inner map.
+// checkCacheGate evaluates the Cache Reliability gate per (agent, task)
+// entirely from the agent's emitted trace. Per the cache-epoch review it
+// FAILS CLOSED: a task that requires the gate but produced no trace (or a
+// trace with no usage/epoch fields) fails rather than reporting N/A as a
+// pass. Only tasks with require_cache_gate=true are included.
 func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string]CacheGateResult {
 	taskLookup := make(map[string]TaskSpec)
 	for _, t := range tasks {
@@ -604,26 +776,7 @@ func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string
 			continue
 		}
 
-		gate := CacheGateResult{
-			CompactionStable:     true,
-			CompactionStableOK:   true,
-			UnauthorizedDrift:    0,
-			UnauthorizedDriftOK:  true,
-			ParentChildPollution: 0,
-			ParentChildOK:        true,
-		}
-
-		gate.UsageParsed = r.UsageParsed
-		gate.UsageParsedOK = r.UsageParsed
-
-		total := r.CacheHits + r.CacheMisses
-		if total > 0 {
-			gate.PostWarmHitRate = float64(r.CacheHits) / float64(total)
-		}
-		gate.PostWarmHitRateOK = gate.PostWarmHitRate >= 0.95
-
-		gate.Passed = gate.UsageParsedOK && gate.PostWarmHitRateOK &&
-			gate.UnauthorizedDriftOK && gate.CompactionStableOK && gate.ParentChildOK
+		gate := evalCacheGate(r)
 
 		if gates[r.Agent] == nil {
 			gates[r.Agent] = make(map[string]CacheGateResult)
@@ -631,6 +784,68 @@ func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string
 		gates[r.Agent][r.Task] = gate
 	}
 	return gates
+}
+
+// evalCacheGate derives a single CacheGateResult from one run's trace.
+func evalCacheGate(r RunResult) CacheGateResult {
+	gate := CacheGateResult{}
+
+	tr := r.Trace
+	gate.TraceFound = tr != nil && tr.Found
+	gate.TraceFoundOK = gate.TraceFound
+
+	if !gate.TraceFound {
+		// No instrumentation → cannot prove cache reliability. Fail closed.
+		gate.Notes = append(gate.Notes,
+			"no agent trace emitted (epoch/usage instrumentation missing) — fail closed")
+		gate.Passed = false
+		return gate
+	}
+
+	gate.UsageParsed = tr.UsageTurns > 0
+	gate.UsageParsedOK = gate.UsageParsed
+	if !gate.UsageParsed {
+		gate.Notes = append(gate.Notes, "trace had no usage turns")
+	}
+
+	gate.UnauthorizedDrift = tr.DriftBlocked
+	gate.UnauthorizedDriftOK = tr.DriftBlocked == 0
+
+	gate.CompactionStable = tr.CompactionUnstable == 0
+	gate.CompactionStableOK = gate.CompactionStable
+
+	unstable := tr.unstableEpochs()
+	gate.PrefixStable = unstable == 0
+	gate.PrefixStableOK = gate.PrefixStable
+	if unstable > 0 {
+		gate.Notes = append(gate.Notes,
+			fmt.Sprintf("%d epoch(s) showed >1 distinct static_prefix_hash", unstable))
+	}
+
+	rate, eligible := tr.postWarmHitRate()
+	gate.PostWarmHitRate = rate
+	gate.PostWarmEligible = eligible > 0
+	if gate.PostWarmEligible {
+		gate.PostWarmHitRateOK = rate >= 0.95
+	} else {
+		// Single-turn (cold-only) task: no warm turns to judge. Not a
+		// failure on its own — the other dimensions still gate.
+		gate.PostWarmHitRateOK = true
+		gate.Notes = append(gate.Notes, "no post-warm turns (cache hit rate not eligible)")
+	}
+
+	// Parent/subagent pollution: the one-shot trace is a single process; a
+	// child epoch cannot mutate the parent epoch by construction, so this
+	// is 0 here. Subagent-isolation evidence belongs to the subagent task's
+	// own trace once child traces are wired.
+	gate.ParentChildPollution = 0
+	gate.ParentChildOK = true
+
+	gate.Passed = gate.TraceFoundOK && gate.UsageParsedOK && gate.PrefixStableOK &&
+		gate.UnauthorizedDriftOK && gate.CompactionStableOK &&
+		gate.PostWarmHitRateOK && gate.ParentChildOK
+
+	return gate
 }
 
 func countLines(s string) int {
@@ -743,31 +958,28 @@ func writeTrace(w io.Writer, records []TraceRecord) error {
 	return nil
 }
 
+// buildTraceRecords builds the harness-level run summary trace. The
+// authoritative per-turn epoch/usage/compaction evidence is the agent's own
+// `<task>.agent.jsonl` (parsed into result.Trace); this file records only
+// what the harness itself observed (start/finish, aggregate usage). It no
+// longer fabricates empty prefix.snapshot/compaction placeholders.
 func buildTraceRecords(result RunResult) []TraceRecord {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	turn := 1
 
-	records := []TraceRecord{
-		{
-			Type:      "run.started",
-			Agent:     result.Agent,
-			Task:      result.Task,
-			Timestamp: now,
-		},
-		{
-			Type: "prefix.snapshot",
-		},
-		{
-			Type: "turn.started",
-			Turn: &turn,
-		},
-		{
-			Type: "usage",
-			Turn: &turn,
-		},
-		{
-			Type: "compaction",
-		},
+	usage := TraceRecord{Type: "usage", Turn: &turn}
+	if result.UsageParsed {
+		usage.OutputTokens = &result.OutputTokens
+		usage.CostCNY = &result.CostCNY
+		if result.CacheHits > 0 || result.CacheMisses > 0 {
+			usage.CacheHitTokens = &result.CacheHits
+			usage.CacheMissTokens = &result.CacheMisses
+		}
+	}
+
+	return []TraceRecord{
+		{Type: "run.started", Agent: result.Agent, Task: result.Task, Timestamp: now},
+		usage,
 		{
 			Type:        "run.finished",
 			Success:     &result.Success,
@@ -778,16 +990,6 @@ func buildTraceRecords(result RunResult) []TraceRecord {
 			StderrLines: &result.StderrLines,
 		},
 	}
-
-	if result.UsageParsed {
-		records[3].OutputTokens = &result.OutputTokens
-		records[3].CostCNY = &result.CostCNY
-		if result.CacheHits > 0 || result.CacheMisses > 0 {
-			records[3].CacheHitTokens = &result.CacheHits
-			records[3].CacheMissTokens = &result.CacheMisses
-		}
-	}
-	return records
 }
 
 // ---------------------------------------------------------------------------
@@ -890,8 +1092,8 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 		}
 		b.WriteString(fmt.Sprintf("\n## Cache Reliability Gate — %s (%s)\n\n", agent.ID, enforcedLabel))
 
-		b.WriteString("| Task | Usage Parsed | Hit Rate | Drift | Compaction | Pollution | Verdict |\n")
-		b.WriteString("|------|--------------|----------|-------|------------|-----------|---------|\n")
+		b.WriteString("| Task | Trace | Prefix Stable | Post-warm Hit | Drift | Compaction | Pollution | Verdict |\n")
+		b.WriteString("|------|-------|---------------|---------------|-------|------------|-----------|---------|\n")
 
 		// Sort tasks for stable output
 		taskIDs := make([]string, 0, len(taskGates))
@@ -901,33 +1103,50 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 		sort.Strings(taskIDs)
 
 		agentAllPassed := true
+		var notes []string
 		for _, tID := range taskIDs {
 			gate := taskGates[tID]
 
-			usageCell := "❌ no"
-			if gate.UsageParsed {
-				usageCell = "✅ yes"
+			traceCell := "❌ missing"
+			if gate.TraceFound {
+				traceCell = "✅ yes"
 			}
-			hitCell := fmt.Sprintf("%.1f%% %s", gate.PostWarmHitRate*100, boolMark(gate.PostWarmHitRateOK))
-			driftCell := "N/A ⏭️"  // no event data yet
-			compCell := "N/A ⏭️"
-			if !gate.CompactionStableOK {
-				compCell = "FAIL ❌"
-			}
-			pollCell := "N/A ⏭️"
-			if !gate.ParentChildOK {
-				pollCell = "FAIL ❌"
+			prefixCell := "—"
+			hitCell := "—"
+			driftCell := "—"
+			compCell := "—"
+			pollCell := "—"
+			if gate.TraceFound {
+				prefixCell = boolMark(gate.PrefixStableOK)
+				if gate.PostWarmEligible {
+					hitCell = fmt.Sprintf("%.1f%% %s", gate.PostWarmHitRate*100, boolMark(gate.PostWarmHitRateOK))
+				} else {
+					hitCell = "n/a"
+				}
+				driftCell = fmt.Sprintf("%d %s", gate.UnauthorizedDrift, boolMark(gate.UnauthorizedDriftOK))
+				compCell = boolMark(gate.CompactionStableOK)
+				pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))
 			}
 			verdictCell := "✅ PASS"
 			if !gate.Passed {
 				verdictCell = "❌ FAIL"
 				agentAllPassed = false
 			}
-			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n",
-				tID, usageCell, hitCell, driftCell, compCell, pollCell, verdictCell))
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+				tID, traceCell, prefixCell, hitCell, driftCell, compCell, pollCell, verdictCell))
+			for _, n := range gate.Notes {
+				notes = append(notes, fmt.Sprintf("- `%s`: %s", tID, n))
+			}
 		}
 
-		b.WriteString("\n_Note: drift/compaction/pollution checks require event-level instrumentation in agent traces._\n")
+		b.WriteString("\n_Gate dimensions are computed from the agent's `<task>.agent.jsonl` trace " +
+			"(epoch/usage/compaction/drift). A missing trace fails an enforced gate (fail-closed)._\n")
+		if len(notes) > 0 {
+			b.WriteString("\nNotes:\n")
+			for _, n := range notes {
+				b.WriteString(n + "\n")
+			}
+		}
 		switch {
 		case agentAllPassed:
 			b.WriteString("**Agent verdict: PASS**\n")
@@ -1067,7 +1286,7 @@ func main() {
 					}
 					warmupCtx, warmupCancel := context.WithTimeout(context.Background(),
 						time.Duration(task.TimeoutSec)*time.Second)
-					runAgent(warmupCtx, agent, task, warmupDir, absBenchDir)
+					runAgent(warmupCtx, agent, task, warmupDir, absBenchDir, "")
 					warmupCancel()
 					warmupCleanup()
 				}
@@ -1090,8 +1309,15 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(),
 				time.Duration(task.TimeoutSec)*time.Second)
 
+			// Only deepseekcode agents emit the JSONL epoch/usage trace.
+			// External agents (e.g. reasonix) have no such instrumentation.
+			traceOut := ""
+			if agent.UsageParse == "deepseekcode" {
+				traceOut = filepath.Join(agentTraceDir, task.ID+".agent.jsonl")
+			}
+
 			// Run agent
-			result := runAgent(ctx, agent, task, fixtureDir, absBenchDir)
+			result := runAgent(ctx, agent, task, fixtureDir, absBenchDir, traceOut)
 			cancel()
 
 			if ctx.Err() == context.DeadlineExceeded {

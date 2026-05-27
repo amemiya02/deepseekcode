@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -153,7 +154,16 @@ type Agent struct {
 	Skills *skills.Store
 
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
+	// Its SchemaHash feeds the epoch's mcp_schema_hash, so startup MCP
+	// discovery is part of the frozen prefix and mid-session schema
+	// changes surface as pending changes rather than live drift.
 	MCPRegistry *mcp.Registry
+
+	// Profile is the active first-class agent profile. nil means the
+	// implicit "default" profile. The profile name feeds the epoch's
+	// agent_profile_hash; switching profiles via SwitchProfile creates a
+	// new epoch (one expected cache miss) rather than mutating the live one.
+	Profile *agents.AgentProfile
 
 	// ActiveTiers controls which tool tiers are sent to the model. The
 	// agent uses Tools.AsLLMToolsFiltered(ActiveTiers...) when building
@@ -174,22 +184,22 @@ type Agent struct {
 // the UI goroutine were stuck — an upstream bug we'd want to surface.
 func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model string) *Agent {
 	a := &Agent{
-		Client:        client,
-		Tools:         reg,
-		Permissions:   pol,
-		eventsCompat:  make(chan Event, 256),
-		Model:         model,
-		Thinking:      true,
-		prefixMon:     llm.NewPrefixMonitor(),
-		epochMgr:      NewEpochManager(),
-		System:        DefaultSystemPrompt,
-		MaxToolCalls:  200,
-		ActiveTiers:   []tools.ToolTier{tools.TierCore},
-		CompactionCfg:      DefaultCompactionConfig(),
-		SemanticCfg:        defaultSemanticCompactionConfig(),
-		MaxContextTokens:   MaxContextTokens,
-		Jobs:          NewJobRegistry(),
-		stormBreaker:  repair.NewStormBreaker(6, 3),
+		Client:           client,
+		Tools:            reg,
+		Permissions:      pol,
+		eventsCompat:     make(chan Event, 256),
+		Model:            model,
+		Thinking:         true,
+		prefixMon:        llm.NewPrefixMonitor(),
+		epochMgr:         NewEpochManager(),
+		System:           DefaultSystemPrompt,
+		MaxToolCalls:     200,
+		ActiveTiers:      []tools.ToolTier{tools.TierCore},
+		CompactionCfg:    DefaultCompactionConfig(),
+		SemanticCfg:      defaultSemanticCompactionConfig(),
+		MaxContextTokens: MaxContextTokens,
+		Jobs:             NewJobRegistry(),
+		stormBreaker:     repair.NewStormBreaker(6, 3),
 		StopWhen: []StopCondition{
 			MaxSteps(50),
 			LoopDetection(5, 3),
@@ -468,6 +478,86 @@ func stepContext(parent context.Context, timeout time.Duration) (context.Context
 	return context.WithTimeout(parent, timeout)
 }
 
+// staticSystem returns the cache-stable portion of the system prompt
+// (everything before the dynamic-context boundary). This is what feeds the
+// epoch's system hash; per-turn git/date context after the boundary is
+// excluded so it never counts as prefix drift.
+func (a *Agent) staticSystem() string {
+	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
+		return a.System[:i]
+	}
+	return a.System
+}
+
+// currentProfileID returns the active agent-profile name, or "default"
+// when no profile has been set. It feeds the epoch's agent_profile_hash.
+func (a *Agent) currentProfileID() string {
+	if a.Profile != nil && a.Profile.Name != "" {
+		return a.Profile.Name
+	}
+	return "default"
+}
+
+// buildEpochComponents snapshots the current prefix-determining state
+// (static system, active tool tier, skill directory, MCP schema, profile)
+// into EpochComponents. Shared by runStep (initial freeze + drift detection)
+// and SwitchProfile (explicit epoch switch) so both compute the same hash
+// from the same inputs.
+func (a *Agent) buildEpochComponents() EpochComponents {
+	comps := EpochComponents{
+		StaticSystem:   a.staticSystem(),
+		ToolSpecs:      a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
+		Model:          a.Model,
+		AgentProfileID: a.currentProfileID(),
+	}
+	if a.Skills != nil {
+		comps.StableSkillDir = a.Skills.VersionHash()
+	}
+	if a.MCPRegistry != nil {
+		comps.MCPSchemaSnapshot = a.MCPRegistry.SchemaHash()
+	}
+	return comps
+}
+
+// toolTiersFromStrings maps profile tier names to tools.ToolTier values.
+// Unknown names are skipped.
+func toolTiersFromStrings(names []string) []tools.ToolTier {
+	var out []tools.ToolTier
+	for _, n := range names {
+		switch strings.ToLower(strings.TrimSpace(n)) {
+		case "core":
+			out = append(out, tools.TierCore)
+		case "profile":
+			out = append(out, tools.TierProfile)
+		case "lazy":
+			out = append(out, tools.TierLazy)
+		}
+	}
+	return out
+}
+
+// SwitchProfile makes p the active agent profile. It applies the profile's
+// tool tiers and model, then creates a new PrefixEpoch via the epoch
+// manager. The first turn of the new epoch is expected to miss cache
+// (ExpectedCacheMiss); subsequent same-epoch turns stay cache-stable.
+// Returns the new epoch. A no-op when an epoch hasn't been initialized yet
+// (the first runStep will pick up the profile when it creates epoch #1).
+func (a *Agent) SwitchProfile(p agents.AgentProfile) *PrefixEpoch {
+	a.Profile = &p
+	if tiers := toolTiersFromStrings(p.ToolTiers); len(tiers) > 0 {
+		a.ActiveTiers = tiers
+	}
+	if p.Model != "" {
+		a.Model = p.Model
+	}
+	if a.epochMgr.CurrentEpoch() == nil {
+		// No epoch yet: the initial runStep will fold the profile into
+		// epoch #1, so there is nothing to switch.
+		return nil
+	}
+	return a.epochMgr.SwitchEpoch("profile_switch:"+p.Name, a.buildEpochComponents())
+}
+
 // runStep streams one model turn and aggregates events into a StepRecord.
 // It assembles the assistant message and appends it to a.Messages.
 func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
@@ -485,23 +575,8 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		Thinking: llm.ThinkingEnabled(thinking),
 	}
 
-	staticSys := a.System
-	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
-		staticSys = a.System[:i]
-	}
-
-	epochComps := EpochComponents{
-		StaticSystem:   staticSys,
-		ToolSpecs:      req.Tools,
-		Model:          a.Model,
-		AgentProfileID: "default",
-	}
-	if a.Skills != nil {
-		epochComps.StableSkillDir = a.Skills.VersionHash()
-	}
-	if a.MCPRegistry != nil {
-		epochComps.MCPSchemaSnapshot = a.MCPRegistry.SchemaHash()
-	}
+	staticSys := a.staticSystem()
+	epochComps := a.buildEpochComponents()
 
 	epoch := a.epochMgr.CurrentEpoch()
 	if epoch == nil {
@@ -509,6 +584,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		a.bus.Publish(EventEpochCreated{
 			EpochID:          epoch.EpochID,
 			StaticPrefixHash: epoch.StaticPrefixHash,
+			ToolsHash:        epoch.ComponentHashes["tools"],
 			Reason:           "session_start",
 		})
 	}

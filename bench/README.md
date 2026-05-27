@@ -140,17 +140,37 @@ Each run produces a `.jsonl` file with one JSON object per line:
 ### Record Types
 
 - **run.started**: Agent and task identifiers, timestamp
-- **turn.started**: Turn number (1-indexed)
 - **usage**: Token counts and cost for the turn
 - **run.finished**: Success/failure, duration, exit code, line counts, errors
 
-### Missing Fields
+The file above (`<task>.jsonl`) is the harness's run-level summary. The
+**authoritative cache evidence** is a separate per-run file the agent itself
+writes — see below.
 
-When instrumentation data is unavailable, fields are set to `null` (not omitted):
+### Agent trace (`<task>.agent.jsonl`) — source of truth for the gate
+
+deepseekcode agents emit a real epoch/usage/compaction/drift trace via
+`dsc -p --trace-jsonl <path>` (the harness sets `DEEPSEEKCODE_TRACE_JSONL`
+per run). The Cache Reliability gate is computed entirely from this trace —
+there are no fabricated placeholders. Record types:
 
 ```json
-{"type":"usage","turn":1,"cache_hit_tokens":null,"cache_miss_tokens":null,"output_tokens":null,"cost_cny":null}
+{"type":"prefix.snapshot","epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…","reason":"session_start"}
+{"type":"epoch.frozen","epoch_id":"epoch_…"}
+{"type":"prefix.snapshot","turn":1,"epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…"}
+{"type":"usage","turn":1,"epoch_id":"epoch_…","cache_hit_tokens":1152,"cache_miss_tokens":2951,"output_tokens":15,"cost_cny":0.0030}
+{"type":"pending_change","epoch_id":"epoch_…","kind":"skill_body_changed","description":"…"}
+{"type":"drift.blocked","epoch_id":"epoch_…","which":"tools"}
+{"type":"compaction","epoch_id":"epoch_…","kind":"semantic","static_prefix_hash_changed":false}
 ```
+
+### Fail-closed instrumentation
+
+There is no "N/A pass". If a task sets `require_cache_gate: true` and the
+agent produces **no** trace (or a trace with no usage/epoch fields), the gate
+**fails** for that task. For agents with `enforce_cache_gate: true` this also
+fails the CI exit code. External agents (e.g. Reasonix) that don't emit this
+trace will show a missing-trace gate row — reported, never enforced.
 
 ### Markdown Reports
 
@@ -257,14 +277,17 @@ Traces are written to `bench/traces/<agent-id>/`. Reports go to
 
 ### Cache Reliability Gate
 
-The Cache Reliability gate is a pass/fail check on four criteria:
+The Cache Reliability gate is a pass/fail check computed from the agent
+trace (`<task>.agent.jsonl`):
 
-| # | Criterion | Threshold |
-|---|-----------|-----------|
-| 1 | Post-warm cache hit rate | >= 95% on eligible tasks |
-| 2 | Unauthorized drift count | 0 |
-| 3 | Parent/subagent cache pollution | 0 |
-| 4 | Compaction prefix hash stability | 0 changes |
+| # | Criterion | Threshold | Trace source |
+|---|-----------|-----------|--------------|
+| 0 | Trace present with usage turns | required (fail-closed) | file exists + `usage` records |
+| 1 | Within-epoch prefix stability | 1 hash per epoch | `prefix.snapshot.static_prefix_hash` |
+| 2 | Post-warm cache hit rate | >= 95% on eligible tasks | `usage` records (excl. first/epoch) |
+| 3 | Unauthorized drift count | 0 | `drift.blocked` records |
+| 4 | Compaction prefix hash stability | 0 changes | `compaction.static_prefix_hash_changed` |
+| 5 | Parent/subagent cache pollution | 0 | (single-process: 0; child traces TODO) |
 
 **Post-warm cache hit rate**: After the first turn warms the prompt
 cache, all subsequent turns must achieve >= 95% cache hit tokens /
@@ -300,11 +323,29 @@ The optimized adapter **wins** if it passes the Cache Reliability gate
 and beats the baseline on at least one of: cost, trace quality, or
 debug quality.
 
-### Report Template
+### Reports are generated, not templated
 
-Fill in `bench/reports/optimized-YYYY-MM-DD.md` after each run. The
-template includes placeholders for all Cache Reliability and Agentic
-Engineering Score criteria.
+`benchrunner` writes a real `bench/reports/bench-YYYYMMDD-HHMMSS.md` from the
+parsed traces on every run, including the per-(agent, task) Cache Reliability
+gate table. Do **not** hand-author an `optimized-YYYY-MM-DD.md` with
+placeholder values and call M5 done — a report only counts if it was produced
+by an actual run whose `<task>.agent.jsonl` traces exist alongside it.
+
+### Running the full Phase-1 matrix (current + optimized + Reasonix)
+
+```bash
+make build                              # ./bin/dsc
+npm --prefix <reasonix-repo> run build  # if running Reasonix from source
+go run ./bench/cmd/benchrunner/         # all three agents × all tasks
+```
+
+`reasonix-current` runs the headless `reasonix run <task>` mode. Reasonix
+does not emit deepseekcode's epoch trace, so its gate row reads
+"trace missing" (report-only) — a token-level cache comparison would require
+parsing Reasonix's own `--transcript` JSONL (future work). Until a real
+matrix run is recorded with all three adapters, the Reasonix comparison
+required by the Phase-1 Definition of Done is **blocked**, and M5 must not be
+marked complete.
 
 ## Future Work
 

@@ -16,19 +16,19 @@ import (
 // pending changes that are visible in receipts but not model-visible
 // until an explicit epoch switch.
 type PrefixEpoch struct {
-	EpochID          string
-	AgentProfileID   string
-	Model            string
-	ReasoningEffort  string
-	StaticSystem     string
-	FewShots         []llm.Message
-	ToolSpecs        []llm.Tool
-	StableSkillDir   string
+	EpochID           string
+	AgentProfileID    string
+	Model             string
+	ReasoningEffort   string
+	StaticSystem      string
+	FewShots          []llm.Message
+	ToolSpecs         []llm.Tool
+	StableSkillDir    string
 	MCPSchemaSnapshot string
-	CreatedAt        time.Time
-	CreatedReason    string
-	ComponentHashes  map[string]string
-	StaticPrefixHash string
+	CreatedAt         time.Time
+	CreatedReason     string
+	ComponentHashes   map[string]string
+	StaticPrefixHash  string
 
 	// FrozenTools and FrozenSystem capture the tool list and system
 	// prompt at the moment FreezeEpoch is called. When the epoch is
@@ -40,13 +40,13 @@ type PrefixEpoch struct {
 
 // EpochComponents is the input for creating a PrefixEpoch.
 type EpochComponents struct {
-	AgentProfileID   string
-	Model            string
-	ReasoningEffort  string
-	StaticSystem     string
-	FewShots         []llm.Message
-	ToolSpecs        []llm.Tool
-	StableSkillDir   string
+	AgentProfileID    string
+	Model             string
+	ReasoningEffort   string
+	StaticSystem      string
+	FewShots          []llm.Message
+	ToolSpecs         []llm.Tool
+	StableSkillDir    string
 	MCPSchemaSnapshot string
 }
 
@@ -207,6 +207,7 @@ func (m *EpochManager) SwitchEpoch(reason string, components EpochComponents) *P
 			OldEpochID:       oldID,
 			NewEpochID:       epoch.EpochID,
 			StaticPrefixHash: epoch.StaticPrefixHash,
+			ToolsHash:        epoch.ComponentHashes["tools"],
 			Reason:           reason,
 		})
 	}

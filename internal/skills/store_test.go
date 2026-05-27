@@ -3,6 +3,7 @@ package skills
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -166,10 +167,32 @@ description: Skill `+name+`
 		t.Errorf("IndexText not deterministic:\n%s\nvs\n%s", text1, text2)
 	}
 
-	// Should be sorted by name
-	expected := "alpha | Skill alpha | alpha | direct\nbeta | Skill beta | beta | direct\ngamma | Skill gamma | gamma | direct\n"
-	if text1 != expected {
-		t.Errorf("IndexText = %q, want %q", text1, expected)
+	// Canonical stable-directory format:
+	//   name | short_description | run_mode | version_hash | allowed_tools
+	// Sorted by name. version_hash is body-derived, so assert structure
+	// rather than the exact hash.
+	lines := strings.Split(strings.TrimRight(text1, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %q", len(lines), text1)
+	}
+	wantNames := []string{"alpha", "beta", "gamma"}
+	for i, line := range lines {
+		fields := strings.Split(line, " | ")
+		if len(fields) != 5 {
+			t.Fatalf("line %d %q: want 5 fields, got %d", i, line, len(fields))
+		}
+		if fields[0] != wantNames[i] {
+			t.Errorf("line %d name = %q, want %q", i, fields[0], wantNames[i])
+		}
+		if fields[1] != "Skill "+wantNames[i] {
+			t.Errorf("line %d short_description = %q", i, fields[1])
+		}
+		if fields[2] != "direct" {
+			t.Errorf("line %d run_mode = %q, want direct", i, fields[2])
+		}
+		if len(fields[3]) != 12 {
+			t.Errorf("line %d version_hash = %q, want 12 hex chars", i, fields[3])
+		}
 	}
 }
 
@@ -435,18 +458,22 @@ func TestStore_DiffBodyChanged(t *testing.T) {
 		os.MkdirAll(skillDir, 0o755)
 	}
 
+	// Identical frontmatter (same description), different body. The change
+	// must be detected from the body, not the description.
 	os.WriteFile(filepath.Join(dir1, "test", "SKILL.md"), []byte(`---
 name: test
-description: Old description
+description: Same description
 ---
 # Body
+Original body content.
 `), 0o644)
 
 	os.WriteFile(filepath.Join(dir2, "test", "SKILL.md"), []byte(`---
 name: test
-description: New description
+description: Same description
 ---
 # Body
+Edited body content with new instructions.
 `), 0o644)
 
 	old, _ := Load([]string{dir1})
@@ -460,6 +487,51 @@ description: New description
 		t.Errorf("expected 'body_changed', got %q", changes[0].Kind)
 	}
 	if changes[0].OldHash == changes[0].NewHash {
-		t.Error("old and new hashes should differ")
+		t.Error("old and new body hashes should differ")
+	}
+}
+
+// TestStore_BodyEditFlipsVersionHashNotDescription is the cache-epoch
+// regression: a body-only edit must change the store VersionHash (so the
+// live epoch records a pending change) even though the description — and
+// thus the human-facing directory line prefix — is unchanged.
+func TestStore_BodyEditFlipsVersionHash(t *testing.T) {
+	write := func(dir, body string) *Store {
+		skillDir := filepath.Join(dir, "review")
+		os.MkdirAll(skillDir, 0o755)
+		os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: review
+description: Review code for defects
+---
+# Review
+`+body+`
+`), 0o644)
+		s, err := Load([]string{dir})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return s
+	}
+
+	s1 := write(t.TempDir(), "Look for nil derefs.")
+	s2 := write(t.TempDir(), "Look for nil derefs and data races.")
+
+	if s1.VersionHash() == s2.VersionHash() {
+		t.Error("body edit should change the store VersionHash")
+	}
+
+	// The description-derived prefix of the directory line is unchanged.
+	prefix := func(s *Store) string {
+		line := s.IndexText()
+		fields := strings.Split(strings.TrimRight(line, "\n"), " | ")
+		return fields[0] + " | " + fields[1] // name | short_description
+	}
+	if prefix(s1) != prefix(s2) {
+		t.Errorf("description prefix changed: %q vs %q", prefix(s1), prefix(s2))
+	}
+
+	// No SKILL.md path leaks into the stable directory text — only metadata.
+	if strings.Contains(s1.IndexText(), "SKILL.md") {
+		t.Errorf("IndexText must not contain skill file paths: %q", s1.IndexText())
 	}
 }

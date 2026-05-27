@@ -16,11 +16,52 @@ import (
 
 // Skill is the metadata for a single skill.
 type Skill struct {
-	Name        string
-	Description string
-	Scope       string
-	RunAs       string
-	Path        string
+	Name         string
+	Description  string
+	Scope        string
+	RunAs        string
+	AllowedTools []string
+	Path         string
+
+	// BodyHash is the SHA-256 of the skill body (everything after the
+	// frontmatter). It is the source of VersionHash: a body-only edit
+	// changes BodyHash even when the description is untouched, so the
+	// stable skill directory in the prefix records a new version_hash
+	// and the epoch sees a pending change. Computed at Load time.
+	BodyHash string
+}
+
+// shortVersionHash is the body-derived version_hash placed in the stable
+// skill directory. Truncated so the directory stays compact (the prefix
+// is cache-stable and every byte counts) while still flipping on any body
+// edit.
+func (sk Skill) shortVersionHash() string {
+	if len(sk.BodyHash) >= 12 {
+		return sk.BodyHash[:12]
+	}
+	return sk.BodyHash
+}
+
+// shortDescription returns a single-line, length-capped description for
+// the stable directory. The full description never enters the prefix.
+func (sk Skill) shortDescription() string {
+	d := sk.Description
+	if i := strings.IndexByte(d, '\n'); i >= 0 {
+		d = d[:i]
+	}
+	d = strings.TrimSpace(d)
+	if r := []rune(d); len(r) > 80 {
+		d = string(r[:80])
+	}
+	return d
+}
+
+// runMode returns the skill's run mode, defaulting to "direct".
+func (sk Skill) runMode() string {
+	if sk.RunAs == "" {
+		return "direct"
+	}
+	return sk.RunAs
 }
 
 // Store holds the indexed skill metadata. Construct with Load.
@@ -74,17 +115,34 @@ func (s *Store) List() []Skill {
 	return s.skills
 }
 
+// Names returns the indexed skill names, sorted. Used by the skill_read
+// tool to report available skills on a miss.
+func (s *Store) Names() []string {
+	out := make([]string, 0, len(s.skills))
+	for _, sk := range s.skills {
+		out = append(out, sk.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // IndexText returns a deterministic, prefix-stable text representation
-// of the skill index. One line per skill with name, description, scope,
-// and run mode. Skill bodies are NOT included.
+// of the skill index: one line per skill in the canonical stable-skill-
+// directory format
+//
+//	name | short_description | run_mode | version_hash | allowed_tools
+//
+// where version_hash is derived from the skill body (see Skill.BodyHash).
+// Full skill bodies and local absolute paths are NOT included, so the
+// directory stays both compact and machine-independent. A body-only edit
+// flips version_hash and therefore the whole IndexText, which is what
+// drives a pending epoch change.
 func (s *Store) IndexText() string {
 	var b strings.Builder
 	for _, sk := range s.skills {
-		runAs := sk.RunAs
-		if runAs == "" {
-			runAs = "direct"
-		}
-		fmt.Fprintf(&b, "%s | %s | %s | %s\n", sk.Name, sk.Description, sk.Scope, runAs)
+		fmt.Fprintf(&b, "%s | %s | %s | %s | %s\n",
+			sk.Name, sk.shortDescription(), sk.runMode(),
+			sk.shortVersionHash(), strings.Join(sk.AllowedTools, ","))
 	}
 	return b.String()
 }
@@ -130,36 +188,36 @@ func discoverSkills(root string) ([]Skill, error) {
 	return skills, nil
 }
 
-// parseSkillFile parses a SKILL.md file's frontmatter and returns metadata.
+// parseSkillFile parses a SKILL.md file's frontmatter and body. It reads
+// the file once, extracts metadata from the frontmatter, and computes the
+// body hash (everything after the closing "---") so a body-only edit is
+// detectable without keeping the body in memory.
 func parseSkillFile(path, dirName string) (Skill, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Skill{}, err
 	}
-	defer f.Close()
 
 	sk := Skill{
 		Name: dirName, // default to directory name
 		Path: path,
 	}
 
-	scanner := bufio.NewScanner(f)
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	inFrontmatter := false
 	frontmatterDone := false
+	bodyStart := -1
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
+	for i, line := range lines {
 		if line == "---" {
 			if !inFrontmatter {
 				inFrontmatter = true
 				continue
 			}
-			// Second --- ends frontmatter
 			frontmatterDone = true
+			bodyStart = i + 1
 			break
 		}
-
 		if inFrontmatter {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) != 2 {
@@ -175,8 +233,10 @@ func parseSkillFile(path, dirName string) (Skill, error) {
 				}
 			case "description":
 				sk.Description = value
-			case "runAs":
+			case "runAs", "run_mode", "run-mode":
 				sk.RunAs = value
+			case "allowed-tools", "allowed_tools", "allowedTools":
+				sk.AllowedTools = parseToolList(value)
 			}
 		}
 	}
@@ -185,7 +245,29 @@ func parseSkillFile(path, dirName string) (Skill, error) {
 		return Skill{}, fmt.Errorf("no frontmatter found")
 	}
 
+	body := ""
+	if bodyStart >= 0 && bodyStart < len(lines) {
+		body = strings.TrimSpace(strings.Join(lines[bodyStart:], "\n"))
+	}
+	sk.BodyHash = hashString(body)
+
 	return sk, nil
+}
+
+// parseToolList splits a comma-separated tool list, trims each entry, and
+// sorts for a deterministic stable directory.
+func parseToolList(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(value, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SkillChange describes a mutation between two skill stores.
@@ -230,12 +312,16 @@ func (s *Store) Diff(old *Store) []SkillChange {
 			changes = append(changes, SkillChange{Kind: "added", Name: sk.Name})
 			continue
 		}
-		if oldSk.Description != sk.Description {
+		// Compare the body hash, not the description: a skill whose body
+		// is edited while its frontmatter description stays the same must
+		// still surface as a body change. This is the bug the cache-epoch
+		// review called out — Diff used to read only the description.
+		if oldSk.BodyHash != sk.BodyHash {
 			changes = append(changes, SkillChange{
 				Kind:    "body_changed",
 				Name:    sk.Name,
-				OldHash: hashString(oldSk.Description),
-				NewHash: hashString(sk.Description),
+				OldHash: oldSk.BodyHash,
+				NewHash: sk.BodyHash,
 			})
 		}
 	}

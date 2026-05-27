@@ -165,6 +165,7 @@ func run() error {
 		resumeSes   string
 		prompt      string
 		debug       bool
+		traceJSONL  string
 	)
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&yolo, "yolo", false, "auto-approve all tool calls (DANGEROUS)")
@@ -177,7 +178,14 @@ func run() error {
 	flag.StringVar(&resumeSes, "r", "", "resume session by ID (empty opens picker)")
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
 	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
+	flag.StringVar(&traceJSONL, "trace-jsonl", "", "one-shot: write epoch/usage/compaction/drift trace as JSONL to PATH (used by the benchmark harness)")
 	flag.Parse()
+
+	// Env fallback so the benchmark harness can request a trace without
+	// reordering positional prompt args. Explicit flag wins.
+	if traceJSONL == "" {
+		traceJSONL = os.Getenv("DEEPSEEKCODE_TRACE_JSONL")
+	}
 
 	if showVersion {
 		fmt.Println("dsc", version.String())
@@ -238,7 +246,7 @@ func run() error {
 	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
 
 	if !tuiMode {
-		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction})
+		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL})
 	}
 
 	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction}, newSession, continueSes, resumeSes)
@@ -313,6 +321,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
+	a.MCPRegistry = mcpReg
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
@@ -333,6 +342,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
+	registerSkillRead(reg, skills)
 
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
@@ -562,9 +572,10 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 }
 
 type modeFlags struct {
-	yolo, readOnly, askAll            bool
-	disablePrefixEpoch                bool
-	disableSemanticCompaction         bool
+	yolo, readOnly, askAll    bool
+	disablePrefixEpoch        bool
+	disableSemanticCompaction bool
+	traceJSONL                string // one-shot trace sink path; "" disables
 }
 
 type providerRuntime struct {
@@ -650,6 +661,27 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
 
+	// MCP servers: connect and bridge tools so one-shot runs match the TUI's
+	// tool surface — and so MCP schema discovery feeds the prefix epoch
+	// (mcp_schema_hash). Notices go to stderr; one-shot output is on stdout.
+	mcpReg := mcp.NewRegistry()
+	defer mcpReg.Shutdown()
+	for name, srv := range cfg.MCPServers {
+		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cerr := mcpReg.Connect(mctx, name, srv.Command, srv.Args, srv.Env)
+		mcancel()
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "warning: mcp[%s]: failed — %v\n", name, cerr)
+			continue
+		}
+		if srv.TimeoutSeconds > 0 {
+			mcpReg.SetTimeout(name, srv.TimeoutSeconds)
+		}
+	}
+	for _, t := range mcp.BridgeAll(mcpReg) {
+		reg.Register(t)
+	}
+
 	// LSP: one-shot also gets the lsp tool; servers shut down after the turn.
 	lspReg := lsp.NewRegistry()
 	defer lspReg.Shutdown()
@@ -672,6 +704,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
 	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
+	a.MCPRegistry = mcpReg
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
@@ -692,6 +725,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
+	registerSkillRead(reg, skills)
 
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
@@ -729,12 +763,30 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	reg.Register(tools.NewSubagentTool(spawner))
 	reg.Register(tools.NewWorktreeTool(wtMgr))
 
+	// Optional JSONL trace sink (benchmark harness). Attached before Run so
+	// it captures the first epoch event; flushed by waiting on its handle
+	// before the file is closed.
+	var traceHandle *agent.TraceSinkHandle
+	if mf.traceJSONL != "" {
+		tf, terr := os.Create(mf.traceJSONL)
+		if terr != nil {
+			fmt.Fprintf(os.Stderr, "warning: trace-jsonl %s: %v\n", mf.traceJSONL, terr)
+		} else {
+			defer tf.Close()
+			traceHandle = a.AttachTraceSink(tf)
+		}
+	}
+
 	// Consumer goroutine: pulls events from the agent's lifetime stream
 	// and renders each to stdout/stderr. Mirrors the TUI's pumpEvents
 	// adapter — same channel, different sink.
 	go consumeAgentEvents(a, rt.Model)
 
 	reason, err := a.Run(ctx, prompt)
+	if traceHandle != nil {
+		traceHandle.WaitTimeout(2 * time.Second)
+		traceHandle.Close()
+	}
 	fmt.Fprintf(os.Stderr, "\n[stop: %s", reason)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, " err=%v", err)
@@ -912,6 +964,40 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 			e.Reply <- tools.QuestionResponse{Answers: answers}
 		}
 	}
+}
+
+// promptSkillSource adapts the prompt builder's loaded skill list into a
+// tools.SkillSource so skill_read resolves exactly the skills shown in the
+// ## Skills directory — bodies are already in memory from LoadSkills.
+type promptSkillSource struct{ skills []promptpkg.Skill }
+
+func (p promptSkillSource) Body(name string) (string, bool) {
+	for _, s := range p.skills {
+		if s.Name == name {
+			return s.Body, true
+		}
+	}
+	return "", false
+}
+
+func (p promptSkillSource) Names() []string {
+	out := make([]string, 0, len(p.skills))
+	for _, s := range p.skills {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+// registerSkillRead installs the skill_read lazy-body dispatcher as a core
+// tool whenever a skill directory is present, so the model can always load
+// the full body of any skill it sees listed. The dispatcher schema is
+// fixed, so its presence does not destabilize the tool hash within a
+// session.
+func registerSkillRead(reg *tools.Registry, skills []promptpkg.Skill) {
+	if len(skills) == 0 {
+		return
+	}
+	reg.RegisterWithTier(tools.NewSkillReadTool(promptSkillSource{skills}), tools.TierCore)
 }
 
 func stdinIsPipe() bool {

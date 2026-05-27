@@ -158,13 +158,19 @@ const maxSkillsBlockChars = 4000
 //
 // Description is truncated to 200 chars. Total block capped at ~4000 chars;
 // overflow appends "... (N more skills omitted)".
+//
+// Local absolute paths are deliberately NOT rendered: the skills block is
+// part of the cache-stable static prefix, and an absolute path would both
+// make the prefix machine-specific and violate the cache-epoch rule that
+// the stable skill directory carry no local paths. The model loads a
+// skill body on demand with the skill_read tool, keyed by skill name.
 func RenderSkillsBlock(skills []Skill) string {
 	if len(skills) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\n## Skills\n")
-	b.WriteString("(Use the skill path to load full instructions via read_file)\n")
+	b.WriteString("(Load a skill's full instructions on demand with skill_read using its name.)\n")
 	total := 0
 	omitted := 0
 	for _, s := range skills {
@@ -174,17 +180,9 @@ func RenderSkillsBlock(skills []Skill) string {
 		}
 		var line string
 		if desc != "" {
-			if s.Path != "" {
-				line = fmt.Sprintf("- %s: %s (path: %s)\n", s.Name, desc, s.Path)
-			} else {
-				line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
-			}
+			line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
 		} else {
-			if s.Path != "" {
-				line = fmt.Sprintf("- %s (path: %s)\n", s.Name, s.Path)
-			} else {
-				line = fmt.Sprintf("- %s\n", s.Name)
-			}
+			line = fmt.Sprintf("- %s\n", s.Name)
 		}
 		if total+len(line) > maxSkillsBlockChars {
 			omitted++

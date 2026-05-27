@@ -32,6 +32,45 @@ The north star is:
 - Improvements must be measured against both current `deepseekcode` and
   DeepSeek-Reasonix.
 
+## Implementation Status (updated 2026-05-27, post cache-epoch review)
+
+The review flagged that the Phase-1 code skeleton was in place but the gate
+was not yet provable. The instrumentation gap is now closed; the remaining
+gap is the billed comparison run itself.
+
+**Done and provable**
+
+- **Real cache gate (was P0-1).** `dsc -p --trace-jsonl <path>` (or
+  `DEEPSEEKCODE_TRACE_JSONL`) emits a real JSONL trace of
+  `prefix.snapshot` / `epoch.frozen` / `pending_change` / `drift.blocked` /
+  `usage` / `compaction` records. `benchrunner` reads that trace and computes
+  the Cache Reliability gate from it (within-epoch prefix stability, drift
+  count, compaction stability, post-warm hit rate). Missing trace/fields now
+  **fail closed** for enforced agents instead of reporting `N/A`. Verified on
+  a live smoke run (real `cache_hit_tokens`/`cache_miss_tokens` from the API).
+- **Skill directory (was P1-3).** The stable skill directory is
+  `name | short_description | run_mode | version_hash | allowed_tools` with
+  `version_hash` derived from the skill **body**; `Diff` compares body
+  hashes; the static prefix no longer embeds local absolute paths; bodies
+  load on demand via the `skill_read` tool. A body-only edit flips the skill
+  version hash and becomes a pending change while the live epoch hash stays
+  stable (test: `TestSkillBodyChangeIsPendingNotLiveDrift`).
+- **MCP + AgentProfile runtime (was P1-4).** Both the TUI and one-shot paths
+  set `a.MCPRegistry` (one-shot now also connects MCP), so startup MCP schema
+  feeds `mcp_schema_hash`. The epoch's `agent_profile_hash` comes from the
+  active profile name, and `Agent.SwitchProfile` creates/switches an epoch and
+  records one expected cache miss (test:
+  `TestSwitchProfileCreatesEpochAndExpectsCacheMiss`).
+
+**Blocked / not yet done**
+
+- **M1 / M5 real reports + Reasonix comparison (P0-2).** The harness can now
+  run `current + optimized + reasonix` and produce a real gate, but a genuine
+  billed matrix run has not been executed here, and a token-level Reasonix
+  cache comparison needs a Reasonix-`--transcript` parser. Until that run is
+  recorded, **M1 and M5 stay open** and the Reasonix dimension of the Phase-1
+  Definition of Done is **blocked** — it must not be reported as complete.
+
 ## Decisions
 
 The following decisions are locked for phase 1:

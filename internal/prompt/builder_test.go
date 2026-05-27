@@ -137,8 +137,12 @@ func TestRenderSkillsBlockNoDescription(t *testing.T) {
 	got := RenderSkillsBlock([]Skill{
 		{Name: "bare", Path: "/x/SKILL.md"},
 	})
-	if !strings.Contains(got, "- bare (path: /x/SKILL.md)") {
-		t.Errorf("missing bare skill line with path; got: %s", got)
+	if !strings.Contains(got, "- bare\n") {
+		t.Errorf("missing bare skill line; got: %s", got)
+	}
+	// The static prefix must never carry a local absolute path.
+	if strings.Contains(got, "/x/SKILL.md") || strings.Contains(got, "path:") {
+		t.Errorf("skills block leaked a local path; got: %s", got)
 	}
 }
 

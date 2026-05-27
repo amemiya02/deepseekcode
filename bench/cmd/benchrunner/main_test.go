@@ -65,6 +65,34 @@ cached_tokens: 2500`
 	}
 }
 
+// traceWith builds an AgentTrace for one epoch with the given per-turn
+// usage and a single (stable) prefix hash.
+func traceWith(epoch, prefixHash string, turns []usageTurn) *AgentTrace {
+	tr := &AgentTrace{
+		Found:       true,
+		UsageTurns:  len(turns),
+		epochHashes: map[string]map[string]bool{epoch: {prefixHash: true}},
+		epochUsage:  map[string][]usageTurn{epoch: turns},
+	}
+	return tr
+}
+
+// TestParseUsageReasonix_RunSummaryLine parses the real `reasonix run`
+// stdout footer: "— turns:N cache:NN.N% cost:$X save-vs-claude:NN.N%".
+// Cost (USD→CNY) must be captured; no token split is fabricated from a
+// bare percentage.
+func TestParseUsageReasonix_RunSummaryLine(t *testing.T) {
+	out := "— turns:5 cache:99.8% cost:$0.001234 save-vs-claude:78.5%\n"
+	h, m, o, c := parseUsageReasonix(out)
+	if h != 0 || m != 0 || o != 0 {
+		t.Errorf("no token split should be fabricated from a percentage; got h=%d m=%d o=%d", h, m, o)
+	}
+	wantCNY := 0.001234 * 7.2
+	if c < wantCNY*0.99 || c > wantCNY*1.01 {
+		t.Errorf("cost: want ~%f got %f", wantCNY, c)
+	}
+}
+
 func TestCheckCacheGate_PerAgentPerTask(t *testing.T) {
 	tasks := []TaskSpec{
 		{ID: "t-cache-a", Metrics: MetricsSpec{RequireCacheGate: true}},
@@ -72,10 +100,15 @@ func TestCheckCacheGate_PerAgentPerTask(t *testing.T) {
 		{ID: "t-no-cache", Metrics: MetricsSpec{RequireCacheGate: false}},
 	}
 	results := []RunResult{
-		// agent X: A passes (high hit), B fails (low hit). Aggregating would mask B.
-		{Agent: "X", Task: "t-cache-a", UsageParsed: true, CacheHits: 9700, CacheMisses: 300},
-		{Agent: "X", Task: "t-cache-b", UsageParsed: true, CacheHits: 100, CacheMisses: 9900},
-		{Agent: "X", Task: "t-no-cache", UsageParsed: true, CacheHits: 50, CacheMisses: 50},
+		// agent X: A passes (warm turn 97% hit), B fails (warm turn 1% hit).
+		// Turn 1 is the cold start (excluded from post-warm). Aggregating
+		// across tasks would mask B.
+		{Agent: "X", Task: "t-cache-a", UsageParsed: true,
+			Trace: traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 9700, 300}})},
+		{Agent: "X", Task: "t-cache-b", UsageParsed: true,
+			Trace: traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 100, 9900}})},
+		{Agent: "X", Task: "t-no-cache", UsageParsed: true,
+			Trace: traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 50, 50}})},
 	}
 	gates := checkCacheGate(results, tasks)
 	if _, ok := gates["X"]["t-no-cache"]; ok {
@@ -83,21 +116,114 @@ func TestCheckCacheGate_PerAgentPerTask(t *testing.T) {
 	}
 	gA := gates["X"]["t-cache-a"]
 	if !gA.Passed {
-		t.Fatalf("t-cache-a should pass at 97%% hit; gate=%+v", gA)
+		t.Fatalf("t-cache-a should pass at 97%% post-warm hit; gate=%+v", gA)
 	}
 	gB := gates["X"]["t-cache-b"]
 	if gB.Passed {
-		t.Fatalf("t-cache-b should fail at 1%% hit; gate=%+v", gB)
+		t.Fatalf("t-cache-b should fail at 1%% post-warm hit; gate=%+v", gB)
 	}
 }
 
-func TestCheckCacheGate_NoUsageParsedFails(t *testing.T) {
+// TestCheckCacheGate_NoTraceFailsClosed is the core review requirement:
+// a task that requires the gate but produced no trace must FAIL, not be
+// reported as N/A and pass.
+func TestCheckCacheGate_NoTraceFailsClosed(t *testing.T) {
 	tasks := []TaskSpec{{ID: "t1", Metrics: MetricsSpec{RequireCacheGate: true}}}
-	results := []RunResult{{Agent: "Y", Task: "t1", UsageParsed: false}}
+	results := []RunResult{{Agent: "Y", Task: "t1", UsageParsed: true, Trace: nil}}
 	gates := checkCacheGate(results, tasks)
 	g := gates["Y"]["t1"]
-	if g.Passed || g.UsageParsedOK {
-		t.Fatalf("missing usage must fail the gate; gate=%+v", g)
+	if g.Passed || g.TraceFoundOK {
+		t.Fatalf("missing trace must fail the gate closed; gate=%+v", g)
+	}
+}
+
+// TestCheckCacheGate_DriftFails verifies a blocked drift event fails the gate
+// even when the post-warm hit rate is perfect.
+func TestCheckCacheGate_DriftFails(t *testing.T) {
+	tasks := []TaskSpec{{ID: "t1", Metrics: MetricsSpec{RequireCacheGate: true}}}
+	tr := traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 1000, 0}})
+	tr.DriftBlocked = 1
+	results := []RunResult{{Agent: "Z", Task: "t1", UsageParsed: true, Trace: tr}}
+	g := checkCacheGate(results, tasks)["Z"]["t1"]
+	if g.Passed || g.UnauthorizedDriftOK {
+		t.Fatalf("unauthorized drift must fail the gate; gate=%+v", g)
+	}
+}
+
+// TestCheckCacheGate_UnstablePrefixFails verifies that two distinct prefix
+// hashes within one epoch fail the gate.
+func TestCheckCacheGate_UnstablePrefixFails(t *testing.T) {
+	tasks := []TaskSpec{{ID: "t1", Metrics: MetricsSpec{RequireCacheGate: true}}}
+	tr := &AgentTrace{
+		Found:       true,
+		UsageTurns:  2,
+		epochHashes: map[string]map[string]bool{"e1": {"h1": true, "h2": true}},
+		epochUsage:  map[string][]usageTurn{"e1": {{1, 0, 1000}, {2, 1000, 0}}},
+	}
+	results := []RunResult{{Agent: "Q", Task: "t1", UsageParsed: true, Trace: tr}}
+	g := checkCacheGate(results, tasks)["Q"]["t1"]
+	if g.Passed || g.PrefixStableOK {
+		t.Fatalf("mid-epoch prefix drift must fail the gate; gate=%+v", g)
+	}
+}
+
+// TestParseAgentTrace round-trips the exact JSONL shape emitted by the
+// agent's TraceSink (internal/agent/trace.go) and checks derived metrics.
+func TestParseAgentTrace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "t.agent.jsonl")
+	lines := []string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"H","tools_hash":"T","reason":"session_start"}`,
+		`{"type":"epoch.frozen","epoch_id":"e1"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","tools_hash":"T"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":50,"cost_cny":0.001}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","tools_hash":"T"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":980,"cache_miss_tokens":20,"output_tokens":40,"cost_cny":0.0005}`,
+		`{"type":"compaction","epoch_id":"e1","kind":"semantic","static_prefix_hash":"H","static_prefix_hash_changed":false,"summary_cost_cny":0.002}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := parseAgentTrace(path)
+	if err != nil {
+		t.Fatalf("parseAgentTrace: %v", err)
+	}
+	if !tr.Found {
+		t.Fatal("trace should be Found")
+	}
+	if tr.UsageTurns != 2 {
+		t.Errorf("UsageTurns = %d, want 2", tr.UsageTurns)
+	}
+	if tr.DriftBlocked != 0 {
+		t.Errorf("DriftBlocked = %d, want 0", tr.DriftBlocked)
+	}
+	if tr.CompactionUnstable != 0 {
+		t.Errorf("CompactionUnstable = %d, want 0", tr.CompactionUnstable)
+	}
+	if got := tr.unstableEpochs(); got != 0 {
+		t.Errorf("unstableEpochs = %d, want 0", got)
+	}
+	rate, eligible := tr.postWarmHitRate()
+	if eligible != 1 {
+		t.Errorf("eligible warm turns = %d, want 1", eligible)
+	}
+	if rate < 0.97 { // turn 2: 980/1000 = 0.98
+		t.Errorf("post-warm hit rate = %.3f, want >= 0.97", rate)
+	}
+
+	// And the gate built from it passes.
+	g := evalCacheGate(RunResult{Agent: "a", Task: "t", Trace: tr})
+	if !g.Passed {
+		t.Errorf("gate from healthy trace should pass; gate=%+v", g)
+	}
+}
+
+// TestParseAgentTrace_MissingFile reports not-found so the gate fails closed.
+func TestParseAgentTrace_MissingFile(t *testing.T) {
+	_, err := parseAgentTrace(filepath.Join(t.TempDir(), "nope.jsonl"))
+	if err == nil {
+		t.Fatal("expected error for missing trace file")
 	}
 }
 

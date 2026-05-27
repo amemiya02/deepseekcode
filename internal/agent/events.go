@@ -195,9 +195,10 @@ func (EventRepair) isAgentEvent() {}
 
 // EventEpochCreated signals that a new PrefixEpoch was created.
 type EventEpochCreated struct {
-	EpochID         string
+	EpochID          string
 	StaticPrefixHash string
-	Reason          string
+	ToolsHash        string
+	Reason           string
 }
 
 // EventEpochFrozen signals that the current PrefixEpoch was frozen
@@ -219,6 +220,7 @@ type EventEpochSwitched struct {
 	OldEpochID       string
 	NewEpochID       string
 	StaticPrefixHash string
+	ToolsHash        string
 	Reason           string
 }
 

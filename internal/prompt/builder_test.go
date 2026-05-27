@@ -1,7 +1,6 @@
 package prompt
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -85,9 +84,9 @@ func lastN(s string, n int) string {
 
 func TestBuildSkillsBeforeBoundary(t *testing.T) {
 	out := (&SystemPromptBuilder{
-		StaticBase: "X",
-		Skills:     []Skill{{Name: "pdf", Description: "edit PDFs", Path: "/p/pdf/SKILL.md"}},
-		Project:    &ProjectContext{CWD: "/a"},
+		StaticBase:     "X",
+		SkillDirectory: "pdf | edit PDFs | direct | a1b2c3d4e5f6 | read_file\n",
+		Project:        &ProjectContext{CWD: "/a"},
 	}).Build()
 	skillsIdx := strings.Index(out, "## Skills")
 	boundaryIdx := strings.Index(out, DynamicContextBoundary)
@@ -100,6 +99,11 @@ func TestBuildSkillsBeforeBoundary(t *testing.T) {
 	if skillsIdx >= boundaryIdx {
 		t.Errorf("## Skills at %d is not before boundary at %d", skillsIdx, boundaryIdx)
 	}
+	// The version_hash carried by the directory must land in the static
+	// prefix — that is the whole point of rendering IndexText() here.
+	if !strings.Contains(out[:boundaryIdx], "a1b2c3d4e5f6") {
+		t.Error("version_hash from the skill directory missing from the static prefix")
+	}
 }
 
 func TestBuildOmitsSkillsWhenEmpty(t *testing.T) {
@@ -109,56 +113,27 @@ func TestBuildOmitsSkillsWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestRenderSkillsBlockEmpty(t *testing.T) {
-	if got := RenderSkillsBlock(nil); got != "" {
-		t.Errorf("nil skills: got %q, want empty", got)
+func TestRenderSkillDirectoryEmpty(t *testing.T) {
+	if got := renderSkillDirectory(""); got != "" {
+		t.Errorf("empty directory: got %q, want empty", got)
 	}
-	if got := RenderSkillsBlock([]Skill{}); got != "" {
-		t.Errorf("empty skills: got %q, want empty", got)
+	if got := renderSkillDirectory("\n\n"); got != "" {
+		t.Errorf("whitespace-only directory: got %q, want empty", got)
 	}
 }
 
-func TestRenderSkillsBlockBasic(t *testing.T) {
-	got := RenderSkillsBlock([]Skill{
-		{Name: "pdf", Description: "edit PDFs", Path: "/p/.deepseek/skills/pdf/SKILL.md"},
-	})
+func TestRenderSkillDirectoryVerbatim(t *testing.T) {
+	dir := "pdf | edit PDFs | direct | abc123abc123 | read_file\ngit | git ops | subagent | def456def456 | bash"
+	got := renderSkillDirectory(dir)
 	if !strings.Contains(got, "## Skills") {
 		t.Error("missing ## Skills heading")
 	}
-	if !strings.Contains(got, "pdf: edit PDFs") {
-		t.Error("missing skill line with description")
+	// The directory text is rendered verbatim, including version hashes.
+	if !strings.Contains(got, dir) {
+		t.Errorf("directory not rendered verbatim; got: %s", got)
 	}
-	if strings.Contains(got, "file:") {
-		t.Error("skill prefix should not include file path")
-	}
-}
-
-func TestRenderSkillsBlockNoDescription(t *testing.T) {
-	got := RenderSkillsBlock([]Skill{
-		{Name: "bare", Path: "/x/SKILL.md"},
-	})
-	if !strings.Contains(got, "- bare\n") {
-		t.Errorf("missing bare skill line; got: %s", got)
-	}
-	// The static prefix must never carry a local absolute path.
-	if strings.Contains(got, "/x/SKILL.md") || strings.Contains(got, "path:") {
+	// A stable directory never leaks a local path or a body.
+	if strings.Contains(got, "/") && strings.Contains(got, "SKILL.md") {
 		t.Errorf("skills block leaked a local path; got: %s", got)
-	}
-}
-
-func TestRenderSkillsBlockTruncation(t *testing.T) {
-	skills := make([]Skill, 200)
-	for i := range skills {
-		skills[i] = Skill{
-			Name:        fmt.Sprintf("skill-%03d", i),
-			Description: "a moderately long description that adds up across many skills to exceed the block cap",
-		}
-	}
-	got := RenderSkillsBlock(skills)
-	if !strings.Contains(got, "more skills omitted") {
-		t.Error("expected truncation with 200 skills")
-	}
-	if len(got) > 4200 {
-		t.Errorf("block too long: %d chars", len(got))
 	}
 }

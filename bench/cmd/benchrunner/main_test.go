@@ -179,7 +179,7 @@ func TestParseAgentTrace(t *testing.T) {
 		`{"type":"usage","turn":1,"epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":50,"cost_cny":0.001}`,
 		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","tools_hash":"T"}`,
 		`{"type":"usage","turn":2,"epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":980,"cache_miss_tokens":20,"output_tokens":40,"cost_cny":0.0005}`,
-		`{"type":"compaction","epoch_id":"e1","kind":"semantic","static_prefix_hash":"H","static_prefix_hash_changed":false,"summary_cost_cny":0.002}`,
+		`{"type":"compaction","epoch_id":"e1","kind":"semantic","static_prefix_hash":"H","before_static_prefix_hash":"P","after_static_prefix_hash":"P","summary_cost_cny":0.002}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -212,8 +212,18 @@ func TestParseAgentTrace(t *testing.T) {
 		t.Errorf("post-warm hit rate = %.3f, want >= 0.97", rate)
 	}
 
+	// Compaction was measured stable (before == after) and the integrity
+	// counters are clean.
+	if tr.CompactionRecords != 1 || tr.CompactionUnstable != 0 {
+		t.Errorf("compaction records=%d unstable=%d, want 1/0", tr.CompactionRecords, tr.CompactionUnstable)
+	}
+	if tr.ParseErrors != 0 || tr.UsageMissingEpoch != 0 || tr.SnapshotMissingHash != 0 ||
+		tr.UsageWithoutSnapshot != 0 || tr.CompactionMissingHash != 0 {
+		t.Errorf("expected clean integrity counters, got %+v", tr)
+	}
+
 	// And the gate built from it passes.
-	g := evalCacheGate(RunResult{Agent: "a", Task: "t", Trace: tr})
+	g := evalCacheGate(RunResult{Agent: "a", Task: "t", Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
 	if !g.Passed {
 		t.Errorf("gate from healthy trace should pass; gate=%+v", g)
 	}
@@ -224,6 +234,160 @@ func TestParseAgentTrace_MissingFile(t *testing.T) {
 	_, err := parseAgentTrace(filepath.Join(t.TempDir(), "nope.jsonl"))
 	if err == nil {
 		t.Fatal("expected error for missing trace file")
+	}
+}
+
+// writeTrace writes JSONL lines to a temp file and parses them.
+func parseTraceLines(t *testing.T, lines ...string) *AgentTrace {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "t.agent.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := parseAgentTrace(path)
+	if err != nil {
+		t.Fatalf("parseAgentTrace: %v", err)
+	}
+	return tr
+}
+
+// TestCacheGate_MalformedJSONLFailsClosed: a stray non-JSON line in an
+// otherwise-healthy trace fails the enforced gate instead of being tolerated.
+func TestCacheGate_MalformedJSONLFailsClosed(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`this is not json`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0}`,
+	)
+	if tr.ParseErrors != 1 {
+		t.Fatalf("ParseErrors = %d, want 1", tr.ParseErrors)
+	}
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.Passed || g.TraceIntegrityOK {
+		t.Fatalf("malformed JSONL must fail the gate closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_UsageWithoutSnapshotFailsClosed: usage whose epoch never
+// emitted a prefix.snapshot cannot be tied to a stable prefix.
+func TestCacheGate_UsageWithoutSnapshotFailsClosed(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0}`,
+	)
+	if tr.UsageWithoutSnapshot != 2 {
+		t.Fatalf("UsageWithoutSnapshot = %d, want 2", tr.UsageWithoutSnapshot)
+	}
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.Passed || g.TraceIntegrityOK {
+		t.Fatalf("usage-without-snapshot must fail the gate closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_EmptyEpochUsageFailsClosed: a usage record with no epoch_id
+// is an integrity failure.
+func TestCacheGate_EmptyEpochUsageFailsClosed(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":1,"cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+	)
+	if tr.UsageMissingEpoch != 1 {
+		t.Fatalf("UsageMissingEpoch = %d, want 1", tr.UsageMissingEpoch)
+	}
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.Passed || g.TraceIntegrityOK {
+		t.Fatalf("empty-epoch usage must fail the gate closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_CompactionMovedPrefixFails: a compaction whose before/after
+// hashes differ means the prefix moved — measured, not asserted.
+func TestCacheGate_CompactionMovedPrefixFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0}`,
+		`{"type":"compaction","epoch_id":"e1","kind":"semantic","before_static_prefix_hash":"P1","after_static_prefix_hash":"P2"}`,
+	)
+	if tr.CompactionUnstable != 1 {
+		t.Fatalf("CompactionUnstable = %d, want 1", tr.CompactionUnstable)
+	}
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.Passed || g.CompactionStableOK {
+		t.Fatalf("compaction that moved the prefix must fail the gate; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_CompactionMissingHashFails: a compaction record without a
+// before/after hash is incomplete instrumentation and fails closed.
+func TestCacheGate_CompactionMissingHashFails(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0}`,
+		`{"type":"compaction","epoch_id":"e1","kind":"semantic"}`,
+	)
+	if tr.CompactionMissingHash != 1 {
+		t.Fatalf("CompactionMissingHash = %d, want 1", tr.CompactionMissingHash)
+	}
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.Passed || g.TraceIntegrityOK {
+		t.Fatalf("compaction missing before/after hash must fail closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_SubagentIsolationRequiresChildTrace: a task that requires
+// subagent isolation must fail closed when the trace has no child epoch,
+// rather than reporting a hardcoded ✅.
+func TestCacheGate_SubagentIsolationRequiresChildTrace(t *testing.T) {
+	tr := traceWith("e1", "h1", []usageTurn{{1, 0, 1000}, {2, 1000, 0}})
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if g.ParentChildEvaluated {
+		t.Error("ParentChild must be reported as not evaluated (no child epoch)")
+	}
+	if g.ParentChildOK || g.Passed {
+		t.Fatalf("subagent-isolation task with no child trace must fail closed; gate=%+v", g)
+	}
+}
+
+// TestCacheGate_ChildEpochEvaluated: when a child (subagent) epoch is present,
+// pollution is actually evaluated rather than N/A.
+func TestCacheGate_ChildEpochEvaluated(t *testing.T) {
+	tr := parseTraceLines(t,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H","agent_role":"root"}`,
+		`{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"agent_role":"root"}`,
+		`{"type":"prefix.snapshot","turn":1,"epoch_id":"c1","static_prefix_hash":"CH","agent_role":"subagent","parent_epoch_id":"e1"}`,
+	)
+	if tr.ChildEpochs != 1 {
+		t.Fatalf("ChildEpochs = %d, want 1", tr.ChildEpochs)
+	}
+	g := evalCacheGate(RunResult{Trace: tr},
+		TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true, RequireSubagentIsolation: true}})
+	if !g.ParentChildEvaluated {
+		t.Error("ParentChild must be evaluated when a child epoch is present")
+	}
+}
+
+// TestCacheGate_InsufficientPostWarmFails: a cache-gated task whose run never
+// produced a warm turn must fail, not pass on N/A.
+func TestCacheGate_InsufficientPostWarmFails(t *testing.T) {
+	// Single (cold-only) turn → 0 warm turns.
+	tr := traceWith("e1", "h1", []usageTurn{{1, 0, 1000}})
+	g := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: true}})
+	if g.PostWarmHitRateOK || g.Passed {
+		t.Fatalf("cache-gated task with no warm turn must fail; gate=%+v", g)
+	}
+	// A non-cache-gated task with the same trace is not penalized for it.
+	g2 := evalCacheGate(RunResult{Trace: tr}, TaskSpec{Metrics: MetricsSpec{RequireCacheGate: false}})
+	if !g2.PostWarmHitRateOK {
+		t.Errorf("non-cache-gated task should not require warm turns; gate=%+v", g2)
 	}
 }
 

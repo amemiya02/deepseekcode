@@ -13,3 +13,9 @@ success:
     - no_changes: true
 metrics:
   require_cache_gate: true
+  # This task's whole point is parent/subagent cache isolation. The gate
+  # must FAIL closed unless the trace actually contains a child (subagent)
+  # epoch to judge — no hardcoded ✅. Until cross-process child-trace
+  # emission is wired, this task reports the pollution dimension as N/A and
+  # fails the gate rather than fake a pass.
+  require_subagent_isolation: true

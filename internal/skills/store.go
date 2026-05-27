@@ -110,6 +110,99 @@ func Load(roots []string) (*Store, error) {
 	return &Store{skills: all, byName: byName}, nil
 }
 
+// scanDirs are the cross-tool skill directories scanned relative to each
+// root, in priority order. Mirrors the set the prompt builder used before
+// skill discovery was unified into this package, so model-visible skills do
+// not shrink when the dual loader is removed.
+var scanDirs = []string{
+	".deepseek/skills",
+	"skills",
+	".opencode/skills",
+	".claude/skills",
+	".agents/skills",
+}
+
+const maxScanDepth = 8
+
+// LoadScan is the single canonical skill loader. It walks the cross-tool
+// skill directories under cwd (then home, if different) recursively,
+// stopping descent at the first SKILL.md in any subtree, and returns a
+// deterministic Store. The same Store feeds the prompt's stable skill
+// directory (PromptIndex), the epoch hash (VersionHash), and skill_read
+// (Body) — so the model-visible capability list and the cache-epoch hash
+// are computed from one source and can never diverge.
+//
+// Unlike Load, LoadScan keeps skills whose description is empty: the prompt
+// previously listed name-only skills, and dropping them here would silently
+// shrink the model-visible directory.
+func LoadScan(cwd, home string) (*Store, error) {
+	if cwd == "" {
+		return nil, fmt.Errorf("LoadScan: empty cwd")
+	}
+	roots := []string{cwd}
+	if home != "" && home != cwd {
+		roots = append(roots, home)
+	}
+
+	seen := make(map[string]bool)
+	var all []Skill
+	for _, root := range roots {
+		for _, rel := range scanDirs {
+			walkScan(filepath.Join(root, rel), 0, seen, &all)
+		}
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Name != all[j].Name {
+			return all[i].Name < all[j].Name
+		}
+		return all[i].Scope < all[j].Scope
+	})
+	byName := make(map[string]int, len(all))
+	for i, s := range all {
+		byName[s.Name] = i
+	}
+	return &Store{skills: all, byName: byName}, nil
+}
+
+// walkScan implements the "stop at SKILL.md, dedupe by name, skip hidden,
+// bounded depth" discovery contract shared with the old prompt loader.
+func walkScan(dir string, depth int, seen map[string]bool, out *[]Skill) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // missing or unreadable → skip
+	}
+	for _, e := range entries {
+		if e.Name() == "SKILL.md" && !e.IsDir() {
+			sk, err := parseSkillFile(filepath.Join(dir, "SKILL.md"), filepath.Base(dir))
+			if err != nil {
+				return // malformed skill dir — don't drill further
+			}
+			sk.Scope = filepath.Base(dir)
+			if !seen[sk.Name] {
+				seen[sk.Name] = true
+				*out = append(*out, sk)
+			}
+			return // SKILL.md found → stop descending this subtree
+		}
+	}
+	if depth >= maxScanDepth {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name()[0] == '.' {
+			continue // skip files and hidden dirs at every level
+		}
+		walkScan(filepath.Join(dir, e.Name()), depth+1, seen, out)
+	}
+}
+
+// PromptIndex returns the canonical stable skill directory rendered into the
+// model-visible static prefix. It is exactly IndexText(): the same bytes that
+// feed VersionHash(), so a body edit moves the prefix the model sees and the
+// epoch hash in lock-step.
+func (s *Store) PromptIndex() string { return s.IndexText() }
+
 // List returns all indexed skills.
 func (s *Store) List() []Skill {
 	return s.skills

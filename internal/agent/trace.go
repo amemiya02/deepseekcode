@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -16,6 +17,16 @@ import (
 type traceRecord struct {
 	Type string `json:"type"`
 	Turn *int   `json:"turn,omitempty"`
+
+	// run_id/agent_role/parent_epoch_id identify which agent emitted the
+	// record. The root one-shot stamps agent_role="root" with no parent; a
+	// subagent (once child-trace emission is wired) stamps "subagent" plus
+	// the parent epoch it ran under. The benchmark uses these to tell a
+	// child epoch from the root epoch when judging parent/subagent cache
+	// pollution — instead of hardcoding a pass.
+	RunID         string `json:"run_id,omitempty"`
+	AgentRole     string `json:"agent_role,omitempty"`
+	ParentEpochID string `json:"parent_epoch_id,omitempty"`
 
 	EpochID          string `json:"epoch_id,omitempty"`
 	OldEpochID       string `json:"old_epoch_id,omitempty"`
@@ -35,9 +46,12 @@ type traceRecord struct {
 	Description string `json:"description,omitempty"`
 	Which       string `json:"which,omitempty"`
 
-	// compaction
-	StaticPrefixHashChanged *bool    `json:"static_prefix_hash_changed,omitempty"`
-	SummaryCostCNY          *float64 `json:"summary_cost_cny,omitempty"`
+	// compaction — the measured static-prefix fingerprints before and after
+	// compaction. The benchmark compares them itself; there is no hardcoded
+	// "changed" boolean. Equal means compaction reused the frozen prefix.
+	BeforeStaticPrefixHash string   `json:"before_static_prefix_hash,omitempty"`
+	AfterStaticPrefixHash  string   `json:"after_static_prefix_hash,omitempty"`
+	SummaryCostCNY         *float64 `json:"summary_cost_cny,omitempty"`
 }
 
 // TraceSink converts the agent's event stream into JSONL trace records.
@@ -52,6 +66,8 @@ type TraceSink struct {
 	mu    sync.Mutex
 	enc   *json.Encoder
 	model string
+	runID string
+	role  string
 
 	turn          int
 	curEpochID    string
@@ -60,12 +76,25 @@ type TraceSink struct {
 }
 
 // NewTraceSink builds a sink writing JSONL to w. model is used to price
-// usage records (cost_cny).
+// usage records (cost_cny). Every record is stamped with a per-run run_id and
+// agent_role="root" so the benchmark can distinguish the root epoch from any
+// subagent epochs when judging parent/subagent cache pollution.
 func NewTraceSink(w io.Writer, model string) *TraceSink {
-	return &TraceSink{enc: json.NewEncoder(w), model: model}
+	return &TraceSink{
+		enc:   json.NewEncoder(w),
+		model: model,
+		runID: fmt.Sprintf("run_%d", time.Now().UnixNano()),
+		role:  "root",
+	}
 }
 
 func (s *TraceSink) write(r traceRecord) {
+	if r.RunID == "" {
+		r.RunID = s.runID
+	}
+	if r.AgentRole == "" {
+		r.AgentRole = s.role
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = s.enc.Encode(r)
@@ -146,22 +175,25 @@ func (s *TraceSink) Handle(ev Event) {
 			Reason:          e.Reason.String(),
 		})
 	case EventSemanticCompaction:
-		// Compaction reuses the frozen epoch (FrozenSystem/FrozenTools), so
-		// the static prefix hash does not change. Record the live hash so
-		// the harness can cross-check against surrounding snapshots.
-		unchanged := false
+		// Emit the measured static-prefix fingerprints the agent computed for
+		// the frozen baseline (before) and for the request compaction actually
+		// fed the model (after). The harness compares them — there is no
+		// hardcoded "unchanged" claim. Equal hashes prove compaction reused
+		// the frozen prefix; a divergence (e.g. summarizing against the live,
+		// non-frozen prompt) fails the gate.
 		kind := "semantic"
 		if !e.UsedSemantic {
 			kind = "deterministic"
 		}
 		cost := e.SummaryCost
 		s.write(traceRecord{
-			Type:                    "compaction",
-			EpochID:                 s.curEpochID,
-			Kind:                    kind,
-			StaticPrefixHash:        s.curPrefixHash,
-			StaticPrefixHashChanged: &unchanged,
-			SummaryCostCNY:          &cost,
+			Type:                   "compaction",
+			EpochID:                s.curEpochID,
+			Kind:                   kind,
+			StaticPrefixHash:       s.curPrefixHash,
+			BeforeStaticPrefixHash: e.StaticPrefixHashBefore,
+			AfterStaticPrefixHash:  e.StaticPrefixHashAfter,
+			SummaryCostCNY:         &cost,
 		})
 	}
 }

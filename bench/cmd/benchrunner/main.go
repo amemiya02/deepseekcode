@@ -83,6 +83,17 @@ type DiffInvariant struct {
 // MetricsSpec defines metrics requirements.
 type MetricsSpec struct {
 	RequireCacheGate bool `yaml:"require_cache_gate"`
+
+	// MinPostWarmTurns is the minimum number of warm (non-cold-start) turns a
+	// cache-gated task must produce before its post-warm hit rate is trusted.
+	// Defaults to 1 for cache-gated tasks (see loadTaskSpecs): a task that
+	// requires the gate but never measured a cache hit must not pass on N/A.
+	MinPostWarmTurns int `yaml:"min_post_warm_turns"`
+
+	// RequireSubagentIsolation marks a task whose gate must prove parent/
+	// subagent cache isolation. When set, the gate fails closed unless the
+	// trace contains at least one child (subagent) epoch to evaluate.
+	RequireSubagentIsolation bool `yaml:"require_subagent_isolation"`
 }
 
 // TraceRecord is a single JSONL trace line.
@@ -155,7 +166,25 @@ type AgentTrace struct {
 	UsageTurns         int
 	DriftBlocked       int // count of drift.blocked records (unauthorized drift)
 	PendingChanges     int
-	CompactionUnstable int // compaction records that changed the static prefix
+	CompactionRecords  int // total compaction records seen
+	CompactionUnstable int // compaction records where before != after prefix hash
+
+	// Integrity counters. Any non-zero value fails an enforced gate closed:
+	// a malformed or incomplete trace cannot prove cache reliability.
+	ParseErrors           int // malformed JSONL lines
+	UsageMissingEpoch     int // usage records with an empty epoch_id
+	SnapshotMissingHash   int // prefix.snapshot records missing epoch_id or hash
+	UsageWithoutSnapshot  int // usage records whose epoch had no valid snapshot
+	CompactionMissingHash int // compaction records missing a before/after hash
+
+	// ChildEpochs counts epochs attributed to a subagent (agent_role other
+	// than ""/"root", or carrying a parent_epoch_id). Parent/subagent cache
+	// isolation can only be judged when at least one child epoch is present.
+	ChildEpochs int
+	// ParentChildPollution counts isolation violations: an epoch_id seen under
+	// both a root and a subagent role (a child reused the parent's epoch), or a
+	// child whose parent_epoch_id equals its own epoch_id (self-parented).
+	ParentChildPollution int
 
 	// epochHashes maps an epoch_id to the set of static_prefix_hash values
 	// seen in its prefix.snapshot records. A stable epoch has exactly one.
@@ -169,13 +198,16 @@ type usageTurn struct {
 }
 
 type traceLine struct {
-	Type                    string `json:"type"`
-	EpochID                 string `json:"epoch_id"`
-	StaticPrefixHash        string `json:"static_prefix_hash"`
-	Turn                    *int   `json:"turn"`
-	CacheHitTokens          *int   `json:"cache_hit_tokens"`
-	CacheMissTokens         *int   `json:"cache_miss_tokens"`
-	StaticPrefixHashChanged *bool  `json:"static_prefix_hash_changed"`
+	Type                   string `json:"type"`
+	EpochID                string `json:"epoch_id"`
+	StaticPrefixHash       string `json:"static_prefix_hash"`
+	Turn                   *int   `json:"turn"`
+	CacheHitTokens         *int   `json:"cache_hit_tokens"`
+	CacheMissTokens        *int   `json:"cache_miss_tokens"`
+	BeforeStaticPrefixHash string `json:"before_static_prefix_hash"`
+	AfterStaticPrefixHash  string `json:"after_static_prefix_hash"`
+	AgentRole              string `json:"agent_role"`
+	ParentEpochID          string `json:"parent_epoch_id"`
 }
 
 // parseAgentTrace reads a JSONL trace emitted by `dsc -p --trace-jsonl`.
@@ -191,6 +223,9 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 		epochHashes: map[string]map[string]bool{},
 		epochUsage:  map[string][]usageTurn{},
 	}
+	childEpochs := map[string]bool{}
+	epochRoles := map[string]map[string]bool{} // epoch_id -> set of roles seen
+	selfParented := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -198,18 +233,45 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 		}
 		var tl traceLine
 		if err := json.Unmarshal([]byte(line), &tl); err != nil {
-			continue // tolerate stray non-JSON lines
+			// A malformed line in an enforced trace is an integrity failure,
+			// not something to silently tolerate.
+			tr.ParseErrors++
+			continue
+		}
+		role := tl.AgentRole
+		if role == "" {
+			role = "root"
+		}
+		if tl.EpochID != "" {
+			if epochRoles[tl.EpochID] == nil {
+				epochRoles[tl.EpochID] = map[string]bool{}
+			}
+			epochRoles[tl.EpochID][role] = true
+			// A record attributed to a subagent marks its epoch as a child
+			// epoch, which enables real parent/child pollution evaluation.
+			if role != "root" || tl.ParentEpochID != "" {
+				childEpochs[tl.EpochID] = true
+			}
+			// A child whose parent epoch is itself is an isolation violation.
+			if tl.ParentEpochID == tl.EpochID && tl.ParentEpochID != "" {
+				selfParented++
+			}
 		}
 		switch tl.Type {
 		case "prefix.snapshot":
-			if tl.EpochID != "" && tl.StaticPrefixHash != "" {
-				if tr.epochHashes[tl.EpochID] == nil {
-					tr.epochHashes[tl.EpochID] = map[string]bool{}
-				}
-				tr.epochHashes[tl.EpochID][tl.StaticPrefixHash] = true
+			if tl.EpochID == "" || tl.StaticPrefixHash == "" {
+				tr.SnapshotMissingHash++
+				continue
 			}
+			if tr.epochHashes[tl.EpochID] == nil {
+				tr.epochHashes[tl.EpochID] = map[string]bool{}
+			}
+			tr.epochHashes[tl.EpochID][tl.StaticPrefixHash] = true
 		case "usage":
 			tr.UsageTurns++
+			if tl.EpochID == "" {
+				tr.UsageMissingEpoch++
+			}
 			hit, miss, turn := 0, 0, 0
 			if tl.CacheHitTokens != nil {
 				hit = *tl.CacheHitTokens
@@ -226,11 +288,34 @@ func parseAgentTrace(path string) (*AgentTrace, error) {
 		case "pending_change":
 			tr.PendingChanges++
 		case "compaction":
-			if tl.StaticPrefixHashChanged != nil && *tl.StaticPrefixHashChanged {
+			tr.CompactionRecords++
+			if tl.BeforeStaticPrefixHash == "" || tl.AfterStaticPrefixHash == "" {
+				tr.CompactionMissingHash++
+				continue
+			}
+			if tl.BeforeStaticPrefixHash != tl.AfterStaticPrefixHash {
 				tr.CompactionUnstable++
 			}
 		}
 	}
+
+	// A usage record whose epoch never produced a valid prefix.snapshot
+	// cannot be tied to a stable prefix — count those for the integrity gate.
+	for epoch, turns := range tr.epochUsage {
+		if len(tr.epochHashes[epoch]) == 0 {
+			tr.UsageWithoutSnapshot += len(turns)
+		}
+	}
+	tr.ChildEpochs = len(childEpochs)
+	// Pollution = self-parented children + epochs shared across root and a
+	// subagent role (a child that mutated the parent's epoch namespace).
+	pollution := selfParented
+	for _, roles := range epochRoles {
+		if roles["root"] && len(roles) > 1 {
+			pollution++
+		}
+	}
+	tr.ParentChildPollution = pollution
 	return tr, nil
 }
 
@@ -289,6 +374,12 @@ type CacheGateResult struct {
 	TraceFound   bool
 	TraceFoundOK bool
 
+	// TraceIntegrityOK is false when the trace was malformed or incomplete
+	// (parse errors, usage with no epoch_id, snapshots missing a hash, usage
+	// with no backing snapshot, or compaction missing a before/after hash).
+	// A failing integrity check fails the gate closed.
+	TraceIntegrityOK bool
+
 	// PrefixStable: every prefix.snapshot within an epoch shares the same
 	// static_prefix_hash.
 	PrefixStable   bool
@@ -297,13 +388,20 @@ type CacheGateResult struct {
 	PostWarmHitRate   float64
 	PostWarmHitRateOK bool
 	PostWarmEligible  bool // had >=1 warm (non-cold-start) turn
+	PostWarmTurns     int  // number of warm turns observed
+	MinPostWarmTurns  int  // required minimum (0 = not enforced)
 
 	UnauthorizedDrift   int // count of drift.blocked records
 	UnauthorizedDriftOK bool
 
-	CompactionStable   bool // no compaction record changed the static prefix
+	CompactionStable   bool // no compaction record moved the static prefix
 	CompactionStableOK bool
 
+	// ParentChildEvaluated is true only when the trace contained a child
+	// (subagent) epoch to judge. When false the dimension is N/A, not a pass:
+	// it never contributes a ✅, and a task that requires subagent isolation
+	// fails closed.
+	ParentChildEvaluated bool
 	ParentChildPollution int
 	ParentChildOK        bool
 
@@ -383,6 +481,9 @@ func loadTaskSpecs(dir string) ([]TaskSpec, error) {
 		}
 		if ts.TimeoutSec <= 0 {
 			ts.TimeoutSec = 300 // default 5 minutes
+		}
+		if ts.Metrics.RequireCacheGate && ts.Metrics.MinPostWarmTurns <= 0 {
+			ts.Metrics.MinPostWarmTurns = 1 // cache-gated tasks need a warm turn
 		}
 		tasks = append(tasks, ts)
 	}
@@ -776,7 +877,7 @@ func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string
 			continue
 		}
 
-		gate := evalCacheGate(r)
+		gate := evalCacheGate(r, ts)
 
 		if gates[r.Agent] == nil {
 			gates[r.Agent] = make(map[string]CacheGateResult)
@@ -786,8 +887,11 @@ func checkCacheGate(results []RunResult, tasks []TaskSpec) map[string]map[string
 	return gates
 }
 
-// evalCacheGate derives a single CacheGateResult from one run's trace.
-func evalCacheGate(r RunResult) CacheGateResult {
+// evalCacheGate derives a single CacheGateResult from one run's trace and the
+// task's metrics requirements. Every dimension is derived from real trace
+// evidence; missing or malformed evidence fails the gate closed rather than
+// passing on N/A.
+func evalCacheGate(r RunResult, ts TaskSpec) CacheGateResult {
 	gate := CacheGateResult{}
 
 	tr := r.Trace
@@ -802,6 +906,17 @@ func evalCacheGate(r RunResult) CacheGateResult {
 		return gate
 	}
 
+	// Integrity: a malformed or incomplete trace cannot prove anything.
+	gate.TraceIntegrityOK = tr.ParseErrors == 0 && tr.UsageMissingEpoch == 0 &&
+		tr.SnapshotMissingHash == 0 && tr.UsageWithoutSnapshot == 0 &&
+		tr.CompactionMissingHash == 0
+	if !gate.TraceIntegrityOK {
+		gate.Notes = append(gate.Notes, fmt.Sprintf(
+			"trace integrity failed: parse_errors=%d usage_missing_epoch=%d snapshot_missing_hash=%d usage_without_snapshot=%d compaction_missing_hash=%d",
+			tr.ParseErrors, tr.UsageMissingEpoch, tr.SnapshotMissingHash,
+			tr.UsageWithoutSnapshot, tr.CompactionMissingHash))
+	}
+
 	gate.UsageParsed = tr.UsageTurns > 0
 	gate.UsageParsedOK = gate.UsageParsed
 	if !gate.UsageParsed {
@@ -811,6 +926,8 @@ func evalCacheGate(r RunResult) CacheGateResult {
 	gate.UnauthorizedDrift = tr.DriftBlocked
 	gate.UnauthorizedDriftOK = tr.DriftBlocked == 0
 
+	// Compaction stability is now MEASURED: a compaction record is unstable
+	// when the agent's before/after static-prefix hashes differ.
 	gate.CompactionStable = tr.CompactionUnstable == 0
 	gate.CompactionStableOK = gate.CompactionStable
 
@@ -824,25 +941,45 @@ func evalCacheGate(r RunResult) CacheGateResult {
 
 	rate, eligible := tr.postWarmHitRate()
 	gate.PostWarmHitRate = rate
+	gate.PostWarmTurns = eligible
 	gate.PostWarmEligible = eligible > 0
-	if gate.PostWarmEligible {
+	gate.MinPostWarmTurns = ts.Metrics.MinPostWarmTurns
+	if gate.MinPostWarmTurns <= 0 && ts.Metrics.RequireCacheGate {
+		gate.MinPostWarmTurns = 1 // default for cache-gated tasks
+	}
+	switch {
+	case eligible >= gate.MinPostWarmTurns && gate.PostWarmEligible:
 		gate.PostWarmHitRateOK = rate >= 0.95
-	} else {
-		// Single-turn (cold-only) task: no warm turns to judge. Not a
-		// failure on its own — the other dimensions still gate.
+	case gate.MinPostWarmTurns > 0:
+		// A cache-gated task that never measured the required number of warm
+		// turns has NOT demonstrated cache reuse — fail, do not pass on N/A.
+		gate.PostWarmHitRateOK = false
+		gate.Notes = append(gate.Notes, fmt.Sprintf(
+			"insufficient post-warm turns (%d/%d) — cache hit rate not demonstrated",
+			eligible, gate.MinPostWarmTurns))
+	default:
+		// Not a cache-gated task: warm turns are not required.
 		gate.PostWarmHitRateOK = true
-		gate.Notes = append(gate.Notes, "no post-warm turns (cache hit rate not eligible)")
 	}
 
-	// Parent/subagent pollution: the one-shot trace is a single process; a
-	// child epoch cannot mutate the parent epoch by construction, so this
-	// is 0 here. Subagent-isolation evidence belongs to the subagent task's
-	// own trace once child traces are wired.
-	gate.ParentChildPollution = 0
-	gate.ParentChildOK = true
+	// Parent/subagent pollution. Only evaluable when the trace contains a
+	// child (subagent) epoch. A single-process root trace has none, so the
+	// dimension is N/A — it never contributes a ✅. A task that requires
+	// subagent isolation fails closed when there is no child trace to judge.
+	gate.ParentChildEvaluated = tr.ChildEpochs > 0
+	if gate.ParentChildEvaluated {
+		gate.ParentChildPollution = tr.ParentChildPollution
+		gate.ParentChildOK = gate.ParentChildPollution == 0
+	} else if ts.Metrics.RequireSubagentIsolation {
+		gate.ParentChildOK = false
+		gate.Notes = append(gate.Notes,
+			"no subagent/child epoch in trace — cannot prove parent/subagent isolation (fail closed)")
+	} else {
+		gate.ParentChildOK = true // not applicable
+	}
 
-	gate.Passed = gate.TraceFoundOK && gate.UsageParsedOK && gate.PrefixStableOK &&
-		gate.UnauthorizedDriftOK && gate.CompactionStableOK &&
+	gate.Passed = gate.TraceFoundOK && gate.TraceIntegrityOK && gate.UsageParsedOK &&
+		gate.PrefixStableOK && gate.UnauthorizedDriftOK && gate.CompactionStableOK &&
 		gate.PostWarmHitRateOK && gate.ParentChildOK
 
 	return gate
@@ -1108,7 +1245,12 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 			gate := taskGates[tID]
 
 			traceCell := "❌ missing"
-			if gate.TraceFound {
+			switch {
+			case !gate.TraceFound:
+				traceCell = "❌ missing"
+			case !gate.TraceIntegrityOK:
+				traceCell = "❌ malformed"
+			default:
 				traceCell = "✅ yes"
 			}
 			prefixCell := "—"
@@ -1118,14 +1260,24 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec,
 			pollCell := "—"
 			if gate.TraceFound {
 				prefixCell = boolMark(gate.PrefixStableOK)
-				if gate.PostWarmEligible {
+				switch {
+				case gate.PostWarmEligible:
 					hitCell = fmt.Sprintf("%.1f%% %s", gate.PostWarmHitRate*100, boolMark(gate.PostWarmHitRateOK))
-				} else {
+				case gate.MinPostWarmTurns > 0:
+					hitCell = fmt.Sprintf("n/a %s", boolMark(gate.PostWarmHitRateOK))
+				default:
 					hitCell = "n/a"
 				}
 				driftCell = fmt.Sprintf("%d %s", gate.UnauthorizedDrift, boolMark(gate.UnauthorizedDriftOK))
 				compCell = boolMark(gate.CompactionStableOK)
-				pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))
+				switch {
+				case gate.ParentChildEvaluated:
+					pollCell = fmt.Sprintf("%d %s", gate.ParentChildPollution, boolMark(gate.ParentChildOK))
+				case !gate.ParentChildOK:
+					pollCell = "n/a ❌" // required isolation, no child trace
+				default:
+					pollCell = "n/a"
+				}
 			}
 			verdictCell := "✅ PASS"
 			if !gate.Passed {

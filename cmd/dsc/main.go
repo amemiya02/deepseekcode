@@ -19,7 +19,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -316,9 +315,12 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
-	// Load skills once; shared between prompt builder and command table.
+	// Load skills once into the canonical store. The same store feeds the
+	// prompt's stable skill directory, the epoch skill-dir hash, and the
+	// skill_read dispatcher — one loader, so model-visible skills and the
+	// cache-epoch hash can never diverge.
 	home4skills, _ := os.UserHomeDir()
-	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
+	skillStore, _ := skillspkg.LoadScan(cwd, home4skills)
 	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
 	a.MCPRegistry = mcpReg
@@ -341,8 +343,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
-	a.PromptBuilder = newPromptBuilder(cwd, skills)
-	registerSkillRead(reg, skills)
+	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
+	registerSkillRead(reg, skillStore)
 
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
@@ -355,11 +357,6 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	applyToolTiersFromEnv(a)
 
-	skillStore, _ := skillspkg.Load([]string{
-		filepath.Join(cwd, ".deepseek/skills"),
-		filepath.Join(cwd, "skills"),
-		filepath.Join(home4skills, ".deepseek/skills"),
-	})
 	if skillStore != nil {
 		a.Skills = skillStore
 	}
@@ -525,16 +522,20 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	home, _ := os.UserHomeDir()
 	customCmds, _ := commands.Load(cwd, home)
 
-	// Promote skills as slash commands (user commands take priority).
-	for _, sk := range skills {
-		if _, taken := customCmds[sk.Name]; taken {
-			continue // user command takes priority
-		}
-		customCmds[sk.Name] = commands.Command{
-			Name:        sk.Name,
-			Description: sk.Description,
-			Template:    sk.Body,
-			Path:        sk.Path,
+	// Promote skills as slash commands (user commands take priority). The
+	// canonical store keeps bodies on disk, so load each template on demand.
+	if skillStore != nil {
+		for _, sk := range skillStore.List() {
+			if _, taken := customCmds[sk.Name]; taken {
+				continue // user command takes priority
+			}
+			body, _ := skillStore.Body(sk.Name)
+			customCmds[sk.Name] = commands.Command{
+				Name:        sk.Name,
+				Description: sk.Description,
+				Template:    body,
+				Path:        sk.Path,
+			}
 		}
 	}
 
@@ -699,9 +700,12 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
-	// Load skills once; shared between prompt builder and command table.
+	// Load skills once into the canonical store. The same store feeds the
+	// prompt's stable skill directory, the epoch skill-dir hash, and the
+	// skill_read dispatcher — one loader, so model-visible skills and the
+	// cache-epoch hash can never diverge.
 	home4skills, _ := os.UserHomeDir()
-	skills, _ := promptpkg.LoadSkills(cwd, home4skills)
+	skillStore, _ := skillspkg.LoadScan(cwd, home4skills)
 	a := agent.New(client, reg, pol, rt.Model)
 	defer a.Close()
 	a.MCPRegistry = mcpReg
@@ -724,8 +728,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
-	a.PromptBuilder = newPromptBuilder(cwd, skills)
-	registerSkillRead(reg, skills)
+	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
+	registerSkillRead(reg, skillStore)
 
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
@@ -738,11 +742,6 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	applyToolTiersFromEnv(a)
 
-	skillStore, _ := skillspkg.Load([]string{
-		filepath.Join(cwd, ".deepseek/skills"),
-		filepath.Join(cwd, "skills"),
-		filepath.Join(home4skills, ".deepseek/skills"),
-	})
 	if skillStore != nil {
 		a.Skills = skillStore
 	}
@@ -808,18 +807,22 @@ var validHookEvents = map[hooks.HookEvent]bool{
 
 func validHookEvent(e hooks.HookEvent) bool { return validHookEvents[e] }
 
-func newPromptBuilder(cwd string, skills []promptpkg.Skill) *promptpkg.SystemPromptBuilder {
+func newPromptBuilder(cwd string, store *skillspkg.Store) *promptpkg.SystemPromptBuilder {
 	if cwd == "" {
 		return nil
 	}
 	home, _ := os.UserHomeDir()
 	files, _ := promptpkg.LoadInstructionFiles(cwd, home)
 	project := promptpkg.DiscoverProjectContext(cwd)
+	skillDir := ""
+	if store != nil {
+		skillDir = store.PromptIndex()
+	}
 	return &promptpkg.SystemPromptBuilder{
-		StaticBase:   promptpkg.BasePromptV1,
-		Instructions: files,
-		Skills:       skills,
-		Project:      &project,
+		StaticBase:     promptpkg.BasePromptV1,
+		Instructions:   files,
+		SkillDirectory: skillDir,
+		Project:        &project,
 	}
 }
 
@@ -966,38 +969,18 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 	}
 }
 
-// promptSkillSource adapts the prompt builder's loaded skill list into a
-// tools.SkillSource so skill_read resolves exactly the skills shown in the
-// ## Skills directory — bodies are already in memory from LoadSkills.
-type promptSkillSource struct{ skills []promptpkg.Skill }
-
-func (p promptSkillSource) Body(name string) (string, bool) {
-	for _, s := range p.skills {
-		if s.Name == name {
-			return s.Body, true
-		}
-	}
-	return "", false
-}
-
-func (p promptSkillSource) Names() []string {
-	out := make([]string, 0, len(p.skills))
-	for _, s := range p.skills {
-		out = append(out, s.Name)
-	}
-	return out
-}
-
 // registerSkillRead installs the skill_read lazy-body dispatcher as a core
-// tool whenever a skill directory is present, so the model can always load
-// the full body of any skill it sees listed. The dispatcher schema is
-// fixed, so its presence does not destabilize the tool hash within a
-// session.
-func registerSkillRead(reg *tools.Registry, skills []promptpkg.Skill) {
-	if len(skills) == 0 {
+// tool whenever the canonical skill store is non-empty, so the model can
+// always load the full body of any skill it sees listed in the ## Skills
+// directory. The store is the same one that renders the directory and feeds
+// the epoch hash, so skill_read resolves exactly the skills the model sees.
+// The dispatcher schema is fixed, so its presence does not destabilize the
+// tool hash within a session.
+func registerSkillRead(reg *tools.Registry, store *skillspkg.Store) {
+	if store == nil || len(store.List()) == 0 {
 		return
 	}
-	reg.RegisterWithTier(tools.NewSkillReadTool(promptSkillSource{skills}), tools.TierCore)
+	reg.RegisterWithTier(tools.NewSkillReadTool(store), tools.TierCore)
 }
 
 func stdinIsPipe() bool {

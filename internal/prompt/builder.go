@@ -41,10 +41,18 @@ type SystemPromptBuilder struct {
 	// (DEEPSEEK.md, AGENTS.md, .deepseek/instructions.md). Session-once.
 	Instructions []InstructionFile
 
-	// Skills is the session-once list of discovered SKILL.md files.
-	// Rendered into the static prefix (before the dynamic boundary)
-	// so it stays cache-stable. nil or empty → no ## Skills section.
-	Skills []Skill
+	// SkillDirectory is the canonical stable skill directory text, exactly
+	// as produced by skills.Store.PromptIndex() / IndexText() — one line per
+	// skill in the form
+	//
+	//	name | short_description | run_mode | version_hash | allowed_tools
+	//
+	// It is rendered into the static prefix (before the dynamic boundary) so
+	// the model-visible bytes carry the body-derived version_hash. Because
+	// this is the same text that feeds the epoch's skill-dir hash, a skill
+	// body edit moves the prefix and the epoch hash together. Empty → no
+	// ## Skills section. Never contains local absolute paths or skill bodies.
+	SkillDirectory string
 
 	// Project carries the dynamic per-turn context (git status, date,
 	// os). nil disables the dynamic suffix entirely.
@@ -95,7 +103,7 @@ func (b *SystemPromptBuilder) Build() string {
 			fmt.Fprintf(&out, "\n[%s]\n%s\n", f.Path, f.Content)
 		}
 	}
-	out.WriteString(RenderSkillsBlock(b.Skills))
+	out.WriteString(renderSkillDirectory(b.SkillDirectory))
 	out.WriteString(DynamicContextBoundary)
 	if b.Project != nil {
 		out.WriteString(renderProject(*b.Project))
@@ -149,50 +157,28 @@ func renderProject(p ProjectContext) string {
 	return b.String()
 }
 
-const maxSkillsBlockChars = 4000
-
-// RenderSkillsBlock generates the "## Skills" section for the system prompt.
-// Empty slice returns "". Each skill is one line:
+// renderSkillDirectory wraps the canonical stable skill directory (from
+// skills.Store.PromptIndex()) with the "## Skills" header. Empty input
+// returns "" so no section is emitted.
 //
-//   - {name}: {description}
+// The directory text is rendered verbatim — it is the exact same bytes that
+// feed the epoch's skill-dir hash and skills.Store.VersionHash(), so the
+// model-visible prefix and the cache-epoch hash move together. Each line is
 //
-// Description is truncated to 200 chars. Total block capped at ~4000 chars;
-// overflow appends "... (N more skills omitted)".
+//	name | short_description | run_mode | version_hash | allowed_tools
 //
-// Local absolute paths are deliberately NOT rendered: the skills block is
-// part of the cache-stable static prefix, and an absolute path would both
-// make the prefix machine-specific and violate the cache-epoch rule that
-// the stable skill directory carry no local paths. The model loads a
-// skill body on demand with the skill_read tool, keyed by skill name.
-func RenderSkillsBlock(skills []Skill) string {
-	if len(skills) == 0 {
+// carrying the body-derived version_hash but never a skill body or a local
+// absolute path. The model loads a skill body on demand with skill_read.
+func renderSkillDirectory(dir string) string {
+	dir = strings.TrimRight(dir, "\n")
+	if dir == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("\n\n## Skills\n")
-	b.WriteString("(Load a skill's full instructions on demand with skill_read using its name.)\n")
-	total := 0
-	omitted := 0
-	for _, s := range skills {
-		desc := s.Description
-		if r := []rune(desc); len(r) > 200 {
-			desc = string(r[:200]) + "..."
-		}
-		var line string
-		if desc != "" {
-			line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
-		} else {
-			line = fmt.Sprintf("- %s\n", s.Name)
-		}
-		if total+len(line) > maxSkillsBlockChars {
-			omitted++
-			continue
-		}
-		b.WriteString(line)
-		total += len(line)
-	}
-	if omitted > 0 {
-		fmt.Fprintf(&b, "... (%d more skills omitted)\n", omitted)
-	}
+	b.WriteString("(Load a skill's full instructions on demand with skill_read using the skill name. " +
+		"Each line is: name | description | run_mode | version_hash | allowed_tools.)\n")
+	b.WriteString(dir)
+	b.WriteByte('\n')
 	return b.String()
 }

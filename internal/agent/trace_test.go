@@ -70,7 +70,11 @@ func TestTraceSinkRecordsDriftAndCompaction(t *testing.T) {
 
 	s.Handle(EventEpochCreated{EpochID: "e1", StaticPrefixHash: "h1", ToolsHash: "t1"})
 	s.Handle(EventDriftBlocked{EpochID: "e1", Which: "tools"})
-	s.Handle(EventSemanticCompaction{FromIdx: 0, ToIdx: 5, UsedSemantic: true, SummaryCost: 0.002})
+	// Stable compaction: the agent measured equal before/after prefix hashes.
+	s.Handle(EventSemanticCompaction{
+		FromIdx: 0, ToIdx: 5, UsedSemantic: true, SummaryCost: 0.002,
+		StaticPrefixHashBefore: "pfx", StaticPrefixHashAfter: "pfx",
+	})
 
 	recs := decodeTrace(t, buf.Bytes())
 
@@ -84,8 +88,14 @@ func TestTraceSinkRecordsDriftAndCompaction(t *testing.T) {
 			}
 		case "compaction":
 			sawCompaction = true
-			if changed, ok := r["static_prefix_hash_changed"].(bool); !ok || changed {
-				t.Errorf("compaction static_prefix_hash_changed = %v, want false", r["static_prefix_hash_changed"])
+			// The hardcoded boolean is gone; the record carries the measured
+			// before/after hashes for the harness to compare.
+			if _, ok := r["static_prefix_hash_changed"]; ok {
+				t.Error("compaction record must not carry a hardcoded static_prefix_hash_changed")
+			}
+			if r["before_static_prefix_hash"] != "pfx" || r["after_static_prefix_hash"] != "pfx" {
+				t.Errorf("compaction before/after = %v/%v, want pfx/pfx",
+					r["before_static_prefix_hash"], r["after_static_prefix_hash"])
 			}
 			if r["kind"] != "semantic" {
 				t.Errorf("compaction kind = %v, want semantic", r["kind"])
@@ -97,5 +107,26 @@ func TestTraceSinkRecordsDriftAndCompaction(t *testing.T) {
 	}
 	if !sawCompaction {
 		t.Error("expected a compaction record")
+	}
+}
+
+// TestTraceSinkStampsRunIDAndRole verifies every record carries the run_id
+// and agent_role used to attribute it to the root (vs a subagent) epoch.
+func TestTraceSinkStampsRunIDAndRole(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewTraceSink(&buf, "deepseek-v4-flash")
+	s.Handle(EventEpochCreated{EpochID: "e1", StaticPrefixHash: "h1", ToolsHash: "t1"})
+
+	recs := decodeTrace(t, buf.Bytes())
+	if len(recs) == 0 {
+		t.Fatal("no records emitted")
+	}
+	for _, r := range recs {
+		if r["agent_role"] != "root" {
+			t.Errorf("agent_role = %v, want root", r["agent_role"])
+		}
+		if rid, _ := r["run_id"].(string); rid == "" {
+			t.Error("run_id missing from record")
+		}
 	}
 }

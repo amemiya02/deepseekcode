@@ -250,11 +250,21 @@ type EventCompactionWarning struct {
 // deterministic fallback was used. SummaryCost is the cost of the
 // LLM call (0 when fallback). FallbackReason is set when the LLM
 // call failed and deterministic compaction was used instead.
+//
+// StaticPrefixHashBefore/After are the measured static-prefix fingerprints
+// (system + tools) of the frozen baseline and of the request compaction
+// actually fed the model. They are emitted into the trace so the benchmark
+// can verify compaction did not move the prefix — instead of the agent
+// asserting stability with a hardcoded boolean. When the freeze override is
+// intact they are equal; a regression that summarized against the live
+// (non-frozen) prompt makes them diverge and fails the gate.
 type EventSemanticCompaction struct {
-	FromIdx, ToIdx int
-	UsedSemantic   bool
-	SummaryCost    float64
-	FallbackReason string
+	FromIdx, ToIdx         int
+	UsedSemantic           bool
+	SummaryCost            float64
+	FallbackReason         string
+	StaticPrefixHashBefore string
+	StaticPrefixHashAfter  string
 }
 
 func (EventCompactionWarning) isAgentEvent()  {}

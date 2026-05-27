@@ -45,16 +45,37 @@ gap is the billed comparison run itself.
   `prefix.snapshot` / `epoch.frozen` / `pending_change` / `drift.blocked` /
   `usage` / `compaction` records. `benchrunner` reads that trace and computes
   the Cache Reliability gate from it (within-epoch prefix stability, drift
-  count, compaction stability, post-warm hit rate). Missing trace/fields now
-  **fail closed** for enforced agents instead of reporting `N/A`. Verified on
-  a live smoke run (real `cache_hit_tokens`/`cache_miss_tokens` from the API).
-- **Skill directory (was P1-3).** The stable skill directory is
-  `name | short_description | run_mode | version_hash | allowed_tools` with
-  `version_hash` derived from the skill **body**; `Diff` compares body
-  hashes; the static prefix no longer embeds local absolute paths; bodies
-  load on demand via the `skill_read` tool. A body-only edit flips the skill
-  version hash and becomes a pending change while the live epoch hash stays
-  stable (test: `TestSkillBodyChangeIsPendingNotLiveDrift`).
+  count, compaction stability, post-warm hit rate). Verified on a live smoke
+  run (real `cache_hit_tokens`/`cache_miss_tokens` from the API).
+- **Gate fails closed on malformed/incomplete trace.** `parseAgentTrace`
+  counts parse errors, `usage` with no `epoch_id`, `prefix.snapshot` missing a
+  hash, `usage` with no backing snapshot, and `compaction` missing a
+  before/after hash; any non-zero counter fails an enforced gate (tests:
+  `TestCacheGate_MalformedJSONLFailsClosed`,
+  `TestCacheGate_UsageWithoutSnapshotFailsClosed`,
+  `TestCacheGate_EmptyEpochUsageFailsClosed`).
+- **Skill directory in the model-visible prefix (was P0).** A single
+  canonical `skills.Store` (`skills.LoadScan`) feeds the prompt's stable skill
+  directory (`PromptIndex` → `IndexText`), the epoch skill-dir hash
+  (`VersionHash`), and the `skill_read` body source — one loader, so
+  model-visible skills and the cache-epoch hash cannot diverge. The directory
+  `name | short_description | run_mode | version_hash | allowed_tools` is
+  rendered into `SystemPromptBuilder` **before the dynamic boundary**, so a
+  body-only edit moves the actual request bytes, not just an internal hash
+  (test: `prompt.TestBuildPrefixReflectsSkillBodyEdit`). No local absolute
+  paths or bodies enter the prefix; bodies load on demand via `skill_read`.
+  The old `prompt.LoadSkills` dual loader was deleted.
+- **Compaction stability is measured, not asserted.** The agent computes the
+  static-prefix fingerprint of the frozen baseline and of the request
+  compaction actually fed the model, and emits both as
+  `before_static_prefix_hash`/`after_static_prefix_hash`. The harness compares
+  them — the hardcoded `static_prefix_hash_changed=false` is gone (tests:
+  `TestCacheGate_CompactionMovedPrefixFails`,
+  `TestCacheGate_CompactionMissingHashFails`).
+- **Post-warm minimum.** A cache-gated task must produce at least
+  `min_post_warm_turns` warm turns (default 1); one that never measured a warm
+  turn fails instead of passing on N/A (test:
+  `TestCacheGate_InsufficientPostWarmFails`).
 - **MCP + AgentProfile runtime (was P1-4).** Both the TUI and one-shot paths
   set `a.MCPRegistry` (one-shot now also connects MCP), so startup MCP schema
   feeds `mcp_schema_hash`. The epoch's `agent_profile_hash` comes from the
@@ -64,6 +85,15 @@ gap is the billed comparison run itself.
 
 **Blocked / not yet done**
 
+- **Parent/subagent isolation evidence (P1).** Traces now carry
+  `run_id`/`agent_role`/`parent_epoch_id`, and the harness evaluates
+  parent/subagent pollution **only when a child (subagent) epoch is present** —
+  otherwise the dimension is reported `N/A`, never a hardcoded ✅. A task that
+  sets `require_subagent_isolation: true` (`subagent-parallel`) **fails closed**
+  with no child trace. Cross-process child-trace emission from subagents is not
+  yet wired, so that task is expected to fail the gate until it is (tests:
+  `TestCacheGate_SubagentIsolationRequiresChildTrace`,
+  `TestCacheGate_ChildEpochEvaluated`).
 - **M1 / M5 real reports + Reasonix comparison (P0-2).** The harness can now
   run `current + optimized + reasonix` and produce a real gate, but a genuine
   billed matrix run has not been executed here, and a token-level Reasonix
@@ -490,15 +520,18 @@ Minimum record types:
 
 ```json
 {"type":"run.started","agent":"deepseekcode-current","task":"ctx-compaction"}
-{"type":"turn.started","turn":1,"epoch_id":"epoch-1","model":"deepseek-v4-flash"}
-{"type":"prefix.snapshot","epoch_id":"epoch-1","static_prefix_hash":"...","tools_hash":"..."}
-{"type":"usage","turn":1,"cache_hit_tokens":0,"cache_miss_tokens":12000,"output_tokens":800,"cost_cny":0.0123}
-{"type":"compaction","kind":"semantic","before_tokens":98000,"after_tokens":23000,"static_prefix_hash_changed":false}
+{"type":"prefix.snapshot","run_id":"run-1","agent_role":"root","epoch_id":"epoch-1","static_prefix_hash":"...","tools_hash":"..."}
+{"type":"usage","run_id":"run-1","agent_role":"root","turn":1,"epoch_id":"epoch-1","cache_hit_tokens":0,"cache_miss_tokens":12000,"output_tokens":800,"cost_cny":0.0123}
+{"type":"compaction","run_id":"run-1","agent_role":"root","epoch_id":"epoch-1","kind":"semantic","before_static_prefix_hash":"...","after_static_prefix_hash":"..."}
 {"type":"run.finished","success":true}
 ```
 
-Agents that cannot emit a field get `null`, but the report must show missing
-instrumentation as a limitation.
+Compaction stability is measured by comparing `before_static_prefix_hash`
+and `after_static_prefix_hash` (no hardcoded boolean). `run_id`/`agent_role`/
+`parent_epoch_id` attribute each record to the root or a subagent epoch.
+Agents that cannot emit a field get `null`, but for an **enforced** gate a
+missing or malformed field fails the gate closed — it is not a silent
+limitation.
 
 ## Scoring
 

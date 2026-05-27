@@ -154,23 +154,41 @@ deepseekcode agents emit a real epoch/usage/compaction/drift trace via
 per run). The Cache Reliability gate is computed entirely from this trace —
 there are no fabricated placeholders. Record types:
 
+Every record carries `run_id` and `agent_role` (`"root"` for the top-level
+agent; a subagent stamps `"subagent"` plus the `parent_epoch_id` it ran
+under) so the harness can attribute each epoch to the root or a child agent.
+
 ```json
-{"type":"prefix.snapshot","epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…","reason":"session_start"}
-{"type":"epoch.frozen","epoch_id":"epoch_…"}
-{"type":"prefix.snapshot","turn":1,"epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…"}
-{"type":"usage","turn":1,"epoch_id":"epoch_…","cache_hit_tokens":1152,"cache_miss_tokens":2951,"output_tokens":15,"cost_cny":0.0030}
-{"type":"pending_change","epoch_id":"epoch_…","kind":"skill_body_changed","description":"…"}
-{"type":"drift.blocked","epoch_id":"epoch_…","which":"tools"}
-{"type":"compaction","epoch_id":"epoch_…","kind":"semantic","static_prefix_hash_changed":false}
+{"type":"prefix.snapshot","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…","reason":"session_start"}
+{"type":"epoch.frozen","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…"}
+{"type":"prefix.snapshot","run_id":"run_…","agent_role":"root","turn":1,"epoch_id":"epoch_…","static_prefix_hash":"…","tools_hash":"…"}
+{"type":"usage","run_id":"run_…","agent_role":"root","turn":1,"epoch_id":"epoch_…","cache_hit_tokens":1152,"cache_miss_tokens":2951,"output_tokens":15,"cost_cny":0.0030}
+{"type":"pending_change","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","kind":"skill_body_changed","description":"…"}
+{"type":"drift.blocked","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","which":"tools"}
+{"type":"compaction","run_id":"run_…","agent_role":"root","epoch_id":"epoch_…","kind":"semantic","before_static_prefix_hash":"…","after_static_prefix_hash":"…"}
 ```
+
+Compaction stability is **measured, not asserted**: the agent computes the
+static-prefix fingerprint of the frozen baseline (`before_static_prefix_hash`)
+and of the request compaction actually fed the model (`after_…`). The harness
+compares the two — there is no hardcoded `static_prefix_hash_changed` boolean.
+Equal hashes prove compaction reused the frozen prefix.
 
 ### Fail-closed instrumentation
 
 There is no "N/A pass". If a task sets `require_cache_gate: true` and the
-agent produces **no** trace (or a trace with no usage/epoch fields), the gate
-**fails** for that task. For agents with `enforce_cache_gate: true` this also
-fails the CI exit code. External agents (e.g. Reasonix) that don't emit this
-trace will show a missing-trace gate row — reported, never enforced.
+agent produces **no** trace, the gate **fails** for that task. The gate also
+fails closed on a **malformed or incomplete** trace — any of:
+
+- a malformed (non-JSON) line,
+- a `usage` record with no `epoch_id`,
+- a `prefix.snapshot` missing its `epoch_id`/`static_prefix_hash`,
+- a `usage` record whose epoch produced no `prefix.snapshot`, or
+- a `compaction` record missing a `before`/`after` hash.
+
+For agents with `enforce_cache_gate: true` a failed gate also fails the CI
+exit code. External agents (e.g. Reasonix) that don't emit this trace show a
+missing-trace gate row — reported, never enforced.
 
 ### Markdown Reports
 
@@ -282,30 +300,37 @@ trace (`<task>.agent.jsonl`):
 
 | # | Criterion | Threshold | Trace source |
 |---|-----------|-----------|--------------|
-| 0 | Trace present with usage turns | required (fail-closed) | file exists + `usage` records |
+| 0 | Trace present **and well-formed** | required (fail-closed) | file exists + integrity counters all 0 |
 | 1 | Within-epoch prefix stability | 1 hash per epoch | `prefix.snapshot.static_prefix_hash` |
-| 2 | Post-warm cache hit rate | >= 95% on eligible tasks | `usage` records (excl. first/epoch) |
+| 2 | Post-warm cache hit rate | >= 95%, >= `min_post_warm_turns` warm turns | `usage` records (excl. first/epoch) |
 | 3 | Unauthorized drift count | 0 | `drift.blocked` records |
-| 4 | Compaction prefix hash stability | 0 changes | `compaction.static_prefix_hash_changed` |
-| 5 | Parent/subagent cache pollution | 0 | (single-process: 0; child traces TODO) |
+| 4 | Compaction prefix hash stability | `before` == `after` on every compaction | `compaction.before/after_static_prefix_hash` |
+| 5 | Parent/subagent cache pollution | 0, **N/A unless a child epoch exists** | `agent_role`/`parent_epoch_id` epochs |
 
 **Post-warm cache hit rate**: After the first turn warms the prompt
 cache, all subsequent turns must achieve >= 95% cache hit tokens /
-total prompt tokens. This verifies that PrefixEpoch is working
-correctly.
+total prompt tokens. A cache-gated task must produce at least
+`min_post_warm_turns` warm turns (default 1) — a task that requires the
+gate but never measured a warm turn **fails**, it does not pass on N/A.
 
 **Unauthorized drift**: The static prefix hash (system prompt + tool
 definitions) must not change between turns within a single epoch. Any
 change indicates a bug in prefix stability.
 
-**Parent/subagent cache pollution**: When a parent spawns a subagent,
-the subagent's system prompt must not corrupt the parent's cached
-prefix. Verified by comparing `static_prefix_hash` before and after
-subagent execution.
+**Parent/subagent cache pollution**: a child epoch must not reuse or
+mutate its parent's epoch. This is only **evaluable when the trace
+contains a child (subagent) epoch** (a record with `agent_role` other
+than `root`, or a `parent_epoch_id`). The single-process root trace has
+none, so the dimension is reported **N/A** — never a hardcoded ✅. A task
+that sets `require_subagent_isolation: true` (e.g. `subagent-parallel`)
+**fails closed** when no child epoch is present, since isolation cannot
+be proven. (Cross-process child-trace emission is not yet wired, so this
+task is expected to fail the gate until it is.)
 
-**Compaction prefix hash stability**: When compaction fires, the
-`static_prefix_hash` must remain unchanged. Compaction rewrites
-conversation history, not the system prompt.
+**Compaction prefix hash stability**: when compaction fires, the agent
+emits the measured static-prefix fingerprint before and after; the
+harness fails the gate if they differ. Compaction rewrites conversation
+history, not the system prompt, so the two must match.
 
 ### Agentic Engineering Score
 

@@ -411,12 +411,17 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 
 		if action == "compact" || action == "protect" {
 			systemPrompt := a.System
-			tools := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+			toolSpecs := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+			// Capture the frozen baseline (what the model has been receiving)
+			// as the authoritative "before" prefix, then apply the freeze
+			// override that the next request will also use.
+			beforeSystem, beforeTools := a.staticSystem(), toolSpecs
 			if epoch := a.epochMgr.CurrentEpoch(); epoch != nil && a.epochMgr.IsFrozen() {
+				beforeSystem, beforeTools = epoch.FrozenSystem, epoch.FrozenTools
 				systemPrompt = epoch.FrozenSystem
-				tools = epoch.FrozenTools
+				toolSpecs = epoch.FrozenTools
 			}
-			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, tools, a.SemanticCfg)
+			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, toolSpecs, a.SemanticCfg)
 			if res.Summary != "" {
 				if a.Persister != nil {
 					if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
@@ -432,11 +437,13 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					RemovedCount: res.RemovedCount,
 				})
 				a.bus.Publish(EventSemanticCompaction{
-					FromIdx:        res.FromIdx,
-					ToIdx:          res.ToIdx,
-					UsedSemantic:   res.UsedSemantic,
-					SummaryCost:    res.SummaryCost,
-					FallbackReason: res.FallbackReason,
+					FromIdx:                res.FromIdx,
+					ToIdx:                  res.ToIdx,
+					UsedSemantic:           res.UsedSemantic,
+					SummaryCost:            res.SummaryCost,
+					FallbackReason:         res.FallbackReason,
+					StaticPrefixHashBefore: staticPrefixHash(beforeSystem, beforeTools),
+					StaticPrefixHashAfter:  staticPrefixHash(staticPrefixOf(systemPrompt), toolSpecs),
 				})
 				if res.UsedSemantic && res.SummaryCost > 0 {
 					a.BudgetState.SpentCNY += res.SummaryCost
@@ -483,10 +490,26 @@ func stepContext(parent context.Context, timeout time.Duration) (context.Context
 // epoch's system hash; per-turn git/date context after the boundary is
 // excluded so it never counts as prefix drift.
 func (a *Agent) staticSystem() string {
-	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
-		return a.System[:i]
+	return staticPrefixOf(a.System)
+}
+
+// staticPrefixOf returns the cache-stable portion of a system prompt
+// (everything before the dynamic-context boundary). Operating on an arbitrary
+// string lets compaction measure the prefix of whatever prompt it actually
+// fed the model, not just a.System.
+func staticPrefixOf(system string) string {
+	if i := strings.Index(system, prompt.DynamicContextBoundary); i >= 0 {
+		return system[:i]
 	}
-	return a.System
+	return system
+}
+
+// staticPrefixHash fingerprints the static prefix (system + tools) the same
+// way the prefix monitor and epoch hashing do. Compaction emits a before/after
+// pair built with this so the benchmark can verify the prefix did not move,
+// rather than the agent asserting it with a hardcoded boolean.
+func staticPrefixHash(system string, toolSpecs []llm.Tool) string {
+	return llm.ComputeFingerprint(llm.PrefixInput{SystemPrompt: system, Tools: toolSpecs}).CombinedSHA256
 }
 
 // currentProfileID returns the active agent-profile name, or "default"

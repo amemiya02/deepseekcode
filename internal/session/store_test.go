@@ -183,13 +183,13 @@ func TestMigrateV1ToV2(t *testing.T) {
 		t.Errorf("backup file missing: %v", err)
 	}
 
-	// schema_version table should now report 2 as the highest applied.
+	// schema_version table should now report 3 as the highest applied.
 	var got int
 	if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&got); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if got != 2 {
-		t.Errorf("schema_version max: want 2, got %d", got)
+	if got != 3 {
+		t.Errorf("schema_version max: want 3, got %d", got)
 	}
 }
 

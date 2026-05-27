@@ -126,7 +126,10 @@ func TestE2EAsyncSubagent(t *testing.T) {
 				`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`,
 			)
 		} else {
-			http.Error(w, "unexpected", http.StatusInternalServerError)
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"content":"subagent result: found 3 items"}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`,
+			)
 		}
 	}))
 	defer srv.Close()

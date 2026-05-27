@@ -149,6 +149,11 @@ type Agent struct {
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	MCPRegistry *mcp.Registry
 
+	// ActiveTiers controls which tool tiers are sent to the model.
+	// Default: [TierCore, TierProfile]. The agent uses
+	// Tools.AsLLMToolsFiltered(ActiveTiers...) when building requests.
+	ActiveTiers []tools.ToolTier
+
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
@@ -172,6 +177,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		epochMgr:      NewEpochManager(),
 		System:        DefaultSystemPrompt,
 		MaxToolCalls:  200,
+		ActiveTiers:   []tools.ToolTier{tools.TierCore},
 		CompactionCfg:      DefaultCompactionConfig(),
 		SemanticCfg:        defaultSemanticCompactionConfig(),
 		MaxContextTokens:   MaxContextTokens,
@@ -386,7 +392,13 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	}
 
 	if action == "compact" || action == "protect" {
-		res := SemanticCompact(ctx, a.Messages, a.Client, a.System, a.Tools.AsLLMTools(), a.SemanticCfg)
+		systemPrompt := a.System
+		tools := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+		if epoch := a.epochMgr.CurrentEpoch(); epoch != nil && a.epochMgr.IsFrozen() {
+			systemPrompt = epoch.FrozenSystem
+			tools = epoch.FrozenTools
+		}
+		res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, tools, a.SemanticCfg)
 		if res.Summary != "" {
 			if a.Persister != nil {
 				if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
@@ -460,7 +472,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	req := llm.Request{
 		Model:    a.Model,
 		Messages: a.fullMessages(),
-		Tools:    a.Tools.AsLLMTools(),
+		Tools:    a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
 		Thinking: llm.ThinkingEnabled(thinking),
 	}
 
@@ -512,6 +524,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 				Description: ch.Description,
 			})
 		}
+	}
+
+	// CRITICAL-1: When the epoch is frozen, use the frozen snapshot
+	// for tools and system prompt. This guarantees cache-stable
+	// prefixes even when live tools/system drift between turns.
+	if a.epochMgr.IsFrozen() {
+		epoch = a.epochMgr.CurrentEpoch()
+		req.Tools = epoch.FrozenTools
+		req.Messages = a.fullMessagesWithFrozenSystem(epoch.FrozenSystem)
+		staticSys = epoch.FrozenSystem
 	}
 
 	expectedCacheMiss := a.epochMgr.ExpectedCacheMiss()
@@ -688,6 +710,23 @@ func (a *Agent) fullMessages() []llm.Message {
 	out = append(out, llm.Message{
 		Role:   "system",
 		Blocks: []llm.ContentBlock{llm.TextBlock{Text: a.System}},
+	})
+	out = append(out, a.Messages...)
+	return out
+}
+
+func (a *Agent) fullMessagesWithFrozenSystem(frozenSystem string) []llm.Message {
+	if frozenSystem == "" {
+		return a.Messages
+	}
+	fullSystem := frozenSystem
+	if a.PromptBuilder != nil && a.PromptBuilder.Project != nil {
+		fullSystem += prompt.DynamicContextBoundary + prompt.RenderProjectContext(*a.PromptBuilder.Project)
+	}
+	out := make([]llm.Message, 0, len(a.Messages)+1)
+	out = append(out, llm.Message{
+		Role:   "system",
+		Blocks: []llm.ContentBlock{llm.TextBlock{Text: fullSystem}},
 	})
 	out = append(out, a.Messages...)
 	return out
@@ -1028,7 +1067,7 @@ func (a *Agent) publishRepairEvent(ev EventRepair) {
 func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) []llm.ToolCall {
 	// Build allowed tool-name map from the registry
 	allowed := make(map[string]struct{})
-	for _, t := range a.Tools.AsLLMTools() {
+	for _, t := range a.Tools.AsLLMToolsFiltered(a.ActiveTiers...) {
 		allowed[t.Function.Name] = struct{}{}
 	}
 

@@ -172,6 +172,42 @@ func (r *Registry) AsLLMTools() []llm.Tool {
 	return out
 }
 
+// AsLLMToolsFiltered returns only tools belonging to the specified
+// tiers, converted to llm.Tool for the wire request. Tools are
+// name-sorted for cache stability. When no tiers are specified, all
+// tools are returned (same as AsLLMTools).
+func (r *Registry) AsLLMToolsFiltered(tiers ...ToolTier) []llm.Tool {
+	if len(tiers) == 0 {
+		return r.AsLLMTools()
+	}
+	tierSet := make(map[ToolTier]bool, len(tiers))
+	for _, t := range tiers {
+		tierSet[t] = true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var names []string
+	for name := range r.tools {
+		if tierSet[r.tiers[name]] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]llm.Tool, len(names))
+	for i, n := range names {
+		t := r.tools[n]
+		out[i] = llm.Tool{
+			Type: "function",
+			Function: llm.ToolFunction{
+				Name:        t.Name(),
+				Description: t.Description(),
+				Parameters:  t.Parameters(),
+			},
+		}
+	}
+	return out
+}
+
 // Subset returns a new Registry containing only the tools whose names
 // appear in names. Unknown names are silently ignored.
 // names being nil or empty returns an empty Registry (not the full set).

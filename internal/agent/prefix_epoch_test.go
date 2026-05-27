@@ -203,6 +203,20 @@ func TestEpochStaticPrefixStableDuringCompaction(t *testing.T) {
 	if epoch.StaticPrefixHash != hashBefore {
 		t.Error("modifying conversation messages should not change static prefix hash")
 	}
+
+	// Verify frozen snapshot was captured at freeze time.
+	if len(epoch.FrozenTools) != len(comps.ToolSpecs) {
+		t.Errorf("FrozenTools should match ToolSpecs: got %d, want %d", len(epoch.FrozenTools), len(comps.ToolSpecs))
+	}
+	if epoch.FrozenSystem != comps.StaticSystem {
+		t.Errorf("FrozenSystem should match StaticSystem: got %q, want %q", epoch.FrozenSystem, comps.StaticSystem)
+	}
+
+	// Mutating the original ToolSpecs slice should not affect frozen copy.
+	epoch.ToolSpecs = append(epoch.ToolSpecs, llm.Tool{Type: "function", Function: llm.ToolFunction{Name: "extra"}})
+	if len(epoch.FrozenTools) != len(comps.ToolSpecs) {
+		t.Error("FrozenTools must be independent of later ToolSpecs mutations")
+	}
 }
 
 func TestEpochChildDoesNotMutateParent(t *testing.T) {

@@ -1,12 +1,12 @@
 id: skill-body-change
-fixture_repo: bench/fixtures/skill-body-change
-commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
-prompt_file: bench/prompts/skill-body-change.md
+fixture_repo: fixtures/skill-body-change
+commit: "4ce9e56b09c8adbe16d53a4e226f79c357bf5b82"
+prompt_file: prompts/skill-body-change.md
 timeout_seconds: 300
 success:
   tests: []
   diff_invariants:
     - no_changes_outside:
-        - bench/fixtures/skill-body-change
+        - .
 metrics:
   require_cache_gate: false

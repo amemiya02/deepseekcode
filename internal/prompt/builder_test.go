@@ -128,8 +128,8 @@ func TestRenderSkillsBlockBasic(t *testing.T) {
 	if !strings.Contains(got, "pdf: edit PDFs") {
 		t.Error("missing skill line with description")
 	}
-	if !strings.Contains(got, "file: /p/.deepseek/skills/pdf/SKILL.md") {
-		t.Error("missing file path")
+	if strings.Contains(got, "file:") {
+		t.Error("skill prefix should not include file path")
 	}
 }
 
@@ -137,26 +137,25 @@ func TestRenderSkillsBlockNoDescription(t *testing.T) {
 	got := RenderSkillsBlock([]Skill{
 		{Name: "bare", Path: "/x/SKILL.md"},
 	})
-	if !strings.Contains(got, "- bare (file:") {
+	if !strings.Contains(got, "- bare\n") {
 		t.Errorf("missing bare skill line; got: %s", got)
 	}
-	if strings.Contains(got, ":  (file:") {
-		t.Error("empty description should not produce ': ' separator")
+	if strings.Contains(got, "file:") {
+		t.Error("skill prefix should not include file path")
 	}
 }
 
 func TestRenderSkillsBlockTruncation(t *testing.T) {
-	skills := make([]Skill, 100)
+	skills := make([]Skill, 200)
 	for i := range skills {
 		skills[i] = Skill{
 			Name:        fmt.Sprintf("skill-%03d", i),
-			Description: "desc",
-			Path:        fmt.Sprintf("/p/skill-%03d/SKILL.md", i),
+			Description: "a moderately long description that adds up across many skills to exceed the block cap",
 		}
 	}
 	got := RenderSkillsBlock(skills)
 	if !strings.Contains(got, "more skills omitted") {
-		t.Error("expected truncation with 100 skills")
+		t.Error("expected truncation with 200 skills")
 	}
 	if len(got) > 4200 {
 		t.Errorf("block too long: %d chars", len(got))

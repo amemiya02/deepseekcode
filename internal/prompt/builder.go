@@ -103,6 +103,13 @@ func (b *SystemPromptBuilder) Build() string {
 	return out.String()
 }
 
+// RenderProjectContext renders the dynamic project context (cwd, git
+// status, git diff) as a string. Exported so the agent can append it
+// after a frozen static prefix without re-building the full prompt.
+func RenderProjectContext(p ProjectContext) string {
+	return renderProject(p)
+}
+
 func renderProject(p ProjectContext) string {
 	var b strings.Builder
 	b.WriteString("\n## Project\n")
@@ -147,7 +154,7 @@ const maxSkillsBlockChars = 4000
 // RenderSkillsBlock generates the "## Skills" section for the system prompt.
 // Empty slice returns "". Each skill is one line:
 //
-//   - {name}: {description} (file: {path})
+//   - {name}: {description}
 //
 // Description is truncated to 200 chars. Total block capped at ~4000 chars;
 // overflow appends "... (N more skills omitted)".
@@ -157,7 +164,7 @@ func RenderSkillsBlock(skills []Skill) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n## Skills\n")
-	b.WriteString("(Use read_file on the file path to open a skill's full instructions when needed)\n")
+	b.WriteString("(Use the skill name to reference skills; load full instructions via read_file when needed)\n")
 	total := 0
 	omitted := 0
 	for _, s := range skills {
@@ -167,9 +174,9 @@ func RenderSkillsBlock(skills []Skill) string {
 		}
 		var line string
 		if desc != "" {
-			line = fmt.Sprintf("- %s: %s (file: %s)\n", s.Name, desc, s.Path)
+			line = fmt.Sprintf("- %s: %s\n", s.Name, desc)
 		} else {
-			line = fmt.Sprintf("- %s (file: %s)\n", s.Name, s.Path)
+			line = fmt.Sprintf("- %s\n", s.Name)
 		}
 		if total+len(line) > maxSkillsBlockChars {
 			omitted++

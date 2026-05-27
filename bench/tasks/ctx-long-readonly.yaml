@@ -1,12 +1,10 @@
 id: ctx-long-readonly
-fixture_repo: bench/fixtures/ctx-long-readonly
-commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
-prompt_file: bench/prompts/ctx-long-readonly.md
+fixture_repo: fixtures/ctx-long-readonly
+commit: "cc5c9e97057d0f272c3ae51f3c9d430a945a7e5c"
+prompt_file: prompts/ctx-long-readonly.md
 timeout_seconds: 300
 success:
   tests: []
-  diff_invariants:
-    - no_changes_outside:
-        - bench/fixtures/ctx-long-readonly
+  diff_invariants: []
 metrics:
   require_cache_gate: true

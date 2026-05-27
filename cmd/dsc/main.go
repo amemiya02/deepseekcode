@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,6 +38,7 @@ import (
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	sandboxpkg "github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
+	skillspkg "github.com/amemiya02/deepseekcode/internal/skills"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 	"github.com/amemiya02/deepseekcode/internal/tui"
@@ -56,6 +58,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "dsc:", err)
 		os.Exit(1)
 	}
+}
+
+func envFlagEnabled(key string) bool {
+	v := os.Getenv(key)
+	return v == "1" || v == "true"
 }
 
 func run() error {
@@ -112,6 +119,16 @@ func run() error {
 	if showVersion {
 		fmt.Println("dsc", version.String())
 		return nil
+	}
+
+	if envFlagEnabled("DEEPSEEKCODE_PREFIX_EPOCH") {
+		slog.Info("feature flag: prefix_epoch enabled via env")
+	}
+	if envFlagEnabled("DEEPSEEKCODE_SEMANTIC_COMPACTION") {
+		slog.Info("feature flag: semantic_compaction enabled via env")
+	}
+	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
+		slog.Info("feature flag: tool_tiers enabled via env")
 	}
 
 	cfg, err := config.Load()
@@ -253,6 +270,19 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
+
+	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
+		a.ActiveTiers = []tools.ToolTier{tools.TierCore}
+	}
+
+	skillStore, _ := skillspkg.Load([]string{
+		filepath.Join(cwd, ".deepseek/skills"),
+		filepath.Join(cwd, "skills"),
+		filepath.Join(home4skills, ".deepseek/skills"),
+	})
+	if skillStore != nil {
+		a.Skills = skillStore
+	}
 
 	// Hooks: assemble configs from TOML, then add the Duet builtin
 	// when enabled. Only create a Runner if there is work for it.
@@ -590,6 +620,19 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
 	a.PromptBuilder = newPromptBuilder(cwd, skills)
+
+	if envFlagEnabled("DEEPSEEKCODE_TOOL_TIERS") {
+		a.ActiveTiers = []tools.ToolTier{tools.TierCore}
+	}
+
+	skillStore, _ := skillspkg.Load([]string{
+		filepath.Join(cwd, ".deepseek/skills"),
+		filepath.Join(cwd, "skills"),
+		filepath.Join(home4skills, ".deepseek/skills"),
+	})
+	if skillStore != nil {
+		a.Skills = skillStore
+	}
 
 	// Set up sub-agent spawner with worktree support (A7).
 	defs, _ := agents.Load(cwd, home4skills)

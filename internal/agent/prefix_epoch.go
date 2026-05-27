@@ -29,6 +29,13 @@ type PrefixEpoch struct {
 	CreatedReason    string
 	ComponentHashes  map[string]string
 	StaticPrefixHash string
+
+	// FrozenTools and FrozenSystem capture the tool list and system
+	// prompt at the moment FreezeEpoch is called. When the epoch is
+	// frozen, runStep and maybeCompact MUST use these instead of the
+	// live values to guarantee cache-stable prefixes.
+	FrozenTools  []llm.Tool
+	FrozenSystem string
 }
 
 // EpochComponents is the input for creating a PrefixEpoch.
@@ -141,10 +148,15 @@ func (m *EpochManager) createEpochLocked(reason string, components EpochComponen
 	}
 }
 
-// FreezeEpoch marks the epoch as immutable after first model request.
+// FreezeEpoch marks the epoch as immutable after first model request
+// and captures FrozenTools/FrozenSystem from the current epoch.
 func (m *EpochManager) FreezeEpoch() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.current != nil {
+		m.current.FrozenTools = m.current.ToolSpecs
+		m.current.FrozenSystem = m.current.StaticSystem
+	}
 	m.frozen = true
 }
 

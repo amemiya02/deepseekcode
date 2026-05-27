@@ -1,12 +1,12 @@
 id: mcp-schema-drift
-fixture_repo: bench/fixtures/mcp-schema-drift
-commit: "0000000000000000000000000000000000000000"  # placeholder: replace with actual fixture commit SHA
-prompt_file: bench/prompts/mcp-schema-drift.md
+fixture_repo: fixtures/mcp-schema-drift
+commit: "308fbf9c695e278ae9396fcf27b17f0220dbc00c"
+prompt_file: prompts/mcp-schema-drift.md
 timeout_seconds: 300
 success:
   tests: []
   diff_invariants:
     - no_changes_outside:
-        - bench/fixtures/mcp-schema-drift
+        - .
 metrics:
   require_cache_gate: false

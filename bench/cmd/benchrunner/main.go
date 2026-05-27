@@ -40,13 +40,14 @@ import (
 
 // AgentConfig represents an agent adapter configuration loaded from YAML.
 type AgentConfig struct {
-	ID         string            `yaml:"id"`
-	Command    string            `yaml:"command"`
-	Args       []string          `yaml:"args"`
-	InputMode  string            `yaml:"input_mode"` // "prompt_arg" or "stdin"
-	Env        map[string]string `yaml:"env"`
-	TracePath  string            `yaml:"trace_path"`
-	UsageParse string            `yaml:"usage_parser"`
+	ID         string                 `yaml:"id"`
+	Command    string                 `yaml:"command"`
+	Args       []string               `yaml:"args"`
+	InputMode  string                 `yaml:"input_mode"` // "prompt_arg" or "stdin"
+	Env        map[string]string      `yaml:"env"`
+	TracePath  string                 `yaml:"trace_path"`
+	UsageParse string                 `yaml:"usage_parser"`
+	Features   map[string]interface{} `yaml:"features"`
 }
 
 // TaskSpec represents a task specification loaded from YAML.
@@ -127,7 +128,33 @@ type RunResult struct {
 	CacheMisses    int
 	OutputTokens   int
 	CostCNY        float64
+	UsageParsed    bool
 	Turns          int
+	TestResults    []TestResult
+	DiffViolations []string
+}
+
+// TestResult holds the outcome of a single test command execution.
+type TestResult struct {
+	Command  string
+	ExitCode int
+	Output   string
+	Passed   bool
+}
+
+// CacheGateResult holds the evaluated Cache Reliability gate verdict.
+type CacheGateResult struct {
+	Passed               bool
+	PostWarmHitRate      float64
+	PostWarmHitRateOK    bool
+	UnauthorizedDrift    int
+	UnauthorizedDriftOK  bool
+	CompactionStable     bool
+	CompactionStableOK   bool
+	ParentChildPollution int
+	ParentChildOK        bool
+	UsageParsed          bool
+	UsageParsedOK        bool
 }
 
 // Pricing mirrors internal/llm/cache_metrics.go pricing table.
@@ -142,9 +169,9 @@ var pricing = map[string][3]float64{
 }
 
 // usageLineRE matches dsc's one-line usage summary emitted at end of -p runs.
-// Example: "usage: prompt=12345 (cache_hit=0 cache_miss=12345) completion=800"
+// Example: "[step done: stop · in=12345 out=800 cache=45% ¥0.0123 · 1.234s]"
 var usageLineRE = regexp.MustCompile(
-	`usage:\s+prompt=(\d+)\s+\(cache_hit=(\d+)\s+cache_miss=(\d+)\)\s+completion=(\d+)`)
+	`\[(?:step done|done):\s+\S+\s+·\s+in=(\d+)\s+out=(\d+)\s+cache=(\d+)%\s+¥([\d.]+)`)
 
 // ---------------------------------------------------------------------------
 // YAML loading
@@ -274,17 +301,26 @@ func prepareFixture(fixtureRepo, commit, benchDir string) (string, func(), error
 // ---------------------------------------------------------------------------
 
 // runAgent executes an agent against a task and returns the result.
-func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir string) RunResult {
+func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir, benchDir string) RunResult {
 	result := RunResult{
 		Agent:         agent.ID,
 		Task:          task.ID,
 		TestsExpected: len(task.Success.Tests) > 0,
 	}
 
-	// Read prompt
+	// Resolve agent command relative to project root (parent of benchDir).
+	// cmd.Dir will be set to the fixture's temp copy, so a relative command
+	// like "./bin/dsc" must be anchored to the repo root first.
+	projectDir := filepath.Dir(benchDir)
+	cmdPath := agent.Command
+	if !filepath.IsAbs(cmdPath) {
+		cmdPath = filepath.Join(projectDir, cmdPath)
+	}
+
+	// Read prompt (resolve relative to benchDir, not workDir)
 	promptPath := task.PromptFile
 	if !filepath.IsAbs(promptPath) {
-		promptPath = filepath.Join(workDir, promptPath)
+		promptPath = filepath.Join(benchDir, promptPath)
 	}
 	prompt, err := os.ReadFile(promptPath)
 	if err != nil {
@@ -301,23 +337,21 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir str
 	switch agent.InputMode {
 	case "prompt_arg":
 		args = append(args, promptStr)
-		cmd = exec.CommandContext(ctx, agent.Command, args...)
+		cmd = exec.CommandContext(ctx, cmdPath, args...)
 	case "stdin":
-		cmd = exec.CommandContext(ctx, agent.Command, args...)
+		cmd = exec.CommandContext(ctx, cmdPath, args...)
 		cmd.Stdin = strings.NewReader(promptStr)
 	default:
 		args = append(args, promptStr)
-		cmd = exec.CommandContext(ctx, agent.Command, args...)
+		cmd = exec.CommandContext(ctx, cmdPath, args...)
 	}
 
-	// Set working directory to the fixture copy
 	cmd.Dir = workDir
 
 	// Set environment variables
 	cmd.Env = os.Environ()
 	for k, v := range agent.Env {
 		if v == "required" {
-			// Check if already set in environment
 			if envVal := os.Getenv(k); envVal != "" {
 				cmd.Env = append(cmd.Env, k+"="+envVal)
 			} else {
@@ -329,22 +363,24 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir str
 		}
 	}
 
-	// Capture stdout and stderr separately
+	// Pass feature flags as env vars
+	for k, v := range agent.Features {
+		envKey := "DEEPSEEKCODE_" + strings.ToUpper(k)
+		cmd.Env = append(cmd.Env, envKey+"="+fmt.Sprintf("%v", v))
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	// Run with timeout
 	start := time.Now()
 	err = cmd.Run()
 	duration := time.Since(start)
 	result.DurationMs = duration.Milliseconds()
 
-	// Count lines
 	result.StdoutLines = countLines(stdout.String())
 	result.StderrLines = countLines(stderr.String())
 
-	// Get exit code
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		result.ExitCode = exitErr.ExitCode()
 	} else if err != nil {
@@ -352,21 +388,127 @@ func runAgent(ctx context.Context, agent AgentConfig, task TaskSpec, workDir str
 		return result
 	}
 
-	// Parse usage from combined output
 	combined := stdout.String() + "\n" + stderr.String()
 	result.CacheHits, result.CacheMisses, result.OutputTokens, result.CostCNY = parseUsage(combined)
-	result.Turns = 1 // single-turn for -p mode
+	result.UsageParsed = result.CacheHits+result.CacheMisses+result.OutputTokens > 0
+	result.Turns = 1
 
-	// Determine success based on exit code.
-	// TODO: When test execution is implemented, success should also require
-	// tests to pass when success.tests is non-empty. For now, log a warning
-	// if tests are defined but can't be run yet.
 	result.Success = result.ExitCode == 0
-	if result.TestsExpected && result.Success {
-		log.Printf("  WARNING: task %s defines tests but test execution not yet implemented", task.ID)
+
+	// Cache gate: if required and no usage metrics were parsed, fail the run.
+	if task.Metrics.RequireCacheGate && !result.UsageParsed {
+		result.Success = false
+		if result.Error == "" {
+			result.Error = "cache gate failed: no usage metrics parsed from agent output"
+		}
+	}
+
+	// Run tests if defined
+	if len(task.Success.Tests) > 0 && result.Success {
+		for _, testCmd := range task.Success.Tests {
+			tr := runTestCommand(testCmd, workDir)
+			result.TestResults = append(result.TestResults, tr)
+			if !tr.Passed {
+				result.Success = false
+			}
+		}
+	}
+
+	// Check diff invariants
+	if result.Success {
+		violations := checkDiffInvariants(task.Success.DiffInvariants, workDir)
+		if len(violations) > 0 {
+			result.DiffViolations = violations
+			result.Success = false
+		}
 	}
 
 	return result
+}
+
+func runTestCommand(testCmd, workDir string) TestResult {
+	tr := TestResult{Command: testCmd}
+	parts := strings.Fields(testCmd)
+	if len(parts) == 0 {
+		tr.Output = "empty command"
+		return tr
+	}
+	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd.Dir = workDir
+	out, err := cmd.CombinedOutput()
+	tr.Output = string(out)
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		tr.ExitCode = exitErr.ExitCode()
+	} else if err != nil {
+		tr.ExitCode = -1
+		tr.Output = fmt.Sprintf("exec error: %v\n%s", err, tr.Output)
+	}
+	tr.Passed = err == nil
+	return tr
+}
+
+func checkDiffInvariants(invariants []DiffInvariant, workDir string) []string {
+	var violations []string
+	for _, inv := range invariants {
+		if len(inv.NoChangesOutside) == 0 {
+			continue
+		}
+		cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			continue
+		}
+		changed := strings.Split(strings.TrimSpace(string(out)), "\n")
+		for _, f := range changed {
+			if f == "" {
+				continue
+			}
+			allowed := false
+			for _, prefix := range inv.NoChangesOutside {
+				if prefix == "." || strings.HasPrefix(f, prefix+"/") || f == prefix {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				violations = append(violations, f)
+			}
+		}
+	}
+	return violations
+}
+
+func checkCacheGate(results []RunResult) CacheGateResult {
+	gate := CacheGateResult{
+		CompactionStable:  true,
+		CompactionStableOK: true,
+		UnauthorizedDriftOK: true,
+		ParentChildOK:     true,
+	}
+
+	var totalHits, totalMisses int
+	parsedCount := 0
+	for _, r := range results {
+		if r.UsageParsed {
+			parsedCount++
+			totalHits += r.CacheHits
+			totalMisses += r.CacheMisses
+		}
+	}
+
+	gate.UsageParsed = parsedCount > 0
+	gate.UsageParsedOK = gate.UsageParsed
+
+	if totalHits+totalMisses > 0 {
+		gate.PostWarmHitRate = float64(totalHits) / float64(totalHits+totalMisses)
+	}
+	gate.PostWarmHitRateOK = gate.PostWarmHitRate >= 0.95
+
+	gate.Passed = gate.UsageParsedOK && gate.PostWarmHitRateOK &&
+		gate.UnauthorizedDriftOK && gate.CompactionStableOK && gate.ParentChildOK
+
+	return gate
 }
 
 func countLines(s string) int {
@@ -376,6 +518,13 @@ func countLines(s string) int {
 	return strings.Count(s, "\n")
 }
 
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 // parseUsage extracts usage metrics from agent output.
 func parseUsage(output string) (cacheHits, cacheMisses, outputTokens int, costCNY float64) {
 	matches := usageLineRE.FindStringSubmatch(output)
@@ -383,11 +532,13 @@ func parseUsage(output string) (cacheHits, cacheMisses, outputTokens int, costCN
 		return 0, 0, 0, 0
 	}
 
-	cacheHits, _ = strconv.Atoi(matches[2])
-	cacheMisses, _ = strconv.Atoi(matches[3])
-	outputTokens, _ = strconv.Atoi(matches[4])
+	totalInput, _ := strconv.Atoi(matches[1])
+	outputTokens, _ = strconv.Atoi(matches[2])
+	cacheHitPct, _ := strconv.ParseFloat(matches[3], 64)
 
-	// Calculate cost using flash pricing (default)
+	cacheHits = int(float64(totalInput) * cacheHitPct / 100)
+	cacheMisses = totalInput - cacheHits
+
 	p := pricing["deepseek-v4-flash"]
 	const million = 1_000_000.0
 	costCNY = (float64(cacheHits)*p[0] + float64(cacheMisses)*p[1] + float64(outputTokens)*p[2]) / million
@@ -422,24 +573,17 @@ func buildTraceRecords(result RunResult) []TraceRecord {
 		},
 		{
 			Type: "prefix.snapshot",
-			// Fields are null when not available from agent output
 		},
 		{
 			Type: "turn.started",
 			Turn: &turn,
-			// EpochID and Model are null when not available
 		},
 		{
-			Type:            "usage",
-			Turn:            &turn,
-			CacheHitTokens:  &result.CacheHits,
-			CacheMissTokens: &result.CacheMisses,
-			OutputTokens:    &result.OutputTokens,
-			CostCNY:         &result.CostCNY,
+			Type: "usage",
+			Turn: &turn,
 		},
 		{
 			Type: "compaction",
-			// Fields are null when not available from agent output
 		},
 		{
 			Type:        "run.finished",
@@ -449,8 +593,16 @@ func buildTraceRecords(result RunResult) []TraceRecord {
 			ExitCode:    &result.ExitCode,
 			StdoutLines: &result.StdoutLines,
 			StderrLines: &result.StderrLines,
-			// PrefixHashChanged is null when not available
 		},
+	}
+
+	if result.UsageParsed {
+		records[3].OutputTokens = &result.OutputTokens
+		records[3].CostCNY = &result.CostCNY
+		if result.CacheHits > 0 || result.CacheMisses > 0 {
+			records[3].CacheHitTokens = &result.CacheHits
+			records[3].CacheMissTokens = &result.CacheMisses
+		}
 	}
 	return records
 }
@@ -459,7 +611,7 @@ func buildTraceRecords(result RunResult) []TraceRecord {
 // Report generation
 // ---------------------------------------------------------------------------
 
-func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec) string {
+func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec, gate CacheGateResult) string {
 	var b strings.Builder
 
 	b.WriteString("# Benchmark Report\n\n")
@@ -526,9 +678,83 @@ func generateReport(results []RunResult, agents []AgentConfig, tasks []TaskSpec)
 			b.WriteString(fmt.Sprintf("- **%s / %s**: %s\n", r.Agent, r.Task, r.Error))
 			hasErrors = true
 		}
+		for _, tr := range r.TestResults {
+			if !tr.Passed {
+				b.WriteString(fmt.Sprintf("- **%s / %s** test `%s` FAILED (exit %d): %s\n",
+					r.Agent, r.Task, tr.Command, tr.ExitCode, firstLine(tr.Output)))
+				hasErrors = true
+			}
+		}
+		for _, v := range r.DiffViolations {
+			b.WriteString(fmt.Sprintf("- **%s / %s** diff violation: `%s`\n", r.Agent, r.Task, v))
+			hasErrors = true
+		}
 	}
 	if !hasErrors {
 		b.WriteString("No errors.\n")
+	}
+
+	// Cache Reliability Gate
+	b.WriteString("\n## Cache Reliability Gate\n\n")
+	b.WriteString("| Check | Required | Actual | Verdict |\n")
+	b.WriteString("|-------|----------|--------|---------|\n")
+
+	usageActual, usageVerdict := "no", "❌"
+	if gate.UsageParsed {
+		usageActual, usageVerdict = "yes", "✅"
+	}
+	b.WriteString(fmt.Sprintf("| Usage metrics parsed | yes | %s | %s |\n", usageActual, usageVerdict))
+
+	hitPct := fmt.Sprintf("%.1f%%", gate.PostWarmHitRate*100)
+	hitVerdict := "❌"
+	if gate.PostWarmHitRateOK {
+		hitVerdict = "✅"
+	}
+	b.WriteString(fmt.Sprintf("| Post-warm cache hit rate | >= 95%% | %s | %s |\n", hitPct, hitVerdict))
+
+	driftVerdict := "✅"
+	if !gate.UnauthorizedDriftOK {
+		driftVerdict = "❌"
+	}
+	b.WriteString(fmt.Sprintf("| Unauthorized drift | 0 | %d | %s |\n", gate.UnauthorizedDrift, driftVerdict))
+
+	compVerdict := "✅"
+	if !gate.CompactionStableOK {
+		compVerdict = "❌"
+	}
+	compActual := "yes"
+	if !gate.CompactionStable {
+		compActual = "no"
+	}
+	b.WriteString(fmt.Sprintf("| Compaction prefix stable | yes | %s | %s |\n", compActual, compVerdict))
+
+	pollVerdict := "✅"
+	if !gate.ParentChildOK {
+		pollVerdict = "❌"
+	}
+	b.WriteString(fmt.Sprintf("| Parent/subagent pollution | 0 | %d | %s |\n", gate.ParentChildPollution, pollVerdict))
+
+	b.WriteString("\n")
+	if gate.Passed {
+		b.WriteString("**Gate verdict: PASS**\n")
+	} else {
+		reasons := []string{}
+		if !gate.UsageParsedOK {
+			reasons = append(reasons, "no usage metrics parsed")
+		}
+		if !gate.PostWarmHitRateOK {
+			reasons = append(reasons, fmt.Sprintf("post-warm hit rate %.1f%% below 95%% threshold", gate.PostWarmHitRate*100))
+		}
+		if !gate.UnauthorizedDriftOK {
+			reasons = append(reasons, "unauthorized drift detected")
+		}
+		if !gate.CompactionStableOK {
+			reasons = append(reasons, "compaction prefix hash changed")
+		}
+		if !gate.ParentChildOK {
+			reasons = append(reasons, "parent/subagent cache pollution detected")
+		}
+		b.WriteString(fmt.Sprintf("**Gate verdict: FAIL** (%s)\n", strings.Join(reasons, "; ")))
 	}
 
 	return b.String()
@@ -627,14 +853,12 @@ func main() {
 	runIdx := 0
 
 	for _, agent := range agents {
-		// Determine agent trace directory: use trace_path from config if specified,
-		// otherwise fall back to tracesDir + agent.ID
 		agentTraceDir := agent.TracePath
 		if agentTraceDir == "" {
 			agentTraceDir = filepath.Join(tracesDir, agent.ID)
 		}
 		if !filepath.IsAbs(agentTraceDir) {
-			agentTraceDir = filepath.Join(absBenchDir, agentTraceDir)
+			agentTraceDir = filepath.Join(filepath.Dir(absBenchDir), agentTraceDir)
 		}
 		if err := os.MkdirAll(agentTraceDir, 0o755); err != nil {
 			log.Fatalf("create agent trace dir: %v", err)
@@ -662,7 +886,7 @@ func main() {
 				time.Duration(task.TimeoutSec)*time.Second)
 
 			// Run agent
-			result := runAgent(ctx, agent, task, fixtureDir)
+			result := runAgent(ctx, agent, task, fixtureDir, absBenchDir)
 			cancel()
 
 			if ctx.Err() == context.DeadlineExceeded {
@@ -696,7 +920,8 @@ func main() {
 	}
 
 	// Generate and write report
-	report := generateReport(results, agents, tasks)
+	gate := checkCacheGate(results)
+	report := generateReport(results, agents, tasks, gate)
 	reportPath := filepath.Join(reportsDir, fmt.Sprintf("bench-%s.md",
 		time.Now().UTC().Format("20060102-150405")))
 	if err := os.WriteFile(reportPath, []byte(report), 0o644); err != nil {

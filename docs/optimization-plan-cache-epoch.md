@@ -142,6 +142,8 @@ gap is the billed comparison run itself.
 
 - Agent frontmatter now parses hidden, max_steps, permission_ruleset,
   temperature, top_p, and default_agent.
+- Canonical event names defined in `internal/eventschema`. Downstream consumers
+  (CLI, dashboards) should import these constants instead of hard-coding strings.
 
 **Blocked / not yet done**
 

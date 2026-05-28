@@ -54,14 +54,18 @@ type Scrollback struct {
 	// started against; if seq drifts, the selection clears.
 	vis    visualState
 	visSeq uint64
+
+	// Per-item render cache keyed by content hash.
+	itemRenderCache *RenderCache
 }
 
 // NewScrollback returns an empty Scrollback with no in-progress
 // streams and no selection.
 func NewScrollback() *Scrollback {
 	return &Scrollback{
-		streamTextIdx:  noStream,
-		streamThinkIdx: noStream,
+		streamTextIdx:   noStream,
+		streamThinkIdx:  noStream,
+		itemRenderCache: NewRenderCache(128),
 	}
 }
 
@@ -261,6 +265,17 @@ func (s *Scrollback) Render(t Theme, width int) string {
 	if width != s.renderW || s.renderSeq != s.seq || s.rendered == "" {
 		var b strings.Builder
 		for _, it := range s.items {
+			key := it.renderKey(width, t.Name)
+			if key != "" {
+				if rendered, ok := s.itemRenderCache.Get(key); ok {
+					b.WriteString(rendered)
+					continue
+				}
+				rendered := it.render(t, width)
+				s.itemRenderCache.Put(key, rendered)
+				b.WriteString(rendered)
+				continue
+			}
 			b.WriteString(it.render(t, width))
 		}
 		s.rendered = b.String()

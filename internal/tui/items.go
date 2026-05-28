@@ -85,6 +85,17 @@ type chatItem struct {
 	model      string
 }
 
+func (i chatItem) renderKey(width int, theme string) string {
+	switch i.kind {
+	case itemToolResult:
+		return fmt.Sprintf("tool-result:%s:%s:%t:%d:%s", i.toolCallID, theme, i.expanded, width, i.result.Content)
+	case itemToolCall:
+		return fmt.Sprintf("tool-call:%s:%s:%d:%s", i.toolCallID, theme, width, i.args)
+	default:
+		return ""
+	}
+}
+
 func (i chatItem) render(t Theme, width int) string {
 	switch i.kind {
 	case itemUser:

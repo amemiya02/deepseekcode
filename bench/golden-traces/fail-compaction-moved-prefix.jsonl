@@ -1,0 +1,5 @@
+{"type":"prefix.snapshot","turn":1,"epoch_id":"e1","static_prefix_hash":"H1","agent_role":"root"}
+{"type":"usage","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":10,"agent_role":"root"}
+{"type":"prefix.snapshot","turn":2,"epoch_id":"e1","static_prefix_hash":"H1","agent_role":"root"}
+{"type":"usage","turn":2,"epoch_id":"e1","cache_hit_tokens":1000,"cache_miss_tokens":0,"output_tokens":10,"agent_role":"root"}
+{"type":"compaction","epoch_id":"e1","agent_role":"root","kind":"semantic","before_static_prefix_hash":"H1","after_static_prefix_hash":"H2"}

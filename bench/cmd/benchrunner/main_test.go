@@ -848,3 +848,62 @@ func TestPrepareFixtureGitRepo(t *testing.T) {
 		t.Errorf("git diff should be clean, got: %s", string(diffOut))
 	}
 }
+
+func TestGoldenTraceGates(t *testing.T) {
+	cases := []struct {
+		name    string
+		file    string
+		metrics MetricsSpec
+		wantOK  bool
+	}{
+		{
+			name: "pass complete subagent",
+			file: "pass-complete-subagent.jsonl",
+			metrics: MetricsSpec{
+				RequireCacheGate:        true,
+				RequireSubagentIsolation: true,
+			},
+			wantOK: true,
+		},
+		{
+			name: "fail split subagent",
+			file: "fail-split-subagent.jsonl",
+			metrics: MetricsSpec{
+				RequireCacheGate:        true,
+				RequireSubagentIsolation: true,
+			},
+			wantOK: false,
+		},
+		{
+			name: "fail compaction moved prefix",
+			file: "fail-compaction-moved-prefix.jsonl",
+			metrics: MetricsSpec{
+				RequireCacheGate:       true,
+				RequireCompactionRecord: true,
+			},
+			wantOK: false,
+		},
+		{
+			name: "fail malformed usage",
+			file: "fail-malformed-usage.jsonl",
+			metrics: MetricsSpec{
+				RequireCacheGate: true,
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "golden-traces", tc.file)
+			tr, err := parseAgentTrace(path)
+			if err != nil {
+				t.Fatalf("parseAgentTrace(%s): %v", path, err)
+			}
+			gate := evalCacheGate(RunResult{Trace: tr, UsageParsed: true}, TaskSpec{Metrics: tc.metrics})
+			if gate.Passed != tc.wantOK {
+				t.Fatalf("gate.Passed = %v, want %v; gate=%+v", gate.Passed, tc.wantOK, gate)
+			}
+		})
+	}
+}

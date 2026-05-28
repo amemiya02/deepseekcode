@@ -34,6 +34,28 @@ Callback-driven ReAct loop modeled on `charmbracelet/crush`. `Agent.Run()` calls
 - **Pre-tool snapshot**: before parallel execution, `runToolCalls` takes one snapshot of the union of affected paths (via `AffectedPathsFor`), so `/undo` reverts a whole step atomically.
 - **Two-tier stream timeout** (per `plandex-ai/plandex`): `Client.FirstTokenTimeout` (45s — reasoner cold start) is distinct from `ChunkStallTimeout` (20s — gap between chunks once streaming).
 
+### Context limits and compaction (`internal/agent/compact.go`)
+
+DeepSeek V4 models have 1M token context windows. The defaults reflect this:
+`MaxContextTokens = 1_000_000`, `AutoCompactInputTokens = 800_000`. Override
+the auto-compact threshold via `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` env var.
+`EstimateTokens` uses char/4 (no tokenizer dependency) — it's intentionally rough.
+
+### Prefix epoch system (`internal/agent/prefix_epoch.go`)
+
+Epoch IDs are generated from a **process-wide atomic counter** + millisecond
+timestamp (`epoch_{ms}_{seq}`), not `time.Now().UnixNano()` alone. This
+prevents ID collisions on Windows where clock resolution is ~15ms. The
+`EpochManager` mutex protects all state; the counter lives outside the struct
+so separate manager instances (parent/child) never collide.
+
+### Budget projection (`internal/agent/budget_projection.go`)
+
+`ProjectedTurnCostCNY` runs **before** the HTTP request. It prices all input
+as cache miss (conservative) and falls back to 2048 output tokens when
+`MaxTokens <= 0`. This gates expensive turns against the session budget
+before any API call is made.
+
 ### Wire format — DeepSeek V4 specifics (`internal/llm/request.go`)
 
 - **`thinking` is a struct, not a bool**: DeepSeek V4 rejects `"thinking":true` with `expected struct ThinkingOptions`. Always use `llm.ThinkingEnabled(bool)` which returns `*ThinkingOptions{Type:"enabled"}` or nil. Regression test: `thinking_shape_test.go`.
@@ -58,9 +80,34 @@ Bubble Tea model. The **key flow** is the non-obvious bit: `Update()` only `retu
 
 The agent runs in a goroutine; `wireCallbacks()` translates `agent.Callbacks` events into typed `tea.Msg` values via `tea.Program.Send`. Permission asks use a reply channel so the agent goroutine blocks until the user answers.
 
+### CLI subcommands (`cmd/dsc/`)
+
+Routing lives in `cmd/dsc/main.go` — each subcommand is dispatched before
+flag parsing via `os.Args[1] == "<name>"`. Subcommand implementations are in
+separate files (`trace.go`, `agent_cmd.go`, `session_inspect.go`). The pattern
+is: a `runXxxCommand(args) (string, error)` function returns text (never
+prints directly) so tests can assert on the output.
+
+- `dsc trace inspect TRACE.jsonl` — summarizes a JSONL trace via `internal/traceinspect`
+- `dsc agent list|show|new|validate` — manages `.deepseek/agent/*.md` definitions
+- Agent definitions support extended frontmatter: `hidden`, `max_steps`, `permission_ruleset`, `temperature`, `top_p`, `default_agent`
+
 ### Tools (`internal/tools/`)
 
 Each tool implements `Tool` (Name/Description/Parameters/Execute). `Registry.AsLLMTools()` returns them sorted by name for cache-stable tool listings. Structured git tools (`git_diff/git_show/git_blame/git_log`) emit typed output rather than wrapping pager output.
+
+### Event schema (`internal/eventschema/`)
+
+Canonical event-name constants (`ModelTurnStarted`, `PrefixEpochCreated`, etc.)
+so downstream consumers (CLI, dashboards, benchmarks) reference the same string
+identifiers. `Known(name) bool` validates event names.
+
+### TUI render cache (`internal/tui/render_cache.go`)
+
+LRU cache keyed by content-based hashes (toolCallID + tool + args + theme +
+width + expanded + IsError + duration + content). `Scrollback.Clear()` resets
+the cache. Cache is only used for `itemToolCall` and `itemToolResult` — other
+item kinds bypass it.
 
 ## Conventions worth knowing
 
@@ -69,3 +116,5 @@ Each tool implements `Tool` (Name/Description/Parameters/Execute). `Registry.AsL
 - **No external LLM SDK**. The `internal/llm` package is ~400 LOC of hand-rolled HTTP+SSE+typed events. Don't introduce one.
 - **Module path is `github.com/amemiya02/deepseekcode`**. Binary name is `dsc`.
 - **Branch model**: PRs go to `main`. SSH remote uses the `github.com-amemiya02` host alias.
+- **Agent definitions**: `.deepseek/agent/*.md` with YAML frontmatter. Parsed by `internal/agents/def.go`. `agents.Load(cwd, home)` silently skips malformed files — use `dsc agent validate` (which walks and checks each file) for strict validation.
+- **PXR workflow**: `.pxr/` contains plan-execute-review task cards and implementation reports. Not production code.

@@ -1,146 +1,316 @@
 # deepseekcode
 
+[![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
+[![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
+[![Baseline](https://img.shields.io/badge/baseline-v0.2.0-blue)](#versioning)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-A terminal-native coding agent purpose-built for DeepSeek models.
-Single Go binary. No runtime dependencies. Distinctive UX around
-reasoning, cache economics, and a Two-Model Duet that's surgical, not
-noisy.
+`deepseekcode` is a terminal-native coding agent for DeepSeek models and
+OpenAI-compatible chat-completions endpoints. It ships as a single Go
+binary named `dsc`, with a Bubble Tea TUI, one-shot CLI mode, structured
+tools, SQLite-backed sessions, cache-aware request serialization, and a
+permission model designed for day-to-day repository work.
 
-> Status: v0.1 in active development, targeting submission to
-> [awesome-deepseek-agent](https://github.com/deepseek-ai/awesome-deepseek-agent).
-> See [`docs/design.md`](docs/design.md) for the full design and
-> trade-offs.
+Current documented baseline: **v0.2.0**.
 
-## What makes it different
+## Why deepseekcode
 
-- **Reasoning Tape** — DeepSeek emits `reasoning_content` as a separate
-  channel. We render it as a collapsible inline timeline plus a
-  fullscreen scrubbable view (`/tape`) you can browse and branch
-  sessions from. ([docs/tape.md](docs/tape.md))
-- **Two-Model Duet — Pro Validator** — `deepseek-v4-flash` drives the
-  loop; `pro` is invoked surgically as a validator on destructive
-  operations. Not on every turn. ([docs/duet.md](docs/duet.md))
-- **Cost HUD** — live cache-hit % and ¥/$ in the status line. The 50×
-  cache-hit discount becomes a dial you watch.
-- **Structured git** — `git_diff`, `git_show`, `git_blame`, `git_log`
-  as typed tools, not pager wrappers.
-- **Session branching** — fork any session from any past step. Cheap,
-  via SQLite parent references; no message copying.
+DeepSeek exposes reasoning, prefix-cache metrics, long context, and
+cost characteristics that are worth treating as first-class UX. This
+project builds around those primitives instead of hiding them behind a
+generic chat wrapper.
+
+- It keeps reasoning visible with collapsible thinking blocks and a
+  fullscreen `/tape` timeline.
+- It keeps costs visible with cache-hit and usage reporting in the TUI
+  and CLI step output.
+- It keeps edits reviewable with structured file tools, pre-edit
+  snapshots, `/undo`, and typed git helpers.
+- It keeps dangerous actions explicit with tiered permissions, secret
+  path checks, bash allowlists, and the Pro validator hook.
+
+## Features
+
+- **TUI and one-shot mode**: run `dsc` for the interactive terminal UI,
+  or `dsc -p "prompt"` for scriptable stdout output.
+- **DeepSeek-first runtime**: defaults to `deepseek-v4-flash`, supports
+  `deepseek-v4-pro`, DeepSeek thinking options, prefix-cache metrics,
+  and JSON-mode validation.
+- **OpenAI-compatible providers**: configure alternate chat-completions
+  endpoints in `.deepseek/config.toml`.
+- **Reasoning Tape**: view model reasoning, tool calls, and repair
+  events in the chat stream or the `/tape` fullscreen view.
+- **Two-Model Duet**: uses the Pro-capable provider path as a validator
+  for destructive tool calls instead of invoking it on every turn.
+- **Tool-rich agent loop**: file edits, patch application, bash, git,
+  web fetch/search, LSP queries, subagents, worktrees, tasks, and user
+  questions are exposed through function calling.
+- **Sessions and resume**: stores sessions in pure-Go SQLite and
+  supports `-c`, `-r`, and the `/sessions` picker.
+- **Custom commands and skills**: loads `.deepseek/command/*.md` slash
+  commands and discovers `SKILL.md` files from project and home
+  directories.
+- **MCP integration**: configured MCP servers are connected at startup
+  and their tools are bridged into the agent registry.
+- **Optional sandboxing**: when enabled in config, bash tools use the
+  platform sandbox implementation available on the host.
 
 ## Install
 
+Prerequisites:
+
+- Go version matching `go.mod` or newer.
+- A DeepSeek API key, or another configured provider key.
+- Git is optional, but enables git-aware prompt context and git tools.
+- Language servers are optional; `dsc` connects to detected servers when
+  they are present.
+
+Build from source:
+
 ```sh
-# Homebrew (after v0.1.0 cut)
-brew install amemiya02/deepseekcode/deepseekcode
-
-# curl | sh
-curl -fsSL https://deepseekcode.dev/install.sh | sh
-
-# Go install
-go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
-
-# from source
-git clone https://github.com/amemiya02/deepseekcode && cd deepseekcode && make build
+git clone https://github.com/amemiya02/deepseekcode
+cd deepseekcode
+make build
+./bin/dsc -version
 ```
 
-Full install matrix: [docs/install.md](docs/install.md).
+Install into your Go binary directory:
 
-## Quick start
+```sh
+make install
+```
+
+Or install directly with Go:
+
+```sh
+go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
+```
+
+## Quick Start
 
 ```sh
 export DEEPSEEK_API_KEY=sk-...
-dsc                                # launch the TUI
-dsc -p "explain pkg/auth"          # one-shot prompt → stdout, exit
-dsc --read-only                    # safe-exploration mode
-dsc --yolo -p "run the tests"      # auto-approve all tools (CI / automation)
-dsc init                           # create DEEPSEEK.md + .deepseek/config.toml
-dsc upgrade                        # check for updates
+
+dsc
+dsc -p "summarize this repository"
+dsc --read-only -p "explain the architecture"
+dsc init
+dsc doctor
 ```
 
-Inside the TUI:
+Useful session flags:
 
-```
-⏎          send prompt
-^C         cancel current run (or quit if idle)
-^D         quit
-r / R      toggle most recent / all thinking blocks
-/help      keys + commands
-/models    list / switch the main-loop model
-/tape      open the Reasoning Tape
-/sessions  list this project's sessions
-/undo      revert the last edit step
-/compact   force-compact the running message list
+```sh
+dsc -c                 # continue the most recent session in this project
+dsc -r <session-id>    # resume a specific session
+dsc -new               # force a new session
 ```
 
-## Environment variables
+## Configuration
 
-| Name | Default | Effect |
-|------|---------|--------|
-| `DEEPSEEK_API_KEY` | (required) | DeepSeek API credential. |
-| `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` | `100000` | Trigger threshold for automatic session compaction. Once the estimated token count of the running message list exceeds this value, older turns are collapsed into a single summary message. Set lower for chattier sessions, higher to disable in practice. |
+Configuration is layered from built-in defaults, user config,
+project-local config, and CLI flags. Project-local configuration lives
+at `./.deepseek/config.toml`; user-wide configuration lives at
+`~/.deepseek/config.toml`.
 
-## Providers
+Minimal DeepSeek configuration:
 
-DeepSeek is the default provider; OpenAI-compatible endpoints can be configured in `.deepseek/config.toml`. See [Providers](docs/PROVIDERS.md).
+```toml
+[active]
+provider = "deepseek"
 
-## Architecture in one paragraph
+[providers.deepseek]
+type = "deepseek"
+base_url = "https://api.deepseek.com"
+env_var = "DEEPSEEK_API_KEY"
+first_token_timeout_ms = 45000
+chunk_stall_timeout_ms = 20000
 
-ReAct loop (callback-driven, modeled on Crush's `internal/agent/agent.go`)
-over a hand-rolled DeepSeek client (~400 LOC HTTP+SSE+typed events,
-no external SDK). Bubble Tea TUI with collapsible reasoning blocks and
-a live Cost HUD. Sessions persist to a pure-Go SQLite
-(`modernc.org/sqlite`, no CGO) so `--continue` / `--resume` / branching
-work without breaking the single-binary distribution story. Tool calls
-run in parallel, gated by a tiered permission policy with snapshot
-rollback (`/undo`). Pro Validator (the Duet) sits between the model and
-destructive operations as a structured-output adjudicator.
+[defaults]
+model = "deepseek-v4-flash"
+thinking = true
+```
 
-Reference repos that shaped the design: `charmbracelet/crush` (Go,
-callback ReAct), `sst/opencode` (finish-reason override), `cline/cline`
-(stream/present split), `plandex-ai/plandex` (two-tier stream timeout).
-See `docs/design.md` §3.
+OpenAI-compatible endpoints use the same provider mechanism:
 
-## Documentation
+```toml
+[active]
+provider = "openai"
 
-- [Design document](docs/design.md) — full architecture, decisions, trade-offs
-- [Install](docs/install.md)
-- [Configuration](docs/config.md)
-- [Tools](docs/tools.md)
-- [Reasoning Tape (`/tape`)](docs/tape.md) — headline feature
-- [Two-Model Duet](docs/duet.md) — second headline feature
-- [Hooks](docs/hooks.md)
-- [MCP](docs/mcp.md)
-- [Custom Slash Commands](docs/commands.md)
-- [Skills](docs/skills.md) — cross-tool SKILL.md discovery
+[providers.openai]
+type = "openai-compat"
+base_url = "https://api.openai.com"
+env_var = "OPENAI_API_KEY"
+default_model = "gpt-4o"
+```
 
-## Appearance
+See [docs/config.md](docs/config.md) and
+[docs/PROVIDERS.md](docs/PROVIDERS.md) for the full field reference.
 
-DeepSeek Ocean — a deep blue → light blue gradient visual identity.
-The startup banner features a whale mascot and `DEEPSEEKCODE` wordmark
-with per-character gradient coloring. Tool calls render as left-sidebar
-cards with brand-blue bars. The spinner flows with an HCL gradient.
-Syntax highlighting via chroma. See [TUI Theme](docs/tui-theme.md).
+## CLI Reference
 
-## Status & roadmap
+Top-level commands:
 
-**v0.1 (current)**: 14 built-in tools (incl. `apply_patch`, `question`), tiered permissions + snapshot
-rollback, SQLite sessions with branch-by-reference, Reasoning Tape +
-`/tape` fullscreen, `/models` picker, Pro Validator, Cost HUD,
-`auto_reasoning` (per-turn thinking selector, opt-in),
-5-platform cross-compile, Homebrew tap + curl|sh + go install. MCP
-deferred. Subagents deferred (Spawner interface stub reserved).
+```sh
+dsc                  # launch the TUI
+dsc init             # create DEEPSEEK.md and .deepseek/config.toml
+dsc doctor           # check config, provider, terminal, SQLite, git, MCP, LSP, and updates
+dsc upgrade          # check the latest GitHub release and print an upgrade command
+dsc agent list       # list project agents
+dsc agent show NAME  # print an agent definition
+dsc agent new NAME   # scaffold .deepseek/agent/NAME.md
+dsc agent validate   # validate project agent definitions
+dsc trace inspect TRACE.jsonl
+```
 
-**v0.2**: Subagents · process sandbox (bubblewrap/sandbox-exec) ·
-`web_fetch` · Anthropic-format endpoint · `/sessions` tree picker ·
-shareable Tape export (`dsc tape export`).
+Main flags:
+
+```sh
+-version          print build version
+-p "prompt"      run one model turn and exit
+-model ID        override the main-loop model
+-read-only       block write, edit, and bash tools
+-ask-all         ask before every tool call
+-yolo            auto-approve all tool calls
+-no-duet         disable the Pro validator hook
+-debug           write structured logs under .deepseek/log/
+-trace-jsonl P   write benchmark/diagnostic trace events to a JSONL file
+```
+
+## TUI Commands
+
+Keys:
+
+```text
+Enter       send prompt
+Shift+Enter insert newline
+Ctrl+C      cancel current run, or quit when idle
+Ctrl+D      quit
+Ctrl+R      toggle the most recent thinking block
+Ctrl+T      toggle all thinking blocks
+PgUp/PgDn   scroll
+```
+
+Slash commands:
+
+```text
+/help       show keymap and commands
+/clear      clear scrollback
+/quit       exit
+/models     list or switch the main-loop model
+/tape       open the reasoning tape
+/sessions   list this project's sessions
+/export     open full scrollback in $PAGER
+/undo       restore the previous edit step
+/compact    force message compaction
+```
+
+Custom slash commands are loaded from `.deepseek/command/*.md` in the
+project and home directories. Discovered skills are also promoted to
+slash commands unless a user command with the same name exists.
+
+## Built-in Tooling
+
+`dsc` exposes tools through model function calling. The active set may
+also include MCP tools from configured servers.
+
+Core repository tools:
+
+- `read_file`, `write_file`, `edit_file`, `apply_patch`
+- `glob`, `grep`, `ls`
+- `bash`, `bash_pty`, `background_bash`
+- `git_diff`, `git_show`, `git_blame`, `git_log`
+- `todo_write`, `task_status`, `question`
+
+Context and extension tools:
+
+- `lsp` for language-server-backed symbol queries when a server is
+  detected.
+- `skill_read` for loading discovered `SKILL.md` bodies on demand.
+- `web_fetch` and `web_search` when web tooling is enabled in config.
+- `task` for subagent dispatch and `worktree` for isolated git
+  worktree management.
+
+See [docs/tools.md](docs/tools.md) for tool parameters and safety notes.
+
+## Safety Model
+
+The permission policy is intentionally conservative:
+
+- Read-only tools are allowed by default.
+- File writes are allowed inside the current working directory unless
+  the target path looks secret-like or unsafe.
+- Bash is controlled by allowlist patterns and permission prompts.
+- `--read-only`, `--ask-all`, and `--yolo` override the default policy.
+- Destructive operations can be checked by the Duet validator hook.
+- Mutating file tools snapshot affected paths before execution; `/undo`
+  restores the last edit step.
+- Optional sandboxing can be enabled for bash execution where the host
+  platform supports it.
+
+See [docs/permissions.md](docs/permissions.md) and
+[docs/SANDBOX.md](docs/SANDBOX.md).
+
+## Project Files
+
+- [docs/config.md](docs/config.md) — configuration reference
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) — provider setup
+- [docs/tools.md](docs/tools.md) — built-in tool surface
+- [docs/commands.md](docs/commands.md) — custom slash commands
+- [docs/skills.md](docs/skills.md) — skill discovery
+- [docs/duet.md](docs/duet.md) — Pro validator behavior
+- [docs/tape.md](docs/tape.md) — reasoning tape behavior
+- [docs/upgrade.md](docs/upgrade.md) — upgrade command behavior
+
+## Development
+
+Common commands:
+
+```sh
+make build
+make test
+make test-race
+make lint
+make fmt
+make tidy
+make run
+```
+
+Run a focused test:
+
+```sh
+go test ./internal/llm/ -run TestThinkingSerializesAsStruct -v
+```
+
+Before opening a pull request, run:
+
+```sh
+make fmt
+make lint
+make test
+```
+
+## Versioning
+
+Use **v0.2.0** as the current public baseline for this repository. The
+codebase includes the terminal agent surface plus implemented provider
+configuration, web tools, MCP bridging, LSP integration, subagent
+dispatch, worktree support, sandbox wiring, and diagnostic commands.
+
+Release builds are stamped by `make build` through `git describe`, so a
+tagged build such as `v0.2.0` will appear in `dsc -version`.
 
 ## Contributing
 
-PRs welcome. The design doc (`docs/design.md`) documents what's in,
-what's out, and the cut order if v0.1 velocity slips. Stick to that
-shape; if you want to expand scope, open an issue first so we can talk
-it through.
+Issues and pull requests are welcome. Keep changes grounded in the
+current CLI, TUI, config, and tool behavior; avoid documenting a feature
+until it is implemented and testable in this repository.
+
+For README changes, update both `README.md` and `README.zh-CN.md` with
+matching `##` structure.
 
 ## License
 

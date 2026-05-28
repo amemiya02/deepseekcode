@@ -1,140 +1,298 @@
 # deepseekcode
 
+[![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
+[![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
+[![Baseline](https://img.shields.io/badge/baseline-v0.2.0-blue)](#版本管理)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-为 DeepSeek 模型量身打造的终端原生编码 Agent。单一 Go 二进制，无运行时
-依赖。围绕"推理过程"、"缓存经济学"和"双模型协奏（精准而不喧嚣）"
-做出了与众不同的 UX。
+`deepseekcode` 是面向 DeepSeek 模型和 OpenAI-compatible
+chat-completions 端点的终端原生编码 Agent。它以单个 Go 二进制 `dsc`
+分发，包含 Bubble Tea TUI、一次性 CLI 模式、结构化工具、SQLite 会话、
+缓存友好的请求序列化，以及适合日常仓库工作的权限模型。
 
-> 状态：v0.1 开发中，目标是提交到
-> [awesome-deepseek-agent](https://github.com/deepseek-ai/awesome-deepseek-agent)。
-> 完整设计与权衡见 [`docs/design.md`](docs/design.md)。
+当前文档基线版本：**v0.2.0**。
 
-## 与众不同之处
+## 为什么选择 deepseekcode
 
-- **Reasoning Tape（推理磁带）** — DeepSeek 将 `reasoning_content` 作为
-  独立通道返回。我们把它渲染成可折叠的内联时间线，并提供一个全屏可滚动
-  的 `/tape` 视图，可以浏览并基于任意历史步骤分叉新会话。
-  ([docs/tape.md](docs/tape.md))
-- **Two-Model Duet —— Pro Validator（双模型协奏 —— Pro 校验器）** ——
-  `deepseek-v4-flash` 驱动主循环，`pro` 仅在破坏性操作时作为校验器被精准
-  调用，而不是每一轮都跑。([docs/duet.md](docs/duet.md))
-- **Cost HUD（成本仪表盘）** —— 状态栏实时显示缓存命中率与 ¥/$ 消耗。
-  让 DeepSeek 50 倍的缓存命中折扣变成一个你能盯着看的旋钮。
-- **Structured git（结构化 git 工具）** —— `git_diff`、`git_show`、
-  `git_blame`、`git_log` 全部以类型化工具的形式提供，而不是 pager 输出
-  的包装器。
-- **Session branching（会话分叉）** —— 可从任意历史步骤分叉出子会话。
-  基于 SQLite 父子引用，零消息拷贝，分叉成本极低。
+DeepSeek 暴露了推理内容、前缀缓存指标、长上下文和成本特征，这些能力值得
+被做成一等 UX，而不是藏在通用聊天壳里。
+
+- 用可折叠 thinking block 和全屏 `/tape` 时间线保留推理过程。
+- 在 TUI 和 CLI step 输出里展示缓存命中与用量，让成本可见。
+- 用结构化文件工具、编辑前快照、`/undo` 和类型化 git 工具让改动可审查。
+- 用分层权限、敏感路径检查、bash allowlist 和 Pro validator hook 约束危险操作。
+
+## 功能
+
+- **TUI 和一次性模式**：运行 `dsc` 进入交互式终端 UI，或用
+  `dsc -p "prompt"` 获得可脚本化的 stdout 输出。
+- **DeepSeek-first runtime**：默认使用 `deepseek-v4-flash`，支持
+  `deepseek-v4-pro`、DeepSeek thinking 选项、前缀缓存指标和 JSON-mode
+  校验。
+- **OpenAI-compatible providers**：可在 `.deepseek/config.toml` 中配置
+  其他 chat-completions 端点。
+- **Reasoning Tape**：在聊天流或 `/tape` 全屏视图中查看模型推理、工具调用
+  和修复事件。
+- **Two-Model Duet**：只在破坏性工具调用前使用 Pro-capable provider path
+  做校验，而不是每一轮都调用。
+- **丰富的 Agent 工具**：文件编辑、patch 应用、bash、git、网页抓取/搜索、
+  LSP 查询、子 Agent、worktree、任务状态和用户提问都通过 function calling
+  暴露。
+- **会话与恢复**：使用纯 Go SQLite 保存会话，并支持 `-c`、`-r` 和
+  `/sessions` 选择器。
+- **自定义命令与技能**：加载 `.deepseek/command/*.md` slash 命令，并从项目
+  与 home 目录发现 `SKILL.md`。
+- **MCP 集成**：配置过的 MCP server 会在启动时连接，其工具会桥接到 Agent
+  registry。
+- **可选沙箱**：在配置启用后，bash 工具会使用当前宿主平台可用的 sandbox
+  实现。
 
 ## 安装
 
+前置条件：
+
+- 与 `go.mod` 匹配或更新的 Go 版本。
+- DeepSeek API key，或其他已配置 provider 的 key。
+- Git 是可选依赖；安装后可启用 git-aware prompt context 和 git 工具。
+- Language server 是可选依赖；存在时 `dsc` 会自动连接检测到的 server。
+
+从源码构建：
+
 ```sh
-# Homebrew（v0.1.0 发布后）
-brew install amemiya02/deepseekcode/deepseekcode
-
-# curl | sh
-curl -fsSL https://deepseekcode.dev/install.sh | sh
-
-# Go install
-go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
-
-# 源码构建
-git clone https://github.com/amemiya02/deepseekcode && cd deepseekcode && make build
+git clone https://github.com/amemiya02/deepseekcode
+cd deepseekcode
+make build
+./bin/dsc -version
 ```
 
-完整安装矩阵见 [docs/install.md](docs/install.md)。
+安装到 Go binary 目录：
+
+```sh
+make install
+```
+
+也可以直接用 Go 安装：
+
+```sh
+go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
+```
 
 ## 快速开始
 
 ```sh
 export DEEPSEEK_API_KEY=sk-...
-dsc                                # 启动 TUI
-dsc -p "解释一下 pkg/auth 的实现"   # 单次提示 → 输出到 stdout，然后退出
-dsc --read-only                    # 安全探索模式（禁止任何写操作）
-dsc --yolo -p "跑一下测试"         # 自动放行所有工具调用（用于 CI / 自动化）
-dsc init                           # 生成 DEEPSEEK.md + .deepseek/config.toml
-dsc upgrade                        # 检查更新
+
+dsc
+dsc -p "summarize this repository"
+dsc --read-only -p "explain the architecture"
+dsc init
+dsc doctor
 ```
 
-在 TUI 内：
+常用会话参数：
 
-```
-⏎          发送提示
-^C         中断当前运行（空闲时为退出）
-^D         退出
-r / R      展开/折叠 最近一个 / 所有 思考块
-/help      键位 + 命令一览
-/models    列出 / 切换主循环模型
-/tape      打开推理磁带
-/sessions  列出本项目的所有会话
-/undo      回滚最近一次编辑
-/compact   强制压缩当前会话消息列表
+```sh
+dsc -c                 # 继续当前项目最近一次会话
+dsc -r <session-id>    # 恢复指定会话
+dsc -new               # 强制创建新会话
 ```
 
-## 环境变量
+## 配置
 
-| 名称 | 默认值 | 作用 |
-|------|--------|------|
-| `DEEPSEEK_API_KEY` | （必填） | DeepSeek API 凭据。 |
-| `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` | `100000` | 自动会话压缩触发阈值。当估算 token 数超过该值时，较早的消息被折叠为一条摘要消息。会话较长时调小，几乎不想触发时调大。 |
+配置按内置默认值、用户配置、项目配置、CLI flags 的顺序叠加。项目配置位于
+`./.deepseek/config.toml`；用户级配置位于 `~/.deepseek/config.toml`。
 
-## 多 Provider 支持
+最小 DeepSeek 配置：
 
-DeepSeek 是默认 provider；也可以在 `.deepseek/config.toml` 中配置 OpenAI-compatible 端点。见 [Providers](docs/PROVIDERS.md)。
+```toml
+[active]
+provider = "deepseek"
 
-## 一段话讲清架构
+[providers.deepseek]
+type = "deepseek"
+base_url = "https://api.deepseek.com"
+env_var = "DEEPSEEK_API_KEY"
+first_token_timeout_ms = 45000
+chunk_stall_timeout_ms = 20000
 
-ReAct 主循环（回调驱动，参考 Crush 的 `internal/agent/agent.go`），构建在
-一个手写的 DeepSeek 客户端之上（~400 行 HTTP+SSE+类型化事件，零外部 SDK）。
-Bubble Tea TUI，含可折叠推理块与实时 Cost HUD。会话持久化使用纯 Go 的
-SQLite（`modernc.org/sqlite`，无 CGO），让 `--continue` / `--resume` /
-分叉这些能力不破坏"单二进制分发"的故事。工具调用支持并行，受分层权限
-策略与快照回滚（`/undo`）保护。Pro Validator（即 Duet）作为结构化输出
-裁判，坐镇模型与破坏性操作之间。
+[defaults]
+model = "deepseek-v4-flash"
+thinking = true
+```
 
-塑造了本项目设计的参考仓库：`charmbracelet/crush`（Go、回调 ReAct）、
-`sst/opencode`（finish-reason 覆盖）、`cline/cline`（流到达 / 渲染拆分）、
-`plandex-ai/plandex`（两段式流超时）。详见 `docs/design.md` §3。
+OpenAI-compatible 端点使用同一套 provider 机制：
 
-## 文档
+```toml
+[active]
+provider = "openai"
 
-- [设计文档](docs/design.md) — 完整的架构、决策与权衡
-- [安装](docs/install.md)
-- [配置](docs/config.md)
-- [工具](docs/tools.md)
-- [推理磁带 (`/tape`)](docs/tape.md) — 头号特性
-- [Two-Model Duet](docs/duet.md) — 第二头号特性
-- [Hooks](docs/hooks.md)
-- [MCP](docs/mcp.md)
-- [自定义 Slash 命令](docs/commands.md)
-- [技能](docs/skills.md) — 跨工具 SKILL.md 发现
+[providers.openai]
+type = "openai-compat"
+base_url = "https://api.openai.com"
+env_var = "OPENAI_API_KEY"
+default_model = "gpt-4o"
+```
 
-## 外观
+完整字段说明见 [docs/config.md](docs/config.md) 和
+[docs/PROVIDERS.md](docs/PROVIDERS.md)。
 
-DeepSeek Ocean —— 深蓝→浅蓝渐变视觉体系。启动画面包含鲸鱼吉祥物和
-逐字符渐变着色的 `DEEPSEEKCODE` 字标。工具调用渲染为品牌蓝左边条卡片。
-Spinner 使用 HCL 渐变流动效果。代码块通过 chroma 语法高亮。
-详见 [TUI 主题](docs/tui-theme.md)。
+## CLI 参考
 
-## 状态与路线图
+顶层命令：
 
-**v0.1（当前）**：14 个内建工具（含 `apply_patch`、`question`）、分层权限 + 快照回滚、带按引用分叉的
-SQLite 会话、Reasoning Tape + `/tape` 全屏、`/models` 选择器、Pro
-Validator、Cost HUD、`auto_reasoning`（逐 turn thinking 选择器，opt-in）、
-五平台交叉编译、Homebrew tap + curl|sh + go install。
-MCP 推迟。子 Agent 推迟（已预留 Spawner 接口骨架）。
+```sh
+dsc                  # 启动 TUI
+dsc init             # 创建 DEEPSEEK.md 和 .deepseek/config.toml
+dsc doctor           # 检查配置、provider、终端、SQLite、git、MCP、LSP 和更新
+dsc upgrade          # 检查最新 GitHub release 并打印升级命令
+dsc agent list       # 列出项目 agents
+dsc agent show NAME  # 打印 agent 定义
+dsc agent new NAME   # 生成 .deepseek/agent/NAME.md
+dsc agent validate   # 校验项目 agent 定义
+dsc trace inspect TRACE.jsonl
+```
 
-**v0.2**：子 Agent · 进程沙箱（bubblewrap / sandbox-exec）· `web_fetch` ·
-Anthropic 格式端点 · `/sessions` 树形选择器 · 可分享的 Tape 导出
-（`dsc tape export`）。
+主要 flags：
+
+```sh
+-version          打印构建版本
+-p "prompt"      运行一轮模型调用后退出
+-model ID        覆盖主循环模型
+-read-only       禁止 write、edit 和 bash 工具
+-ask-all         每个工具调用前都询问
+-yolo            自动批准所有工具调用
+-no-duet         禁用 Pro validator hook
+-debug           将结构化日志写入 .deepseek/log/
+-trace-jsonl P   将 benchmark/diagnostic trace 事件写入 JSONL 文件
+```
+
+## TUI 命令
+
+快捷键：
+
+```text
+Enter       发送提示
+Shift+Enter 插入换行
+Ctrl+C      中断当前运行，空闲时退出
+Ctrl+D      退出
+Ctrl+R      展开/折叠最近一个 thinking block
+Ctrl+T      展开/折叠全部 thinking blocks
+PgUp/PgDn   滚动
+```
+
+Slash commands：
+
+```text
+/help       显示快捷键和命令
+/clear      清空 scrollback
+/quit       退出
+/models     列出或切换主循环模型
+/tape       打开 reasoning tape
+/sessions   列出当前项目会话
+/export     在 $PAGER 中打开完整 scrollback
+/undo       恢复上一次编辑 step
+/compact    强制压缩消息
+```
+
+自定义 slash 命令会从项目和 home 目录下的 `.deepseek/command/*.md` 加载。
+发现到的 skills 也会被提升为 slash commands；同名时用户命令优先。
+
+## 内置工具
+
+`dsc` 通过模型 function calling 暴露工具。实际可用工具还可能包括已配置
+MCP server 提供的工具。
+
+核心仓库工具：
+
+- `read_file`, `write_file`, `edit_file`, `apply_patch`
+- `glob`, `grep`, `ls`
+- `bash`, `bash_pty`, `background_bash`
+- `git_diff`, `git_show`, `git_blame`, `git_log`
+- `todo_write`, `task_status`, `question`
+
+上下文与扩展工具：
+
+- `lsp`：检测到 language server 时，用于基于 LSP 的符号查询。
+- `skill_read`：按需读取已发现的 `SKILL.md` 正文。
+- `web_fetch` 和 `web_search`：web tooling 在配置中启用时可用。
+- `task`：分派子 Agent；`worktree`：管理隔离的 git worktree。
+
+工具参数与安全说明见 [docs/tools.md](docs/tools.md)。
+
+## 安全模型
+
+权限策略刻意保守：
+
+- 只读工具默认允许。
+- 文件写入默认允许当前工作目录内的目标，但敏感或不安全路径会触发询问。
+- Bash 由 allowlist patterns 和权限提示控制。
+- `--read-only`、`--ask-all` 和 `--yolo` 会覆盖默认策略。
+- 破坏性操作可由 Duet validator hook 检查。
+- 会修改文件的工具在执行前会快照受影响路径；`/undo` 恢复最近一次编辑 step。
+- 宿主平台支持时，可通过配置启用 bash 执行沙箱。
+
+见 [docs/permissions.md](docs/permissions.md) 和
+[docs/SANDBOX.md](docs/SANDBOX.md)。
+
+## 项目文件
+
+- [docs/config.md](docs/config.md) — 配置参考
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) — provider 设置
+- [docs/tools.md](docs/tools.md) — 内置工具说明
+- [docs/commands.md](docs/commands.md) — 自定义 slash 命令
+- [docs/skills.md](docs/skills.md) — skill 发现
+- [docs/duet.md](docs/duet.md) — Pro validator 行为
+- [docs/tape.md](docs/tape.md) — reasoning tape 行为
+- [docs/upgrade.md](docs/upgrade.md) — upgrade 命令行为
+
+## 开发
+
+常用命令：
+
+```sh
+make build
+make test
+make test-race
+make lint
+make fmt
+make tidy
+make run
+```
+
+运行单个测试：
+
+```sh
+go test ./internal/llm/ -run TestThinkingSerializesAsStruct -v
+```
+
+提交 PR 前建议运行：
+
+```sh
+make fmt
+make lint
+make test
+```
+
+## 版本管理
+
+当前仓库的公开维护基线建议使用 **v0.2.0**。代码已经包含终端 Agent 表面，
+并且已经实现 provider 配置、web tools、MCP bridging、LSP 集成、子 Agent
+分派、worktree 支持、sandbox wiring 和诊断命令。
+
+Release build 会通过 `make build` 使用 `git describe` 注入版本；因此
+`v0.2.0` 这样的 tag 会出现在 `dsc -version` 输出中。
 
 ## 参与贡献
 
-欢迎 PR。设计文档（`docs/design.md`）写明了 v0.1 的范围、舍弃项、以及
-若进度吃紧时的"砍特性顺序"。请尽量在这个轮廓内贡献；如果你想扩展范围，
-请先开 issue 聊一聊。
+欢迎提交 issue 和 pull request。改动应基于当前 CLI、TUI、配置和工具行为；
+一个特性只有在本仓库中已经实现并可测试时，才应写入文档。
 
-## 协议
+修改 README 时，请同步更新 `README.md` 和 `README.zh-CN.md`，并保持匹配的
+`##` 结构。
+
+## 许可证
 
 MIT

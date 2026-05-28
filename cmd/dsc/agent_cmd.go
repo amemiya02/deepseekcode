@@ -59,12 +59,45 @@ func runAgentCommand(cwd string, args []string) (string, error) {
 		}
 		return "created " + filepath.ToSlash(filepath.Join(".deepseek", "agent", args[1]+".md")) + "\n", nil
 	case "validate":
-		_, err := agents.Load(cwd, "")
-		if err != nil {
+		if err := validateAgentFiles(cwd); err != nil {
 			return "", err
 		}
 		return "agents valid\n", nil
 	default:
 		return "", fmt.Errorf("unknown agent command %q", args[0])
 	}
+}
+
+func validateAgentFiles(cwd string) error {
+	agentDir := filepath.Join(cwd, ".deepseek", "agent")
+	return filepath.WalkDir(agentDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if hasUnclosedFrontmatter(string(body)) {
+			return fmt.Errorf("%s: malformed frontmatter", path)
+		}
+		if _, err := agents.ParseAgent(string(body)); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func hasUnclosedFrontmatter(s string) bool {
+	if !(strings.HasPrefix(s, "---\n") || strings.HasPrefix(s, "---\r\n")) {
+		return false
+	}
+	rest := strings.ReplaceAll(s[4:], "\r\n", "\n")
+	return !strings.Contains(rest, "\n---\n")
 }

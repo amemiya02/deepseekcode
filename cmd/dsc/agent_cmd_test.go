@@ -51,3 +51,23 @@ func TestRunAgentNew(t *testing.T) {
 		t.Fatalf("new agent template unexpected:\n%s", body)
 	}
 }
+
+func TestRunAgentValidateMalformed(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, ".deepseek", "agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Malformed: opening --- but no closing ---
+	if err := os.WriteFile(filepath.Join(agentDir, "bad.md"), []byte("---\ndescription: broken\nno closing here"), 0o644); err != nil {
+		t.Fatalf("write bad agent: %v", err)
+	}
+
+	_, err := runAgentCommand(dir, []string{"validate"})
+	if err == nil {
+		t.Fatal("validate should fail on malformed frontmatter, got nil error")
+	}
+	if !strings.Contains(err.Error(), "malformed frontmatter") {
+		t.Fatalf("error should mention malformed frontmatter: %v", err)
+	}
+}

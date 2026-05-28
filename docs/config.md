@@ -243,3 +243,13 @@ Each rule item has `tool` (glob pattern, e.g. `*`, `read_*`) and `args` (regex o
 - `./.deepseek/last_session` — pointer for `dsc -c`
 - `./.deepseek/snapshots/<sessionID>/<stepIdx>/` — pre-edit snapshots
 - `./.deepseek/.gitignore` — auto-written so `git status` stays clean
+
+## Managing agents
+
+Agent definitions live in `.deepseek/agent/*.md`. The `dsc agent` subcommand
+suite manages them from the CLI:
+
+- `dsc agent list` — list all agents (tab-separated name + description), excluding hidden agents.
+- `dsc agent show NAME` — print the raw `.deepseek/agent/NAME.md` file.
+- `dsc agent new NAME` — scaffold a new agent definition with a starter template.
+- `dsc agent validate` — parse all agent definitions and report errors.

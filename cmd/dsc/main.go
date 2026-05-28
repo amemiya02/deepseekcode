@@ -158,6 +158,20 @@ func run() error {
 		return runTrace(os.Args[2:])
 	}
 
+	// Subcommand: dsc agent list|show|new|validate. Manage .deepseek/agent/*.md definitions.
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		out, err := runAgentCommand(cwd, os.Args[2:])
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		return nil
+	}
+
 	var (
 		showVersion bool
 		yolo        bool

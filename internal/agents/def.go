@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,12 @@ type AgentDef struct {
 	Worktree    bool     // frontmatter "worktree": true|false — isolate in git worktree
 	Prompt      string   // body after frontmatter (trimmed)
 	Path        string   // absolute path (filled by Load)
+	Hidden            bool
+	MaxSteps          int
+	PermissionRuleset string
+	Temperature       *float64
+	TopP              *float64
+	DefaultAgent      string
 }
 
 // AgentProfile is a first-class runtime unit that governs tool tiers,
@@ -134,6 +141,24 @@ func parseFrontmatter(fm, body string) (AgentDef, error) {
 			d.Tools = splitTools(val)
 		case "worktree":
 			d.Worktree = parseBool(val)
+		case "hidden":
+			d.Hidden = parseBool(val)
+		case "max_steps", "maxsteps":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				d.MaxSteps = n
+			}
+		case "permission_ruleset", "permissions":
+			d.PermissionRuleset = val
+		case "temperature":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				d.Temperature = &f
+			}
+		case "top_p":
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				d.TopP = &f
+			}
+		case "default_agent":
+			d.DefaultAgent = val
 		}
 	}
 	if d.Mode == "" {

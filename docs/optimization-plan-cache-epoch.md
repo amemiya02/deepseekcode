@@ -140,6 +140,9 @@ gap is the billed comparison run itself.
   `TestCacheGate_ChildMissingParentFails`,
   `TestCacheGate_ChildUnknownParentFails`).
 
+- Agent frontmatter now parses hidden, max_steps, permission_ruleset,
+  temperature, top_p, and default_agent.
+
 **Blocked / not yet done**
 
 - **M1 / M5 real reports + Reasonix comparison (P0-2).** The harness can now

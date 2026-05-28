@@ -247,3 +247,25 @@ func keys(m map[string]AgentDef) []string {
 	sort.Strings(ks)
 	return ks
 }
+
+func TestParseAgentExtendedFrontmatter(t *testing.T) {
+	got, err := ParseAgent("---\ndescription: Scout the repo\nmode: all\nhidden: true\nmax_steps: 12\npermission_ruleset: read-only\ntemperature: 0.2\ntop_p: 0.9\ndefault_agent: scout\ntools: read_file, grep\n---\nScout instructions.")
+	if err != nil {
+		t.Fatalf("ParseAgent returned error: %v", err)
+	}
+	if got.Mode != "all" || !got.Hidden || got.MaxSteps != 12 {
+		t.Fatalf("mode/hidden/max_steps not parsed: %+v", got)
+	}
+	if got.PermissionRuleset != "read-only" {
+		t.Fatalf("PermissionRuleset = %q", got.PermissionRuleset)
+	}
+	if got.Temperature == nil || *got.Temperature != 0.2 {
+		t.Fatalf("Temperature = %v, want 0.2", got.Temperature)
+	}
+	if got.TopP == nil || *got.TopP != 0.9 {
+		t.Fatalf("TopP = %v, want 0.9", got.TopP)
+	}
+	if got.DefaultAgent != "scout" {
+		t.Fatalf("DefaultAgent = %q, want scout", got.DefaultAgent)
+	}
+}

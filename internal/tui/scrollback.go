@@ -375,6 +375,7 @@ func (s *Scrollback) Clear() {
 	s.streamTextIdx = noStream
 	s.streamThinkIdx = noStream
 	s.vis = visualState{}
+	s.itemRenderCache = NewRenderCache(128)
 	s.bump()
 }
 

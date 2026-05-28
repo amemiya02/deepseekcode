@@ -88,9 +88,20 @@ type chatItem struct {
 func (i chatItem) renderKey(width int, theme string) string {
 	switch i.kind {
 	case itemToolResult:
-		return fmt.Sprintf("tool-result:%s:%s:%t:%d:%s", i.toolCallID, theme, i.expanded, width, i.result.Content)
+		return fmt.Sprintf(
+			"tool-result:%s:%s:%s:%s:%t:%t:%d:%s:%s",
+			i.toolCallID,
+			i.tool,
+			i.args,
+			theme,
+			i.expanded,
+			i.result.IsError,
+			width,
+			i.duration.Round(time.Millisecond).String(),
+			i.result.Content,
+		)
 	case itemToolCall:
-		return fmt.Sprintf("tool-call:%s:%s:%d:%s", i.toolCallID, theme, width, i.args)
+		return fmt.Sprintf("tool-call:%s:%s:%s:%d:%s", i.toolCallID, i.tool, theme, width, i.args)
 	default:
 		return ""
 	}

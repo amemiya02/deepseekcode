@@ -34,6 +34,25 @@ args = ["mcp-server-git", "--repository", "."]
 - Server processes inherit `deepseekcode`'s working directory and a
   reduced environment derived from `[mcp_servers.X.env]`.
 
+## HTTP transport
+
+`HTTPTransport` speaks JSON-RPC 2.0 over HTTP POST to remote MCP servers.
+It replaces the stdio process spawn when the server URL is an `http://` or
+`https://` endpoint rather than a local command.
+
+- **Framing**: each `Send` posts a single JSON-RPC request envelope
+  (`jsonrpc: "2.0"`, monotonic `id`, `method`, `params`) and expects a
+  single JSON-RPC response.
+- **Notifications**: `Notify` posts a JSON-RPC notification (no `id`,
+  fire-and-forget).
+- **Timeout**: 30 seconds per request (configurable on the underlying
+  `http.Client`).
+- **Concurrency**: request IDs are assigned via `atomic.Int64`, so
+  concurrent `Send` calls are safe.
+- **Errors**: non-2xx HTTP status returns an error with status code and
+  body; a JSON-RPC `error` object returns an error with `code` and
+  `message`.
+
 ## Permissions
 
 MCP tools go through the same permission tier as built-ins. Each MCP

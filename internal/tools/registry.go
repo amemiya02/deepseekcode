@@ -96,6 +96,12 @@ func New() *Registry {
 	return &Registry{tools: make(map[string]Tool), tiers: make(map[string]ToolTier)}
 }
 
+func NewWithStructSearch(root string) *Registry {
+	r := New()
+	r.RegisterWithTier(NewStructSearchTool(root), TierLazy)
+	return r
+}
+
 // Register installs a tool. Later registrations of the same name
 // overwrite earlier ones; intentional, so MCP can shadow a built-in
 // if a user wants. The tier is auto-detected from the tool name.

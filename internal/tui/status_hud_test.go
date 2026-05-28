@@ -262,3 +262,37 @@ func TestRenderToolSummary_SmallWidth(t *testing.T) {
 		t.Errorf("result too long for small width: %q", result)
 	}
 }
+
+func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
+	got := RenderHUD(HUDData{
+		Model:           "deepseek-v4-flash",
+		Effort:          "medium",
+		ContextTokens:   64000,
+		ContextLimit:    128000,
+		InputHitTokens:  950,
+		InputMissTokens: 50,
+		OutputTokens:    20,
+		SessionCNY:      0.0123,
+		EpochID:         "epoch_abcdef123456",
+		PrefixHash:      "1234567890abcdef",
+		PendingChanges:  2,
+		DriftReason:     "tools",
+		ActiveAgent:     "coding-default",
+		RunningJobs:     1,
+	}, 240)
+
+	for _, want := range []string{
+		"cache 95.0%",
+		"ctx 64000/128000",
+		"epoch abcdef12",
+		"pfx 12345678",
+		"pending 2",
+		"drift tools",
+		"agent coding-default",
+		"jobs 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("RenderHUD missing %q:\n%s", want, got)
+		}
+	}
+}

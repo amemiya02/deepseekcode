@@ -20,6 +20,12 @@ type statusState struct {
 	thinking        bool
 	hint            string
 	mode            appMode
+	epochID         string
+	prefixHash      string
+	pendingChanges  int
+	driftReason     string
+	activeAgent     string
+	runningJobs     int
 }
 
 // render returns the one-line status string. When in Normal (scroll)
@@ -45,6 +51,12 @@ func (s statusState) render(t Theme) string {
 		InputHitTokens:  s.usage.PromptCacheHitTokens,
 		InputMissTokens: s.usage.PromptCacheMissTokens,
 		OutputTokens:    s.usage.CompletionTokens,
+		EpochID:         s.epochID,
+		PrefixHash:      s.prefixHash,
+		PendingChanges:  s.pendingChanges,
+		DriftReason:     s.driftReason,
+		ActiveAgent:     s.activeAgent,
+		RunningJobs:     s.runningJobs,
 	}
 
 	hudLine := RenderHUD(hudData, 200) // Use wide width for status line

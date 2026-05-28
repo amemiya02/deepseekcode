@@ -435,6 +435,8 @@ session a3f1 — "refactor auth middleware"
 - Strictly **local-only**. No telemetry. No "anonymous usage stats."
   If telemetry is ever added it will be opt-in and will never include
   message content.
+- The `renderSessionReceipts` helper (cmd/dsc/session_inspect.go) renders an
+  ordered transcript-receipt log for a future `dsc session inspect` subcommand.
 
 ---
 

@@ -250,7 +250,7 @@ func DefaultCompactionConfig() CompactionConfig {
 	cfg := CompactionConfig{
 		PreserveRecentMessages: 4,
 		MaxEstimatedTokens:     10_000,
-		AutoCompactInputTokens: 100_000,
+		AutoCompactInputTokens: 800_000,
 	}
 	if v := os.Getenv("DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
@@ -261,9 +261,9 @@ func DefaultCompactionConfig() CompactionConfig {
 }
 
 // MaxContextTokens is the default maximum context window size for
-// DeepSeek V4 models. Used by ContextPressure to compute the
-// usage ratio. Override via Agent.MaxContextTokens.
-const MaxContextTokens = 128_000
+// DeepSeek V4 models (1M context). Used by ContextPressure to compute
+// the usage ratio. Override via Agent.MaxContextTokens.
+const MaxContextTokens = 1_000_000
 
 // CompactWithSemantic checks context pressure and decides between
 // no compaction, a warning, semantic compaction (LLM), or

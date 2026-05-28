@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
+
+// epochSeq is a process-wide monotonic counter for unique epoch IDs.
+var epochSeq atomic.Int64
 
 // PrefixEpoch is a frozen model-visible prefix snapshot.
 // Once frozen (after first model request), it cannot change.
@@ -123,6 +127,7 @@ func (m *EpochManager) createEpochLocked(reason string, components EpochComponen
 	ch := computeComponentHashes(components)
 	epochHash := llm.ComputeEpochHash(ch)
 	now := time.Now()
+	seq := epochSeq.Add(1)
 	componentHashes := map[string]string{
 		"system":        ch.SystemSHA256,
 		"tools":         ch.ToolsSHA256,
@@ -132,7 +137,7 @@ func (m *EpochManager) createEpochLocked(reason string, components EpochComponen
 		"few_shots":     ch.FewShotsSHA256,
 	}
 	return &PrefixEpoch{
-		EpochID:           fmt.Sprintf("epoch_%d", now.UnixNano()),
+		EpochID:           fmt.Sprintf("epoch_%d_%d", now.UnixMilli(), seq),
 		AgentProfileID:    components.AgentProfileID,
 		Model:             components.Model,
 		ReasoningEffort:   components.ReasoningEffort,

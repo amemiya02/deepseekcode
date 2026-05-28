@@ -406,6 +406,18 @@ matrix run is recorded with all three adapters, the Reasonix comparison
 required by the Phase-1 Definition of Done is **blocked**, and M5 must not be
 marked complete.
 
+### Inspecting a trace locally
+
+Use `dsc trace inspect` to summarize one JSONL trace without running the full
+benchmark:
+
+```sh
+./bin/dsc trace inspect bench/traces/deepseekcode-optimized/ctx-compaction.jsonl
+```
+
+The output shows usage turns, cache hit rate, hit/miss tokens, cost, root
+epochs, subagent epochs, and per-epoch completion state.
+
 ## Future Work
 
 - [ ] Support for multi-turn conversations

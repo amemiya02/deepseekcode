@@ -152,6 +152,12 @@ func run() error {
 		return runUpgrade(os.Args[2:])
 	}
 
+	// Subcommand: dsc trace inspect TRACE.jsonl. Reads an agent JSONL trace and
+	// prints cache, epoch, cost, and subagent evidence without running the bench.
+	if len(os.Args) > 1 && os.Args[1] == "trace" {
+		return runTrace(os.Args[2:])
+	}
+
 	var (
 		showVersion bool
 		yolo        bool

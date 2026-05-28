@@ -718,9 +718,10 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Session budget gate: check before model streaming starts.
-	// Zero projection preserves existing behavior until real config/projection exists.
-	projectedCNY := 0.0
+	// Session budget gate: check before model streaming starts. The projection is
+	// conservative: input is priced as cache miss because authoritative cache usage
+	// only arrives after the provider returns a usage record.
+	projectedCNY := ProjectedTurnCostCNY(a.Model, req)
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true

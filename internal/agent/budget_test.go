@@ -409,3 +409,30 @@ done:
 		t.Errorf("expected 2 steps, got %d", stepCount)
 	}
 }
+
+func TestRunStepBudgetBlocksProjectedCostBeforeStreaming(t *testing.T) {
+	streamCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streamCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w, `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	a := New(client, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "deepseek-v4-flash")
+	a.System = "sys"
+	a.BudgetPolicy = BudgetPolicy{HardCNY: 0.000001}
+
+	rec, err := a.runStep(context.Background())
+	if err != nil {
+		t.Fatalf("runStep returned error: %v", err)
+	}
+	if rec.FinishReason != "budget_blocked" {
+		t.Fatalf("FinishReason = %q, want budget_blocked", rec.FinishReason)
+	}
+	if streamCalls != 0 {
+		t.Fatalf("Client.Stream called %d times, want 0", streamCalls)
+	}
+}

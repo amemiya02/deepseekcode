@@ -89,11 +89,26 @@ type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
 	tiers map[string]ToolTier
+	// fileTracker is the session-scoped read-before-write tracker shared by the
+	// file tools (T3.2). Set by RegisterBuiltins*; nil for a bare registry.
+	fileTracker *FileTracker
 }
 
 // New returns an empty registry.
 func New() *Registry {
 	return &Registry{tools: make(map[string]Tool), tiers: make(map[string]ToolTier)}
+}
+
+// FileTracker returns the registry's read-before-write tracker, or nil when the
+// registry was built without the file tools. The agent uses it to invalidate
+// read stamps on history compaction.
+func (r *Registry) FileTracker() *FileTracker {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.fileTracker
 }
 
 func NewWithStructSearch(root string) *Registry {
@@ -224,6 +239,11 @@ func (r *Registry) Subset(names []string) *Registry {
 			sub.Register(t)
 		}
 	}
+	// Share the read-before-write tracker so the subset's FileTracker() is the
+	// same instance the (shared) tool pointers use — otherwise the invalidate-
+	// on-fold Clear() in a subagent built from a Subset is a silent no-op
+	// (T3.2 / adversarial HIGH-1).
+	sub.fileTracker = r.FileTracker()
 	return sub
 }
 
@@ -255,6 +275,7 @@ func (r *Registry) TierTools(tiers ...ToolTier) *Registry {
 	sub := New()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	sub.fileTracker = r.fileTracker // share the freshness tracker (T3.2 / HIGH-1)
 	for name, tool := range r.tools {
 		if tierSet[r.tiers[name]] {
 			sub.tools[name] = tool
@@ -271,6 +292,7 @@ func (r *Registry) CloneForCWD(cwd string) *Registry {
 	cloned := New()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	cloned.fileTracker = r.fileTracker // share the freshness tracker (T3.2 / HIGH-1)
 	for name, t := range r.tools {
 		cloned.tools[name] = CloneForCWD(t, cwd)
 		cloned.tiers[name] = r.tiers[name]

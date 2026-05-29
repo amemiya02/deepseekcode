@@ -31,6 +31,7 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T4.4 | ✅ done | Unified compaction triggers: `reconcileCompactThreshold` makes the deterministic fallback fire at `min(absolute AutoCompactInputTokens, CompactThreshold×maxCtx)` so the absolute and ratio-of-max triggers cannot disagree on the firing point (default-preserving — both are 800k at defaults; only applied when semantic compaction is live). Deleted the dead parallel `context_fold.go`+`context_fold_test.go` (`PlanContextFold`/`FoldPlan`/`hasToolCalls` — zero production callers, confirmed by deletion-impact grep + clean build; it duplicated `adjustBoundary`'s tool-pair-safe boundary logic, a drift risk). |
 | T4.3 | ✅ done | Compaction summary is now an **assistant-role body message** (not a 2nd `system` message wedged after the prompt) — `staticSystem()` only fingerprints `a.System`, so the wire shape changes with zero fingerprint/cache movement (the cache lens of the adversarial pass returned **zero** real defects). `mergeCompactSummaries` wired into production via `summarizeWithMerge` so multi-round compaction unions early facts forward (head-of-body placement is what keeps the prior summary inside the next compaction window — required for merge; "tail" in the original spec was inconsistent with its own merge requirement). **Hardened after a 3-lens adversarial workflow** which reproduced a real HIGH fact-corruption bug: a user message embedding a `- tools_used: […]` line masqueraded as a field header on the now-production `parseSummaryFields` round-trip → fixed by `singleLine()`-collapsing the two raw-text fields (`current_work`, `recent_requests`); also semantic-path carry-forward (prompt instruction + full prior-summary inclusion, since the LLM summary's field vocabulary differs and can't be structurally merged), `current_work`/`recent_requests` cross-round retention, prose false-positive guard, and a scoped store.go comment. touchesFingerprint=false (golden unmoved, full suite + `-race` green). |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
+| T3.2 | ✅ done | Read-before-write freshness guard: a session-scoped, mutex-guarded, nil-safe `tools.FileTracker` stamps `(mtime,size)` on every `read_file`; `edit_file`/`write_file` reject a write to a file never read or changed-since with a model-actionable re-read hint; `apply_patch` is deliberately exempt (its hunk context lines self-validate drift) but re-stamps. Shared across the registry + Subset/TierTools/CloneForCWD; cleared on compaction (folded reads → re-read). Tool `Description`/`Parameters` bytes untouched (golden unmoved). **Hardened by a 3-lens adversarial workflow** that found 2 real HIGH bugs: (1) `Subset`/`TierTools`/`CloneForCWD` dropped the tracker → subagent fold-invalidation was a silent no-op (fixed: share the instance); (2) files over the read cap were never stamped → permanently uneditable (fixed: stamp on the too-large path). full suite + `-race` green. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
@@ -39,8 +40,12 @@ vetted sequential order from the T4 design pass; T4.3 was additionally hardened
 by a 3-lens adversarial workflow that caught a real HIGH fact-corruption bug.
 The avoided 6-caller `ReplaceWithCompaction` signature churn the critic flagged:
 a one-line hardcoded-role change in the store sufficed, since no caller needs a
-variable role. Next: **T3** (T3.2 sandbox, T3.4/T3.5 undo/checkpoint), **T5**
-(T5.2–T5.4 TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7** (docs/config/profiles).
+variable role. **T3 is nearly done** (T3.1/T3.2/T3.3 landed). Remaining T3:
+**T3.4** (sandbox-on-by-default) is DEFERRED — it flips a security-relevant
+default the roadmap itself flags as the highest UX risk, so it stays opt-in
+pending an explicit decision; **T3.5** (/undo transcript reconcile) is next.
+Then **T5** (T5.2–T5.4 TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7**
+(docs/config/profiles).
 
 ---
 

@@ -13,10 +13,18 @@ func RegisterBuiltins(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string
 }
 
 func RegisterBuiltinsWithSandbox(r *Registry, maxReadBytes, maxWriteBytes int64, cwd string, sb sandbox.Sandbox, profile sandbox.Profile) {
-	r.Register(&ReadFile{MaxBytes: maxReadBytes, CWD: cwd})
-	r.Register(&WriteFile{MaxBytes: maxWriteBytes, CWD: cwd})
-	r.Register(NewApplyPatchTool(cwd, maxWriteBytes))
-	r.Register(&EditFile{CWD: cwd})
+	// One read-before-write tracker shared by every file tool in this registry,
+	// so a read by read_file is visible to a later edit_file/write_file/
+	// apply_patch (T3.2). Stored on the registry so the agent can invalidate it
+	// when the conversation is compacted.
+	ft := NewFileTracker()
+	r.fileTracker = ft
+	ap := NewApplyPatchTool(cwd, maxWriteBytes)
+	ap.tracker = ft
+	r.Register(&ReadFile{MaxBytes: maxReadBytes, CWD: cwd, Tracker: ft})
+	r.Register(&WriteFile{MaxBytes: maxWriteBytes, CWD: cwd, Tracker: ft})
+	r.Register(ap)
+	r.Register(&EditFile{CWD: cwd, Tracker: ft})
 	r.Register(&Bash{Sandbox: sb, SandboxProfile: profile, CWD: cwd})
 	r.Register(&BashPTY{Sandbox: sb, SandboxProfile: profile, CWD: cwd})
 	r.Register(Glob{})

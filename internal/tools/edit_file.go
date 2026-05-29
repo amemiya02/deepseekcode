@@ -17,6 +17,9 @@ import (
 // facto standard for agent edits.
 type EditFile struct {
 	CWD string // project root for path safety; empty means os.Getwd
+	// Tracker, when set, rejects an edit to a file that was never read or that
+	// changed on disk since the last read (T3.2). nil disables the guard.
+	Tracker *FileTracker
 }
 
 func (EditFile) Name() string { return "edit_file" }
@@ -96,6 +99,12 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	p.Path = checkedPath
 
+	// Read-before-write freshness guard (T3.2): refuse to edit a file that was
+	// never read or that changed on disk since the read.
+	if err := e.Tracker.CheckFresh(p.Path); err != nil {
+		return Errf("%v", err), nil
+	}
+
 	b, err := os.ReadFile(p.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -132,6 +141,9 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	if err := atomicWriteFile(p.Path, []byte(out)); err != nil {
 		return Result{}, err
 	}
+	// Re-stamp so a follow-up edit in the same session isn't tripped by the
+	// agent's own write (T3.2).
+	e.Tracker.RecordWrite(p.Path)
 	return Result{Content: fmt.Sprintf("edited %s", p.Path)}, nil
 }
 

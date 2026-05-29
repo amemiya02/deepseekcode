@@ -598,6 +598,10 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				// Folded read_file results are gone from the live transcript, so
+				// the model no longer holds those files' contents — force a
+				// re-read before any edit (T3.2). nil-safe on both calls.
+				a.Tools.FileTracker().Clear()
 				a.bus.Publish(EventCompaction{
 					FromIdx:      res.FromIdx,
 					ToIdx:        res.ToIdx,
@@ -642,6 +646,8 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	// See the semantic path above: invalidate read stamps on fold (T3.2).
+	a.Tools.FileTracker().Clear()
 	a.bus.Publish(EventCompaction{
 		FromIdx:      res.FromIdx,
 		ToIdx:        res.ToIdx,

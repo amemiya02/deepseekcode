@@ -69,6 +69,18 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		names = readOnlyToolNames(sub)
 	}
 
+	// permission_ruleset frontmatter (T7.1): map a recognized ruleset name to a
+	// Mode for the child. DeriveChild clamps it against the parent, so this can
+	// only ever restrict, never escalate. Plan mode (above) is a stronger,
+	// tool-narrowing directive and takes precedence.
+	if def.Mode != "plan" && def.PermissionRuleset != "" {
+		if m, ok := permissions.ModeFromRuleset(def.PermissionRuleset); ok {
+			childMode = m
+		} else {
+			s.Parent.EmitInfo("unknown permission_ruleset " + def.PermissionRuleset + "; using parent mode")
+		}
+	}
+
 	// Worktree isolation: create a git worktree for the child agent
 	// when the agent def has worktree:true and we have a manager.
 	useWT := def.Worktree && def.Mode != "plan" && s.WT != nil && s.Locks != nil
@@ -115,6 +127,20 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		child.System = s.Parent.System
 	}
 	child.MaxToolCalls = 50
+
+	// Apply the remaining agent-def frontmatter (T7.1). MaxSteps drives the
+	// step-cap StopCondition only (NOT MaxToolCalls — they are orthogonal
+	// mechanisms). Temperature/TopP feed the llm.Request via the new Agent
+	// fields. DefaultAgent has no defined spawn semantics yet, so it is
+	// surfaced rather than silently ignored.
+	if def.MaxSteps > 0 {
+		child.StopWhen = []StopCondition{MaxSteps(def.MaxSteps), child.loopDetection(5, 3)}
+	}
+	child.Temperature = def.Temperature
+	child.TopP = def.TopP
+	if def.DefaultAgent != "" {
+		s.Parent.EmitInfo("agent def default_agent=" + def.DefaultAgent + " is parsed but not yet applied at spawn")
+	}
 
 	// If the child registry has the "task" tool, bind it with depth+1.
 	if _, ok := subReg.Get("task"); ok {

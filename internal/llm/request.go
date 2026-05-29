@@ -21,6 +21,7 @@ type Request struct {
 	Tools          []Tool         `json:"tools,omitempty"`
 	ToolChoice     string         `json:"tool_choice,omitempty"`
 	Temperature    *float64       `json:"temperature,omitempty"`
+	TopP           *float64       `json:"top_p,omitempty"`
 	MaxTokens      int            `json:"max_tokens,omitempty"`
 	ResponseFormat *ResponseFmt   `json:"response_format,omitempty"`
 
@@ -130,6 +131,7 @@ func (r Request) MarshalCacheStable() ([]byte, error) {
 		Tools          []Tool           `json:"tools,omitempty"`
 		ToolChoice     string           `json:"tool_choice,omitempty"`
 		Temperature    *float64         `json:"temperature,omitempty"`
+		TopP           *float64         `json:"top_p,omitempty"`
 		MaxTokens      int              `json:"max_tokens,omitempty"`
 		ResponseFormat *ResponseFmt     `json:"response_format,omitempty"`
 		Thinking       *ThinkingOptions `json:"thinking,omitempty"`
@@ -141,6 +143,7 @@ func (r Request) MarshalCacheStable() ([]byte, error) {
 		Tools:          tools,
 		ToolChoice:     r.ToolChoice,
 		Temperature:    r.Temperature,
+		TopP:           r.TopP,
 		MaxTokens:      r.MaxTokens,
 		ResponseFormat: r.ResponseFormat,
 		Thinking:       r.Thinking,

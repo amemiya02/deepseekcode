@@ -85,6 +85,13 @@ type Agent struct {
 	Model    string
 	Thinking bool
 
+	// Temperature and TopP, when non-nil, are sent on every model request as
+	// the OpenAI-shaped sampling controls. nil (the default) omits the field
+	// entirely so the main-loop wire bytes — and thus the cache fingerprint —
+	// are unchanged. Sub-agents set these from their def frontmatter (T7.1).
+	Temperature *float64
+	TopP        *float64
+
 	// EscalationModel, when non-empty and different from Model, enables
 	// model-driven escalation (T2.3): a turn is re-issued once on this model
 	// when the assistant emits a <<<NEEDS_PRO>>> self-declaration or the
@@ -813,10 +820,12 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	}
 
 	req := llm.Request{
-		Model:    a.Model,
-		Messages: a.fullMessages(),
-		Tools:    a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
-		Thinking: llm.ThinkingEnabled(thinking),
+		Model:       a.Model,
+		Messages:    a.fullMessages(),
+		Tools:       a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
+		Thinking:    llm.ThinkingEnabled(thinking),
+		Temperature: a.Temperature,
+		TopP:        a.TopP,
 	}
 
 	staticSys := a.staticSystem()

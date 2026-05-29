@@ -243,6 +243,30 @@ func (p *Policy) DeriveChildWithCwd(requested Mode, cwd string) *Policy {
 	return child
 }
 
+// ModeFromRuleset maps a `permission_ruleset` agent-def frontmatter value to a
+// Mode. Recognized names: "default", "yolo", "read-only"/"readonly",
+// "ask-all"/"askall", "plan". Returns ok=false for an unrecognized name so the
+// caller can fall back and warn.
+//
+// Because spawn feeds the result through DeriveChild → clampMode, a ruleset can
+// only ever RESTRICT a child relative to its parent, never escalate it: a child
+// of a default-mode parent that requests "yolo" is clamped back to default.
+func ModeFromRuleset(name string) (Mode, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "default":
+		return ModeDefault, true
+	case "yolo":
+		return ModeYolo, true
+	case "read-only", "readonly":
+		return ModeReadOnly, true
+	case "ask-all", "askall":
+		return ModeAskAll, true
+	case "plan":
+		return ModePlan, true
+	}
+	return ModeDefault, false
+}
+
 // clampMode returns the safer (lower danger) of a and b.
 func clampMode(a, b Mode) Mode {
 	if danger(a) <= danger(b) {

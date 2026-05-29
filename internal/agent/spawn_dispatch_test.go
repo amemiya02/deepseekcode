@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -152,6 +153,82 @@ func TestSpawnTaskExcludedByDefault(t *testing.T) {
 	}
 	if res.Summary != "subagent depth limit reached" {
 		t.Errorf("Summary = %q, want depth limit", res.Summary)
+	}
+}
+
+func fptr(f float64) *float64 { return &f }
+
+// TestSpawnDefSamplingReachesRequest proves def.Temperature/def.TopP reach the
+// child's actual llm.Request wire body (T7.1).
+func TestSpawnDefSamplingReachesRequest(t *testing.T) {
+	var gotTemp, gotTopP *float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Temperature *float64 `json:"temperature"`
+			TopP        *float64 `json:"top_p"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTemp, gotTopP = body.Temperature, body.TopP
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"content":"done"}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, tools.New(), pol, "test-model")
+	defs := map[string]agents.AgentDef{
+		"tuned": {Prompt: "x", Temperature: fptr(0.3), TopP: fptr(0.7)},
+	}
+	s := &LoopSpawner{Client: client, Parent: parent, Defs: defs}
+
+	if _, err := s.Spawn(context.Background(), tools.SpawnRequest{Agent: "tuned", Description: "go"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if gotTemp == nil || *gotTemp != 0.3 {
+		t.Errorf("temperature on wire = %v, want 0.3", gotTemp)
+	}
+	if gotTopP == nil || *gotTopP != 0.7 {
+		t.Errorf("top_p on wire = %v, want 0.7", gotTopP)
+	}
+}
+
+// TestSpawnDefMaxStepsCapsLoop proves def.MaxSteps drives the child's step cap:
+// the mock returns a fresh tool call every turn (distinct args, so neither loop
+// detection nor the storm breaker fires), so only MaxSteps can end the loop.
+// Without the wiring the child would run to the default cap (50), not 3.
+func TestSpawnDefMaxStepsCapsLoop(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := strconv.Itoa(int(atomic.AddInt32(&calls, 1)))
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c`+n+`","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"f`+n+`.go\"}"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	reg := tools.New()
+	reg.Register(stubTool{name: "read_file"})
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, reg, pol, "test-model")
+	defs := map[string]agents.AgentDef{
+		"capped": {Tools: []string{"read_file"}, Prompt: "x", MaxSteps: 3},
+	}
+	s := &LoopSpawner{Client: client, Parent: parent, Defs: defs}
+
+	if _, err := s.Spawn(context.Background(), tools.SpawnRequest{Agent: "capped", Description: "loop"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Errorf("model requests = %d, want 3 (def.MaxSteps cap; default would be 50)", got)
 	}
 }
 

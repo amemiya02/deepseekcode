@@ -214,6 +214,13 @@ type Agent struct {
 	// at the top of Run.
 	loopNudged bool
 	loopFloor  int
+
+	// charsPerToken is the per-session calibrated chars-per-token ratio (T4.1),
+	// learned from provider usage frames and consumed by the compaction trigger
+	// and the budget projection. 0 means uncalibrated → the cold-start char/4
+	// prior is used. Touched only on the single Run/runStep goroutine (like
+	// loopFloor), so it needs no lock.
+	charsPerToken float64
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -512,6 +519,43 @@ func (a *Agent) compactForOverflow(ctx context.Context) {
 	a.ForceCompact(ctx)
 }
 
+// emaAlpha weights the latest observed ratio when updating the running
+// chars-per-token EMA. 0.3 lets the estimate track a shift between CJK-heavy
+// and code-heavy phases of a session without a single huge paste dominating it.
+const emaAlpha = 0.3
+
+// calibrateCharsPerToken folds one turn's authoritative usage.PromptTokens into
+// the per-session chars-per-token ratio (T4.1), correlating it against the
+// character count of the exact request that produced it. A non-positive
+// PromptTokens (no usage frame — a partial/failed turn) or a zero char count
+// leaves the prior ratio intact, so a corrupt frame never poisons the estimate.
+// The observed ratio is clamped to a sane band before being folded in via an
+// EMA; the first frame seeds the EMA directly, and until then char/4
+// (charsPerToken==0) remains the cold-start prior.
+func (a *Agent) calibrateCharsPerToken(promptMessages []llm.Message, usage llm.Usage) {
+	if usage.PromptTokens <= 0 {
+		return
+	}
+	chars, _ := estimateChars(promptMessages)
+	if chars <= 0 {
+		return
+	}
+	observed := float64(chars) / float64(usage.PromptTokens)
+	// Clamp to reject corrupt frames. DeepSeek V4 sits ~1.0-1.7 on pure CJK,
+	// ~3-3.5 on code/JSON, ~4 on ASCII prose; whitespace-heavy pastes can run
+	// higher. [1.0, 12.0] admits every legitimate mix and rejects garbage.
+	if observed < 1.0 {
+		observed = 1.0
+	} else if observed > 12.0 {
+		observed = 12.0
+	}
+	if a.charsPerToken <= 0 {
+		a.charsPerToken = observed // seed the EMA with the first usable frame
+		return
+	}
+	a.charsPerToken = emaAlpha*observed + (1-emaAlpha)*a.charsPerToken
+}
+
 // maybeCompact runs the compaction pipeline and, if it produced a
 // summary, swaps the in-memory message list and persists the
 // collapse. Errors surface via EventInfo so the user sees them
@@ -524,7 +568,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 
 	if !a.DisableSemanticCompaction {
 		// Check context pressure for semantic compaction thresholds.
-		pressure := ContextPressure(a.Messages, maxCtx)
+		pressure := ContextPressure(a.Messages, maxCtx, a.charsPerToken)
 		action := ShouldSemanticCompact(pressure, a.SemanticCfg)
 
 		if action == "warn" {
@@ -581,7 +625,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	}
 
 	// Deterministic fallback path.
-	res := CompactSession(a.Messages, a.CompactionCfg)
+	res := CompactSession(a.Messages, a.CompactionCfg, a.charsPerToken)
 	if res.Summary == "" {
 		return
 	}
@@ -828,7 +872,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// Session budget gate: check before model streaming starts. The projection is
 	// conservative: input is priced as cache miss because authoritative cache usage
 	// only arrives after the provider returns a usage record.
-	projectedCNY := ProjectedTurnCostCNY(a.Model, req)
+	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken)
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true
@@ -884,7 +928,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			flashCost := llm.Cost(a.Model, sr.usage)
 			gateState := a.BudgetState
 			gateState.SpentCNY += flashCost
-			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq))
+			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken))
 			if !allow {
 				a.bus.Publish(EventInfo{Text: "escalation skipped: projected cost would exceed the session budget"})
 			} else {
@@ -957,6 +1001,13 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if cost := llm.Cost(respModel, sr.usage); cost > 0 {
 		a.BudgetState.SpentCNY += cost
 	}
+
+	// Calibrate the chars-per-token ratio from this turn's authoritative
+	// prompt-token count (T4.1). req.Messages is the exact model-visible payload
+	// (including the frozen system prompt when an epoch is frozen), so its char
+	// count correlates with usage.PromptTokens. A zero/absent usage frame leaves
+	// the prior ratio untouched.
+	a.calibrateCharsPerToken(req.Messages, sr.usage)
 
 	return StepRecord{
 		FinishReason:      sr.finish,

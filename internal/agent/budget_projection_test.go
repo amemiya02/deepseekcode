@@ -16,7 +16,7 @@ func TestProjectedTurnCostCNYUsesMissPricingConservatively(t *testing.T) {
 		MaxTokens: 1000,
 	}
 
-	got := ProjectedTurnCostCNY("deepseek-v4-flash", req)
+	got := ProjectedTurnCostCNY("deepseek-v4-flash", req, defaultCharsPerToken)
 	if got <= 0 {
 		t.Fatalf("ProjectedTurnCostCNY = %v, want positive cost", got)
 	}
@@ -39,7 +39,7 @@ func TestProjectedTurnCostCNYDefaultOutputWhenMaxTokensUnset(t *testing.T) {
 		},
 	}
 
-	got := ProjectedTurnCostCNY("deepseek-v4-flash", req)
+	got := ProjectedTurnCostCNY("deepseek-v4-flash", req, defaultCharsPerToken)
 	inputTokens := EstimateTokens(req.Messages)
 	want := llm.Cost("deepseek-v4-flash", llm.Usage{
 		PromptCacheMissTokens: inputTokens,
@@ -59,7 +59,7 @@ func TestProjectedTurnCostCNYUnknownModelReturnsZero(t *testing.T) {
 		MaxTokens: 1000,
 	}
 
-	if got := ProjectedTurnCostCNY("unknown-model", req); got != 0 {
+	if got := ProjectedTurnCostCNY("unknown-model", req, defaultCharsPerToken); got != 0 {
 		t.Fatalf("ProjectedTurnCostCNY unknown model = %v, want 0", got)
 	}
 }

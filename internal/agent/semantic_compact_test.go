@@ -118,7 +118,7 @@ func TestContextPressure(t *testing.T) {
 			llm.TextBlock{Text: strings.Repeat("x", 400)}, // ~100 tokens
 		}},
 	}
-	pressure := ContextPressure(msgs, 1000)
+	pressure := ContextPressure(msgs, 1000, defaultCharsPerToken)
 	if pressure < 0.10 || pressure > 0.12 {
 		t.Errorf("expected ~0.10 pressure; got %f", pressure)
 	}
@@ -126,7 +126,7 @@ func TestContextPressure(t *testing.T) {
 
 func TestContextPressure_ZeroMax(t *testing.T) {
 	msgs := []llm.Message{{Role: "user"}}
-	if p := ContextPressure(msgs, 0); p != 0 {
+	if p := ContextPressure(msgs, 0, defaultCharsPerToken); p != 0 {
 		t.Errorf("expected 0 for zero max; got %f", p)
 	}
 }
@@ -143,9 +143,9 @@ func TestSemanticCompact_UsesFlashDisablesThinkingTimeoutCost(t *testing.T) {
 		// Capture the request body to verify model, thinking, max_tokens.
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Model     string              `json:"model"`
+			Model     string               `json:"model"`
 			Thinking  *llm.ThinkingOptions `json:"thinking,omitempty"`
-			MaxTokens int                 `json:"max_tokens"`
+			MaxTokens int                  `json:"max_tokens"`
 		}
 		_ = json.Unmarshal(body, &req)
 		receivedModel = req.Model

@@ -49,27 +49,61 @@ type CompactionResult struct {
 // adds on top of raw block content.
 const perMessageOverhead = 5
 
-// EstimateTokens returns a rough char/4 token count for the message
-// list. Used only for compaction triggering — not for cost
-// computation. Cheap and deterministic; no tokenizer dependency.
-func EstimateTokens(messages []llm.Message) int {
-	total := 0
+// defaultCharsPerToken is the cold-start chars-per-token prior — the divisor
+// today's char/4 heuristic uses. EstimateTokens == EstimateTokensCalibrated at
+// this ratio, so behaviour is byte-identical until the first provider usage
+// frame calibrates a per-session ratio (T4.1, Agent.calibrateCharsPerToken).
+const defaultCharsPerToken = 4.0
+
+// estimateChars sums the raw model-visible character count of the message
+// blocks (text, thinking, tool name+input, tool result) and returns it with the
+// message count. It isolates the deterministic char measurement from the
+// divisor so calibration can re-divide the same chars; perMessageOverhead is
+// added by the caller per message, never folded into the char count.
+func estimateChars(messages []llm.Message) (chars, msgCount int) {
 	for _, m := range messages {
-		total += perMessageOverhead
+		msgCount++
 		for _, b := range m.Blocks {
 			switch v := b.(type) {
 			case llm.TextBlock:
-				total += len(v.Text) / 4
+				chars += len(v.Text)
 			case llm.ThinkingBlock:
-				total += len(v.Text) / 4
+				chars += len(v.Text)
 			case llm.ToolUseBlock:
-				total += (len(v.Name) + len(v.Input)) / 4
+				chars += len(v.Name) + len(v.Input)
 			case llm.ToolResultBlock:
-				total += len(v.Content) / 4
+				chars += len(v.Content)
 			}
 		}
 	}
-	return total
+	return chars, msgCount
+}
+
+// EstimateTokensCalibrated estimates the token count of a message list using
+// the given chars-per-token ratio — a per-session value learned from provider
+// usage frames (see Agent.calibrateCharsPerToken). A non-positive ratio falls
+// back to the cold-start prior. Used only for compaction triggering and the
+// pre-stream budget projection — never for cost computation. Cheap,
+// deterministic, no tokenizer dependency.
+//
+// Rounding-locus note: this divides the SUMMED char count once, whereas the
+// historical EstimateTokens floored each block's len/4 independently. For the
+// existing strict test inputs every block length is a multiple of 4, so the
+// results are identical; for other inputs the two differ by at most
+// (blocks-1) tokens — negligible on a 1M window.
+func EstimateTokensCalibrated(messages []llm.Message, charsPerToken float64) int {
+	if charsPerToken <= 0 {
+		charsPerToken = defaultCharsPerToken
+	}
+	chars, n := estimateChars(messages)
+	return n*perMessageOverhead + int(float64(chars)/charsPerToken)
+}
+
+// EstimateTokens returns the cold-start (char/4) token estimate. It is the
+// uncalibrated wrapper over EstimateTokensCalibrated; callers holding a learned
+// per-session ratio should use the calibrated form directly.
+func EstimateTokens(messages []llm.Message) int {
+	return EstimateTokensCalibrated(messages, defaultCharsPerToken)
 }
 
 // CompactSession runs the full pipeline: ShouldCompact →
@@ -80,8 +114,8 @@ func EstimateTokens(messages []llm.Message) int {
 // CompactSession does NOT persist — the caller wires the result
 // into Persister.ReplaceWithCompaction (T-209) and replaces its
 // in-memory a.Messages slice.
-func CompactSession(messages []llm.Message, cfg CompactionConfig) CompactionResult {
-	ok, fromIdx, toIdx := ShouldCompact(messages, cfg)
+func CompactSession(messages []llm.Message, cfg CompactionConfig, charsPerToken float64) CompactionResult {
+	ok, fromIdx, toIdx := ShouldCompact(messages, cfg, charsPerToken)
 	if !ok {
 		return CompactionResult{}
 	}
@@ -224,7 +258,7 @@ func collectToolUseIDs(messages []llm.Message) map[string]bool {
 // Returns ok=false (and zero indices) when:
 //   - estimated tokens are below AutoCompactInputTokens, or
 //   - len(messages) <= preserve*2 (nothing meaningful to compact)
-func ShouldCompact(messages []llm.Message, cfg CompactionConfig) (ok bool, fromIdx, toIdx int) {
+func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken float64) (ok bool, fromIdx, toIdx int) {
 	preserve := cfg.PreserveRecentMessages
 	if preserve <= 0 {
 		preserve = 4
@@ -236,7 +270,7 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig) (ok bool, fromI
 	if len(messages) <= preserve*2 {
 		return false, 0, 0
 	}
-	if EstimateTokens(messages) < threshold {
+	if EstimateTokensCalibrated(messages, charsPerToken) < threshold {
 		return false, 0, 0
 	}
 	return true, 0, len(messages) - preserve
@@ -293,7 +327,9 @@ func CompactWithSemantic(
 		semanticCfg = defaultSemanticCompactionConfig()
 	}
 
-	pressure := ContextPressure(messages, maxContextTokens)
+	// CompactWithSemantic is not on the production path (maybeCompact calls
+	// SemanticCompact directly); use the cold-start prior here.
+	pressure := ContextPressure(messages, maxContextTokens, defaultCharsPerToken)
 	action := ShouldSemanticCompact(pressure, semanticCfg)
 
 	switch action {

@@ -73,7 +73,7 @@ func TestShouldCompact(t *testing.T) {
 
 	t.Run("below_threshold", func(t *testing.T) {
 		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 10_000}
-		ok, _, _ := ShouldCompact(mk(20, 100), cfg)
+		ok, _, _ := ShouldCompact(mk(20, 100), cfg, defaultCharsPerToken)
 		if ok {
 			t.Error("expected no compaction below threshold")
 		}
@@ -81,7 +81,7 @@ func TestShouldCompact(t *testing.T) {
 
 	t.Run("above_threshold_picks_window", func(t *testing.T) {
 		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 100}
-		ok, from, to := ShouldCompact(mk(20, 100), cfg)
+		ok, from, to := ShouldCompact(mk(20, 100), cfg, defaultCharsPerToken)
 		if !ok {
 			t.Fatal("expected compaction above threshold")
 		}
@@ -95,7 +95,7 @@ func TestShouldCompact(t *testing.T) {
 
 	t.Run("too_short", func(t *testing.T) {
 		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 1}
-		ok, _, _ := ShouldCompact(mk(6, 1000), cfg)
+		ok, _, _ := ShouldCompact(mk(6, 1000), cfg, defaultCharsPerToken)
 		if ok {
 			t.Error("expected no compaction when len ≤ preserve*2")
 		}
@@ -103,7 +103,7 @@ func TestShouldCompact(t *testing.T) {
 
 	t.Run("zero_preserve_defaults_to_4", func(t *testing.T) {
 		cfg := CompactionConfig{AutoCompactInputTokens: 100}
-		ok, _, to := ShouldCompact(mk(20, 100), cfg)
+		ok, _, to := ShouldCompact(mk(20, 100), cfg, defaultCharsPerToken)
 		if !ok {
 			t.Fatal("expected compaction")
 		}
@@ -114,7 +114,7 @@ func TestShouldCompact(t *testing.T) {
 
 	t.Run("zero_threshold_disables", func(t *testing.T) {
 		cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 0}
-		ok, _, _ := ShouldCompact(mk(20, 1000), cfg)
+		ok, _, _ := ShouldCompact(mk(20, 1000), cfg, defaultCharsPerToken)
 		if ok {
 			t.Error("zero threshold should disable compaction")
 		}
@@ -211,7 +211,7 @@ func TestCompactSessionFullFlow(t *testing.T) {
 	t.Run("no_compact_when_below_threshold", func(t *testing.T) {
 		got := CompactSession(mk(20), CompactionConfig{
 			PreserveRecentMessages: 4, AutoCompactInputTokens: 10_000,
-		})
+		}, defaultCharsPerToken)
 		if got.Summary != "" {
 			t.Errorf("expected empty result; got %+v", got)
 		}
@@ -221,7 +221,7 @@ func TestCompactSessionFullFlow(t *testing.T) {
 		msgs := mk(20)
 		got := CompactSession(msgs, CompactionConfig{
 			PreserveRecentMessages: 4, AutoCompactInputTokens: 100,
-		})
+		}, defaultCharsPerToken)
 		if got.Summary == "" {
 			t.Fatal("expected compaction; got empty")
 		}

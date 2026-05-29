@@ -59,11 +59,11 @@ type SemanticCompactionResult struct {
 }
 
 // ContextPressure returns the current context usage ratio (0-1).
-func ContextPressure(messages []llm.Message, maxContextTokens int) float64 {
+func ContextPressure(messages []llm.Message, maxContextTokens int, charsPerToken float64) float64 {
 	if maxContextTokens <= 0 {
 		return 0
 	}
-	return float64(EstimateTokens(messages)) / float64(maxContextTokens)
+	return float64(EstimateTokensCalibrated(messages, charsPerToken)) / float64(maxContextTokens)
 }
 
 // ShouldSemanticCompact decides whether semantic compaction should fire.
@@ -141,7 +141,9 @@ func SemanticCompact(
 		MaxEstimatedTokens:     cfg.MaxSummaryTokens,
 		AutoCompactInputTokens: 1, // always trigger for semantic path
 	}
-	ok, fromIdx, toIdx := ShouldCompact(messages, compCfg)
+	// compCfg.AutoCompactInputTokens==1 always trips, so the calibrated ratio
+	// is irrelevant here; pass the cold-start prior.
+	ok, fromIdx, toIdx := ShouldCompact(messages, compCfg, defaultCharsPerToken)
 	if !ok {
 		return SemanticCompactionResult{}
 	}
@@ -313,7 +315,9 @@ func buildSemanticSummaryPrompt(messages []llm.Message) string {
 
 // fallbackToDeterministic wraps the existing CompactSession for fallback.
 func fallbackToDeterministic(messages []llm.Message, cfg CompactionConfig, reason string) SemanticCompactionResult {
-	res := CompactSession(messages, cfg)
+	// Reached with cfg.AutoCompactInputTokens==1 (always trips), so the ratio
+	// is irrelevant; the cold-start prior keeps this fallback deterministic.
+	res := CompactSession(messages, cfg, defaultCharsPerToken)
 	if res.Summary == "" {
 		return SemanticCompactionResult{FallbackReason: reason}
 	}

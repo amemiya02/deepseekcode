@@ -62,8 +62,8 @@ func TestContextPressureScalesWithRatio(t *testing.T) {
 
 func TestProjectedTurnCostCNYUsesCalibratedRatio(t *testing.T) {
 	req := llm.Request{Messages: msgsWithChars(40_000), MaxTokens: 1000}
-	c4 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 4.0)
-	c2 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 2.0)
+	c4 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 4.0, 0)
+	c2 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 2.0, 0)
 	if !(c4 > 0 && c2 > c4) {
 		t.Errorf("smaller ratio must raise projected cost (more input tokens): c4=%v c2=%v", c4, c2)
 	}

@@ -869,10 +869,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Session budget gate: check before model streaming starts. The projection is
-	// conservative: input is priced as cache miss because authoritative cache usage
-	// only arrives after the provider returns a usage record.
-	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken)
+	// Session budget gate: check before model streaming starts. The projection
+	// discounts input by the rolling session cache-hit rate (T4.2); at cold
+	// start that rate is 0, so the first turn is priced all-miss like before.
+	// A model with no pricing table can't be cost-gated — surface that once
+	// rather than letting it slip the gate silently.
+	if !llm.CostKnown(a.Model) && !a.BudgetState.UnknownModelWarned {
+		a.BudgetState.UnknownModelWarned = true
+		a.bus.Publish(EventInfo{Text: "budget gate: model " + a.Model + " has no known pricing; turns cannot be cost-gated"})
+	}
+	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken, a.BudgetState.SessionCacheHitRate())
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true
@@ -928,7 +934,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			flashCost := llm.Cost(a.Model, sr.usage)
 			gateState := a.BudgetState
 			gateState.SpentCNY += flashCost
-			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken))
+			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken, a.BudgetState.SessionCacheHitRate()))
 			if !allow {
 				a.bus.Publish(EventInfo{Text: "escalation skipped: projected cost would exceed the session budget"})
 			} else {
@@ -1001,6 +1007,12 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if cost := llm.Cost(respModel, sr.usage); cost > 0 {
 		a.BudgetState.SpentCNY += cost
 	}
+
+	// Fold this committed turn's realized cache hit/miss into the rolling
+	// session rate so the next turn's projection discounts by actual cache
+	// performance (T4.2). The discarded flash turn of an escalation is not
+	// folded — only what was committed, matching how cost is charged.
+	a.BudgetState.FoldCacheUsage(sr.usage.PromptCacheHitTokens, sr.usage.PromptCacheMissTokens)
 
 	// Calibrate the chars-per-token ratio from this turn's authoritative
 	// prompt-token count (T4.1). req.Messages is the exact model-visible payload

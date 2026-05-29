@@ -410,6 +410,138 @@ done:
 	}
 }
 
+// T4.2 — rolling cache-hit rate accounting on BudgetState.
+func TestSessionCacheHitRateAndFold(t *testing.T) {
+	// Cold start: no usage observed yet → rate 0 (the all-miss projection floor).
+	var s BudgetState
+	if got := s.SessionCacheHitRate(); got != 0 {
+		t.Errorf("cold-start rate = %v, want 0", got)
+	}
+
+	// A frame with no input tokens must not move the rate.
+	s.FoldCacheUsage(0, 0)
+	if s.CacheHitTokens != 0 || s.CacheMissTokens != 0 {
+		t.Errorf("zero-input frame folded: hit=%d miss=%d, want 0/0", s.CacheHitTokens, s.CacheMissTokens)
+	}
+
+	// 600 hit / 400 miss → 0.6.
+	s.FoldCacheUsage(600, 400)
+	if got := s.SessionCacheHitRate(); got != 0.6 {
+		t.Errorf("rate after 600/400 = %v, want 0.6", got)
+	}
+
+	// Accumulates across turns: +400 hit / +600 miss → 1000/1000 = 0.5.
+	s.FoldCacheUsage(400, 600)
+	if got := s.SessionCacheHitRate(); got != 0.5 {
+		t.Errorf("rate after accumulation = %v, want 0.5", got)
+	}
+
+	// Negative inputs are floored to 0 (defensive) — a -100/200 frame folds as 0/200.
+	var n BudgetState
+	n.FoldCacheUsage(-100, 200)
+	if n.CacheHitTokens != 0 || n.CacheMissTokens != 200 {
+		t.Errorf("negative hit clamped wrong: hit=%d miss=%d, want 0/200", n.CacheHitTokens, n.CacheMissTokens)
+	}
+}
+
+// TestBudgetFoldsRealizedCacheUsage proves a billed turn's authoritative cache
+// hit/miss tokens land in BudgetState so the next turn's projection can
+// discount by them.
+func TestBudgetFoldsRealizedCacheUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"content":"ok"}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":100,"prompt_cache_hit_tokens":600,"prompt_cache_miss_tokens":400,"total_tokens":1100}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	a := New(client, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "deepseek-v4-flash")
+	a.System = "sys"
+	a.StopWhen = []StopCondition{MaxSteps(1)}
+
+	if _, err := a.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if a.BudgetState.CacheHitTokens != 600 || a.BudgetState.CacheMissTokens != 400 {
+		t.Errorf("folded cache tokens = %d hit / %d miss, want 600/400",
+			a.BudgetState.CacheHitTokens, a.BudgetState.CacheMissTokens)
+	}
+	if got := a.BudgetState.SessionCacheHitRate(); got != 0.6 {
+		t.Errorf("session cache-hit rate = %v, want 0.6", got)
+	}
+}
+
+// TestUnknownModelWarnsOnce proves a model with no pricing table surfaces a
+// single "cannot be cost-gated" warning per session rather than silently
+// slipping the budget gate every turn.
+func TestUnknownModelWarnsOnce(t *testing.T) {
+	var stepCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stepCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if stepCount == 1 {
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"echo","arguments":"{}"}}]}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`,
+			)
+		} else {
+			emitSSE(w,
+				`{"choices":[{"index":0,"delta":{"content":"done"}}]}`,
+				`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`,
+			)
+		}
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	reg := tools.New()
+	reg.Register(echoTool{})
+	a := New(client, reg, permissions.New(permissions.ModeYolo, "", nil, nil, nil), "no-such-model")
+	a.System = "sys"
+	a.StopWhen = []StopCondition{MaxSteps(5)}
+	// A live policy so the gate path is exercised (not short-circuited).
+	a.BudgetPolicy = BudgetPolicy{WarnCNY: 100.0, HardCNY: 200.0}
+
+	sub := a.Bus().Subscribe(256)
+
+	if _, err := a.Run(context.Background(), "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var warnCount int
+	deadline := time.After(time.Second)
+drain:
+	for {
+		select {
+		case env := <-sub.C:
+			if info, ok := env.Event.(EventInfo); ok &&
+				info.Text == "budget gate: model no-such-model has no known pricing; turns cannot be cost-gated" {
+				warnCount++
+			}
+		case <-deadline:
+			break drain
+		default:
+			break drain
+		}
+	}
+
+	if stepCount != 2 {
+		t.Fatalf("expected 2 streamed steps, got %d", stepCount)
+	}
+	if warnCount != 1 {
+		t.Errorf("expected exactly 1 unknown-model warning across 2 steps, got %d", warnCount)
+	}
+	if !a.BudgetState.UnknownModelWarned {
+		t.Error("BudgetState.UnknownModelWarned should be set after warning")
+	}
+}
+
 func TestRunStepBudgetBlocksProjectedCostBeforeStreaming(t *testing.T) {
 	streamCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

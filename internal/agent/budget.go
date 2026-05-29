@@ -12,6 +12,53 @@ type BudgetPolicy struct {
 type BudgetState struct {
 	SpentCNY float64
 	Warned   bool
+
+	// Rolling cache-hit accounting over every billed turn this session. Used
+	// to discount the pre-stream cost projection by the realized cache-hit
+	// rate (T4.2). Only frames with input tokens (hit+miss>0) fold in, so an
+	// empty/absent usage frame can't skew the rate.
+	CacheHitTokens  int
+	CacheMissTokens int
+
+	// UnknownModelWarned makes the "model has no known pricing, so the budget
+	// gate can't cost-gate it" warning fire at most once per session.
+	UnknownModelWarned bool
+}
+
+// SessionCacheHitRate is the rolling cache-hit fraction in [0,1] over all input
+// tokens billed this session. It returns 0 before any usage is observed (cold
+// start), so a projection discounted by it floors to all-miss — never looser
+// than the conservative default. The result is clamped defensively.
+func (s BudgetState) SessionCacheHitRate() float64 {
+	total := s.CacheHitTokens + s.CacheMissTokens
+	if total <= 0 {
+		return 0
+	}
+	r := float64(s.CacheHitTokens) / float64(total)
+	if r < 0 {
+		return 0
+	}
+	if r > 1 {
+		return 1
+	}
+	return r
+}
+
+// FoldCacheUsage adds one turn's realized cache hit/miss token counts into the
+// rolling session accounting. Turns with no input tokens are ignored so they
+// can't move the rate.
+func (s *BudgetState) FoldCacheUsage(hitTokens, missTokens int) {
+	if hitTokens < 0 {
+		hitTokens = 0
+	}
+	if missTokens < 0 {
+		missTokens = 0
+	}
+	if hitTokens+missTokens == 0 {
+		return
+	}
+	s.CacheHitTokens += hitTokens
+	s.CacheMissTokens += missTokens
 }
 
 // CheckBudget evaluates whether a model turn should proceed given the

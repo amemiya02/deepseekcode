@@ -26,18 +26,20 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T2.2 | ✅ done | Fuzzy multi-strategy edit replacer (exact → line-trimmed → whitespace-normalized → indentation-flexible → block-anchor), first **unique** match wins, ambiguous rejected; `apply_patch` `locateChunk` now rejects ambiguous context too. 22-case corpus: exact-only baseline 0.091 → cascade 1.000 (asserted). Byte-fidelity preserved (original substrings, full-file `want`); `Description`/`Parameters` byte-identical so the fingerprint is unmoved. |
 | T2.3 | ✅ done | Model-driven escalation: `<<<NEEDS_PRO>>>` marker (whole-first-line) or ≥3 unrecoverable repair errors re-issues the turn once on `deepseek-v4-pro` via the shared `streamWithReissue`. Only `req.Model` changes → fingerprint unmoved; flash turn discarded (no duplicate persist); `respModel` drives persistence/cost/trace; opt-in contract (`EnableEscalation`) keeps the default golden untouched. **Hardened after a 3-lens adversarial workflow** (storm-history pollution → `StormBreaker` Snapshot/Restore; flash spend charged + pro re-gated; trace attribution; marker tightened). |
 | T2.4 | ✅ done | MCP stdio liveness watcher: process exit → `StateDegraded` (tools drop via the existing `State!=StateConnected` filter), then exactly one bounded reconnect with negative-result backoff. `r.mu` sole authority, no IO under lock, watcher bound to its transport's `Done()` by value; `-race` clean. ADR-0001 invariant (degrade surfaces as `PendingMCPToolRemoved`, never mid-epoch fingerprint movement) covered compositionally by the new mcp-layer `DriftRemoved` test + existing `TestCapabilityDiff_MCPAddRemove`/`TestEpochMutationsAfterFreezeBecomePending`. |
+| T4.1 | ✅ done | Per-session calibrated chars-per-token ratio learned from `usage.PromptTokens` (EMA α=0.3, clamped [1.0,12.0], zero-usage no-op), fed into the compaction trigger (`ContextPressure`/`ShouldCompact`) and the budget projection (`ProjectedTurnCostCNY`). `EstimateTokensCalibrated` with `EstimateTokens` as the char/4 cold-start wrapper — turn-1 byte-identical to today. No tokenizer; touchesFingerprint=false (golden unmoved). |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-**T2 is complete** (T2.1–T2.4). T2.2/T2.4 landed via a worktree-isolated parallel
-workflow integrated by cherry-pick; T2.3 was implemented inline then hardened by a
-3-lens adversarial-verification workflow that caught three real defects before
-merge. T1 is closed except the T1.3 leftovers. Next up: **T4** — T4.1 (reconcile
-the char/4 token estimate against provider usage) → T4.2 (cache-aware budget
-projection + unknown-model guard) → T4.3 (cache-preserving compaction: summary as
-tail, wire `mergeCompactSummaries`) → T4.4 (unify compaction triggers, delete dead
-`context_fold.go`). Then the remaining T3/T5/T6/T7 stages.
+**T1 and T2 are complete** (bar T1.3 leftovers). **T4 in progress: T4.1 landed.**
+A T4 design pass (4 specs + critic) produced the vetted order and a shared-file
+map (compact.go/budget_projection.go/agent.go are shared → sequential). Next:
+**T4.2** (cache-aware budget projection: discount by rolling cache-hit rate; warn
+on unknown models — spec go-ahead) → **T4.3** (cache-preserving compaction:
+summary as assistant-role tail, wire `mergeCompactSummaries` — the critic flagged
+its `ReplaceWithCompaction` signature change has **6 callers** + two store tests
+asserting the old system-role summary; needs an adversarial pass) → **T4.4**
+(unify triggers; delete dead `context_fold.go`). Then the remaining T3/T5/T6/T7.
 
 ---
 

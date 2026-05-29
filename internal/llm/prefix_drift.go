@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"sort"
 )
 
 // PrefixInput holds the inputs for prefix fingerprint computation.
@@ -20,41 +19,22 @@ type PrefixFingerprint struct {
 }
 
 // ComputeFingerprint hashes system prompt + canonical serialized tool specs.
-// Tools are sorted by name and their JSON-Schema parameters are canonicalized
-// (key-sorted) so that key order differences do not affect the fingerprint.
+// It is a thin shim over StaticPrefix.Fingerprint() (static_prefix.go); callers
+// are being migrated to StaticPrefix directly. See docs/adr/0001.
 func ComputeFingerprint(input PrefixInput) PrefixFingerprint {
-	sysH := sha256hex(input.SystemPrompt)
-	tlsH := hashToolsCanonical(input.Tools)
-	return PrefixFingerprint{sysH, tlsH, sha256hex(sysH + ":" + tlsH)}
+	return StaticPrefix{System: input.SystemPrompt, Tools: input.Tools}.Fingerprint()
 }
 
-// hashToolsCanonical hashes the canonical serialized form of tools.
-// Tools are sorted by name and parameters are canonicalized by key-sort.
-// The output matches the tool JSON bytes produced by MarshalCacheStable.
+// hashToolsCanonical hashes the canonical serialized form of tools. It builds on
+// canonicalizeTools (static_prefix.go) — the same canonicalization
+// MarshalCacheStable uses — so the bytes hashed here are exactly the tool bytes
+// that appear on the wire.
 func hashToolsCanonical(tools []Tool) string {
 	if len(tools) == 0 {
 		return sha256hex("")
 	}
-
-	// Sort tools by name (same as MarshalCacheStable)
-	sorted := make([]Tool, len(tools))
-	copy(sorted, tools)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].Function.Name < sorted[j].Function.Name
-	})
-
-	// Canonicalize each tool's parameters (same as MarshalCacheStable)
-	for i, t := range sorted {
-		if len(t.Function.Parameters) > 0 {
-			canon, err := canonicalJSON(t.Function.Parameters)
-			if err == nil {
-				sorted[i].Function.Parameters = canon
-			}
-		}
-	}
-
-	// Serialize tools to JSON - use the exact same struct as MarshalCacheStable
-	b, err := json.Marshal(sorted)
+	canon, _ := canonicalizeTools(tools) // best-effort: leaves malformed schemas raw
+	b, err := json.Marshal(canon)
 	if err != nil {
 		return sha256hex("")
 	}
@@ -63,39 +43,48 @@ func hashToolsCanonical(tools []Tool) string {
 
 func sha256hex(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 
-// PrefixMonitor detects cache-prefix drift across turns. Not
-// goroutine-safe; callers must serialize Check calls.
+// PrefixMonitor detects cache-prefix drift across turns by comparing each
+// StaticPrefix against the previously pinned one. Not goroutine-safe; callers
+// must serialize Check calls.
 type PrefixMonitor struct {
-	pinned      *PrefixFingerprint
+	prev        *StaticPrefix
+	prevFP      PrefixFingerprint
 	checkCount  uint64
 	changeCount uint64
 }
 
 func NewPrefixMonitor() *PrefixMonitor { return &PrefixMonitor{} }
 
-// Check pins on first call; on drift re-pins and returns which changed.
-func (m *PrefixMonitor) Check(staticSystem string, tools []Tool) (changed bool, which string) {
+// Check pins on the first call (zero PrefixDiff, drifted=false). On later calls
+// it compares against the pin: an identical fingerprint is no drift; a changed
+// fingerprint re-pins and returns the typed PrefixDiff with drifted=true. The
+// stable path only hashes — the diff breakdown is computed only when the
+// fingerprint actually moved.
+func (m *PrefixMonitor) Check(p StaticPrefix) (PrefixDiff, bool) {
 	m.checkCount++
-	fp := ComputeFingerprint(PrefixInput{SystemPrompt: staticSystem, Tools: tools})
-	if m.pinned == nil {
-		m.pinned = &fp
-		return false, ""
+	fp := p.Fingerprint()
+	if m.prev == nil {
+		m.pin(p, fp)
+		return PrefixDiff{}, false
 	}
-	if fp.CombinedSHA256 == m.pinned.CombinedSHA256 {
-		return false, ""
+	if fp.CombinedSHA256 == m.prevFP.CombinedSHA256 {
+		return PrefixDiff{}, false
 	}
 	m.changeCount++
-	sysC, toolsC := fp.SystemSHA256 != m.pinned.SystemSHA256, fp.ToolsSHA256 != m.pinned.ToolsSHA256
-	switch {
-	case sysC && toolsC:
-		which = "sys+tools"
-	case sysC:
-		which = "sys"
-	default:
-		which = "tools"
+	d := Diff(*m.prev, p)
+	m.pin(p, fp)
+	return d, true
+}
+
+// pin stores a defensive copy of the prefix so later caller-side slice mutation
+// cannot retroactively change what the monitor compares against.
+func (m *PrefixMonitor) pin(p StaticPrefix, fp PrefixFingerprint) {
+	cp := StaticPrefix{System: p.System}
+	if len(p.Tools) > 0 {
+		cp.Tools = append([]Tool(nil), p.Tools...)
 	}
-	m.pinned = &fp
-	return true, which
+	m.prev = &cp
+	m.prevFP = fp
 }
 
 func (m *PrefixMonitor) StabilityRatio() float64 {
@@ -105,24 +94,7 @@ func (m *PrefixMonitor) StabilityRatio() float64 {
 	return float64(m.checkCount-m.changeCount) / float64(m.checkCount)
 }
 
-// EpochComponentHashes holds individual SHA-256 hashes for the
-// components that constitute a static prefix epoch.
-type EpochComponentHashes struct {
-	SystemSHA256       string
-	ToolsSHA256        string
-	SkillDirSHA256     string
-	MCPSchemaSHA256    string
-	AgentProfileSHA256 string
-	FewShotsSHA256     string
-}
-
-// ComputeEpochHash returns sha256hex(sys:tools:skill:mcp:profile:fewshots).
-func ComputeEpochHash(components EpochComponentHashes) string {
-	combined := components.SystemSHA256 + ":" +
-		components.ToolsSHA256 + ":" +
-		components.SkillDirSHA256 + ":" +
-		components.MCPSchemaSHA256 + ":" +
-		components.AgentProfileSHA256 + ":" +
-		components.FewShotsSHA256
-	return sha256hex(combined)
-}
+// NOTE: the former 6-component EpochComponentHashes / ComputeEpochHash were
+// removed: the epoch's StaticPrefixHash is now the model-visible Prefix
+// Fingerprint (StaticPrefix.Fingerprint), and latent capability state is
+// tracked separately via agent.CapabilitySet. See docs/adr/0001.

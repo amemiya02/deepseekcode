@@ -49,6 +49,20 @@ prevents ID collisions on Windows where clock resolution is ~15ms. The
 `EpochManager` mutex protects all state; the counter lives outside the struct
 so separate manager instances (parent/child) never collide.
 
+**Visible vs. latent split (see `docs/adr/0001`).** An epoch's
+`StaticPrefixHash` is the **Prefix Fingerprint** — the hash of the
+*model-visible bytes only* (system + tools), computed via
+`llm.StaticPrefix.Fingerprint()`, so it equals the DeepSeek cache key by
+construction. It is **not** a hash of profile/skill/MCP identity. That latent
+state is the `CapabilitySet` (`capability_set.go`); `DetectDrift` reports
+pending changes purely from `CapabilityDiff` (canonical `skills.Store.Diff` +
+`mcp.CompareToolLists` + profile compare). Consequences worth remembering: a
+skill edit surfaces as exactly one `skill_body_changed` (never also
+`system_changed`); a reordered-keys MCP reconnect produces no drift; a profile
+rename does not move the fingerprint (no wasted cache miss). Genuine
+model-visible drift is caught per turn by `llm.PrefixMonitor`, not by
+`DetectDrift`. The glossary is in `/CONTEXT.md`.
+
 ### Budget projection (`internal/agent/budget_projection.go`)
 
 `ProjectedTurnCostCNY` runs **before** the HTTP request. It prices all input
@@ -59,7 +73,7 @@ before any API call is made.
 ### Wire format — DeepSeek V4 specifics (`internal/llm/request.go`)
 
 - **`thinking` is a struct, not a bool**: DeepSeek V4 rejects `"thinking":true` with `expected struct ThinkingOptions`. Always use `llm.ThinkingEnabled(bool)` which returns `*ThinkingOptions{Type:"enabled"}` or nil. Regression test: `thinking_shape_test.go`.
-- **Cache-stable serialization**: `Request.MarshalCacheStable()` sorts tools by function name and canonicalizes every JSON-Schema (recursive key-sort). Every byte difference invalidates DeepSeek's prompt cache, and the 50× cache-hit discount is the cost story. Don't introduce non-deterministic field ordering anywhere upstream of this.
+- **Cache-stable serialization**: `Request.MarshalCacheStable()` sorts tools by function name and canonicalizes every JSON-Schema (recursive key-sort). Every byte difference invalidates DeepSeek's prompt cache, and the 50× cache-hit discount is the cost story. Don't introduce non-deterministic field ordering anywhere upstream of this. The sort+canonicalize step is the shared `canonicalizeTools` helper (`static_prefix.go`); both `MarshalCacheStable` and the **Prefix Fingerprint** (`StaticPrefix.Fingerprint()`) call it, so the wire bytes and the cache fingerprint cannot diverge. `TestCacheStableGolden` pins the wire bytes; `TestFingerprintTracksWireStaticHead` pins the linkage.
 - The system prompt (`DefaultSystemPrompt`) must stay byte-stable across turns for the same reason.
 
 ### Two-Model Duet (`internal/agent/duet_pro.go`)

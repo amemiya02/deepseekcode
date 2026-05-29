@@ -1,9 +1,7 @@
 package agent
 
 import (
-	"crypto/sha256"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,11 +25,15 @@ type PrefixEpoch struct {
 	StaticSystem      string
 	FewShots          []llm.Message
 	ToolSpecs         []llm.Tool
-	StableSkillDir    string
-	MCPSchemaSnapshot string
+	// Capability is the latent identity (profile/skills/MCP) frozen with this
+	// epoch. It drives pending-change detection but is NOT in StaticPrefixHash.
+	Capability        CapabilitySet
 	CreatedAt         time.Time
 	CreatedReason     string
 	ComponentHashes   map[string]string
+	// StaticPrefixHash is the Prefix Fingerprint: the canonical hash of the
+	// model-visible bytes (system + tools) — the DeepSeek cache key. Latent
+	// capability state is intentionally excluded (see docs/adr/0001).
 	StaticPrefixHash  string
 
 	// FrozenTools and FrozenSystem capture the tool list and system
@@ -42,16 +44,18 @@ type PrefixEpoch struct {
 	FrozenSystem string
 }
 
-// EpochComponents is the input for creating a PrefixEpoch.
+// EpochComponents is the input for creating a PrefixEpoch. StaticSystem,
+// ToolSpecs (and, when folded in, FewShots) are the model-visible bytes that
+// determine the Prefix Fingerprint; Capability is the latent identity used only
+// for pending-change detection.
 type EpochComponents struct {
-	AgentProfileID    string
-	Model             string
-	ReasoningEffort   string
-	StaticSystem      string
-	FewShots          []llm.Message
-	ToolSpecs         []llm.Tool
-	StableSkillDir    string
-	MCPSchemaSnapshot string
+	AgentProfileID  string
+	Model           string
+	ReasoningEffort string
+	StaticSystem    string
+	FewShots        []llm.Message
+	ToolSpecs       []llm.Tool
+	Capability      CapabilitySet
 }
 
 // PendingChangeKind identifies the type of change detected after an
@@ -124,32 +128,25 @@ func (m *EpochManager) InitEpoch(reason string, components EpochComponents) *Pre
 }
 
 func (m *EpochManager) createEpochLocked(reason string, components EpochComponents) *PrefixEpoch {
-	ch := computeComponentHashes(components)
-	epochHash := llm.ComputeEpochHash(ch)
+	// The Prefix Fingerprint is the canonical hash of the model-visible bytes
+	// only (system + tools). Latent capability state (profile/skills/MCP) is
+	// snapshotted on the epoch for pending-change detection but never hashed in.
+	fp := llm.StaticPrefix{System: components.StaticSystem, Tools: components.ToolSpecs}.Fingerprint()
 	now := time.Now()
 	seq := epochSeq.Add(1)
-	componentHashes := map[string]string{
-		"system":        ch.SystemSHA256,
-		"tools":         ch.ToolsSHA256,
-		"skill_dir":     ch.SkillDirSHA256,
-		"mcp_schema":    ch.MCPSchemaSHA256,
-		"agent_profile": ch.AgentProfileSHA256,
-		"few_shots":     ch.FewShotsSHA256,
-	}
 	return &PrefixEpoch{
-		EpochID:           fmt.Sprintf("epoch_%d_%d", now.UnixMilli(), seq),
-		AgentProfileID:    components.AgentProfileID,
-		Model:             components.Model,
-		ReasoningEffort:   components.ReasoningEffort,
-		StaticSystem:      components.StaticSystem,
-		FewShots:          components.FewShots,
-		ToolSpecs:         components.ToolSpecs,
-		StableSkillDir:    components.StableSkillDir,
-		MCPSchemaSnapshot: components.MCPSchemaSnapshot,
-		CreatedAt:         now,
-		CreatedReason:     reason,
-		ComponentHashes:   componentHashes,
-		StaticPrefixHash:  epochHash,
+		EpochID:          fmt.Sprintf("epoch_%d_%d", now.UnixMilli(), seq),
+		AgentProfileID:   components.AgentProfileID,
+		Model:            components.Model,
+		ReasoningEffort:  components.ReasoningEffort,
+		StaticSystem:     components.StaticSystem,
+		FewShots:         components.FewShots,
+		ToolSpecs:        components.ToolSpecs,
+		Capability:       components.Capability,
+		CreatedAt:        now,
+		CreatedReason:    reason,
+		ComponentHashes:  map[string]string{"system": fp.SystemSHA256, "tools": fp.ToolsSHA256},
+		StaticPrefixHash: fp.CombinedSHA256,
 	}
 }
 
@@ -240,9 +237,11 @@ func (m *EpochManager) ExpectedCacheMiss() bool {
 	return false
 }
 
-// DetectDrift compares the current component state against the frozen
-// epoch and records any differences as pending changes. Returns the
-// list of newly detected changes.
+// DetectDrift records the latent capability deltas (profile / skills / MCP)
+// between the frozen epoch and the live components as pending changes, using
+// canonical comparisons. Model-visible byte drift is NOT detected here — it is
+// caught per turn by llm.PrefixMonitor and treated as a bug, not a pending
+// change. Returns the newly detected changes. See docs/adr/0001.
 func (m *EpochManager) DetectDrift(components EpochComponents) []PendingChange {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -251,106 +250,7 @@ func (m *EpochManager) DetectDrift(components EpochComponents) []PendingChange {
 		return nil
 	}
 
-	ch := computeComponentHashes(components)
-	var changes []PendingChange
-
-	if ch.SystemSHA256 != m.current.ComponentHashes["system"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingSystemChanged,
-			Description: "system prompt changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-	if ch.ToolsSHA256 != m.current.ComponentHashes["tools"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingToolSchemaChanged,
-			Description: "tool set changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-	if ch.SkillDirSHA256 != m.current.ComponentHashes["skill_dir"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingSkillBodyChanged,
-			Description: "skill directory changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-	if ch.MCPSchemaSHA256 != m.current.ComponentHashes["mcp_schema"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingMCPToolSchemaChanged,
-			Description: "MCP schema changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-	if ch.AgentProfileSHA256 != m.current.ComponentHashes["agent_profile"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingAgentProfileChanged,
-			Description: "agent profile changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-	if ch.FewShotsSHA256 != m.current.ComponentHashes["few_shots"] {
-		changes = append(changes, PendingChange{
-			Kind:        PendingFewShotsChanged,
-			Description: "few-shots changed",
-			DetectedAt:  time.Now(),
-		})
-	}
-
+	changes := CapabilityDiff(m.current.Capability, components.Capability)
 	m.pending = append(m.pending, changes...)
 	return changes
-}
-
-func computeComponentHashes(c EpochComponents) llm.EpochComponentHashes {
-	fp := llm.ComputeFingerprint(llm.PrefixInput{
-		SystemPrompt: c.StaticSystem,
-		Tools:        c.ToolSpecs,
-	})
-	return llm.EpochComponentHashes{
-		SystemSHA256:       fp.SystemSHA256,
-		ToolsSHA256:        fp.ToolsSHA256,
-		SkillDirSHA256:     sha256hex(c.StableSkillDir),
-		MCPSchemaSHA256:    sha256hex(c.MCPSchemaSnapshot),
-		AgentProfileSHA256: sha256hex(c.AgentProfileID),
-		FewShotsSHA256:     hashFewShots(c.FewShots),
-	}
-}
-
-func hashFewShots(msgs []llm.Message) string {
-	if len(msgs) == 0 {
-		return sha256hex("")
-	}
-	var sb strings.Builder
-	for _, m := range msgs {
-		sb.WriteString(m.Role)
-		sb.WriteByte(':')
-		for _, b := range m.Blocks {
-			switch tb := b.(type) {
-			case llm.TextBlock:
-				sb.WriteString("text:")
-				sb.WriteString(tb.Text)
-			case llm.ThinkingBlock:
-				sb.WriteString("thinking:")
-				sb.WriteString(tb.Text)
-			case llm.ToolUseBlock:
-				sb.WriteString("tool_use:")
-				sb.WriteString(tb.Name)
-				sb.WriteByte(':')
-				sb.WriteString(string(tb.Input))
-			case llm.ToolResultBlock:
-				sb.WriteString("tool_result:")
-				sb.WriteString(tb.ToolUseID)
-				sb.WriteByte(':')
-				sb.WriteString(tb.Content)
-			default:
-				sb.WriteString("unknown:")
-				sb.WriteString(fmt.Sprintf("%T", b))
-			}
-		}
-	}
-	return sha256hex(sb.String())
-}
-
-func sha256hex(s string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
 }

@@ -133,21 +133,21 @@ func TestComputeFingerprint_ToolsReorderIdentical(t *testing.T) {
 func TestPrefixMonitorFirstPin(t *testing.T) {
 	m := NewPrefixMonitor()
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}
-	changed, which := m.Check("SYS", tools)
-	if changed {
+	d, drifted := m.Check(StaticPrefix{System: "SYS", Tools: tools})
+	if drifted {
 		t.Error("first Check should only pin, not report change")
 	}
-	if which != "" {
-		t.Errorf("first Check which = %q, want empty", which)
+	if d.Which() != "" {
+		t.Errorf("first Check which = %q, want empty", d.Which())
 	}
 }
 
 func TestPrefixMonitorStable(t *testing.T) {
 	m := NewPrefixMonitor()
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}
-	m.Check("SYS", tools)
-	changed, _ := m.Check("SYS", tools)
-	if changed {
+	m.Check(StaticPrefix{System: "SYS", Tools: tools})
+	_, drifted := m.Check(StaticPrefix{System: "SYS", Tools: tools})
+	if drifted {
 		t.Error("same input should not report change")
 	}
 }
@@ -155,37 +155,43 @@ func TestPrefixMonitorStable(t *testing.T) {
 func TestPrefixMonitorSystemDrift(t *testing.T) {
 	m := NewPrefixMonitor()
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}
-	m.Check("SYS", tools)
-	changed, which := m.Check("SYS2", tools)
-	if !changed {
+	m.Check(StaticPrefix{System: "SYS", Tools: tools})
+	d, drifted := m.Check(StaticPrefix{System: "SYS2", Tools: tools})
+	if !drifted {
 		t.Error("system change should report change")
 	}
-	if which != "sys" {
-		t.Errorf("which = %q, want %q", which, "sys")
+	if d.Which() != "sys" {
+		t.Errorf("which = %q, want %q", d.Which(), "sys")
+	}
+	if !d.SystemChanged || d.Tools.Changed() {
+		t.Errorf("expected only system changed, got %+v", d)
 	}
 }
 
 func TestPrefixMonitorToolsDrift(t *testing.T) {
 	m := NewPrefixMonitor()
-	m.Check("SYS", []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}})
-	changed, which := m.Check("SYS", []Tool{{Type: "function", Function: ToolFunction{Name: "b", Description: "tool b"}}})
-	if !changed {
+	m.Check(StaticPrefix{System: "SYS", Tools: []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}})
+	d, drifted := m.Check(StaticPrefix{System: "SYS", Tools: []Tool{{Type: "function", Function: ToolFunction{Name: "b", Description: "tool b"}}}})
+	if !drifted {
 		t.Error("tools change should report change")
 	}
-	if which != "tools" {
-		t.Errorf("which = %q, want %q", which, "tools")
+	if d.Which() != "tools" {
+		t.Errorf("which = %q, want %q", d.Which(), "tools")
+	}
+	if len(d.Tools.Added) != 1 || d.Tools.Added[0] != "b" || len(d.Tools.Removed) != 1 || d.Tools.Removed[0] != "a" {
+		t.Errorf("expected b added / a removed, got %+v", d.Tools)
 	}
 }
 
 func TestPrefixMonitorBothDrift(t *testing.T) {
 	m := NewPrefixMonitor()
-	m.Check("SYS", []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}})
-	changed, which := m.Check("SYS2", []Tool{{Type: "function", Function: ToolFunction{Name: "b", Description: "tool b"}}})
-	if !changed {
+	m.Check(StaticPrefix{System: "SYS", Tools: []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}})
+	d, drifted := m.Check(StaticPrefix{System: "SYS2", Tools: []Tool{{Type: "function", Function: ToolFunction{Name: "b", Description: "tool b"}}}})
+	if !drifted {
 		t.Error("both change should report change")
 	}
-	if which != "sys+tools" {
-		t.Errorf("which = %q, want %q", which, "sys+tools")
+	if d.Which() != "sys+tools" {
+		t.Errorf("which = %q, want %q", d.Which(), "sys+tools")
 	}
 }
 
@@ -195,9 +201,9 @@ func TestPrefixMonitorStabilityRatio(t *testing.T) {
 		t.Error("empty monitor should have ratio 1")
 	}
 	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "a", Description: "tool a"}}}
-	m.Check("SYS", tools)  // pin
-	m.Check("SYS", tools)  // stable
-	m.Check("SYS2", tools) // drift
+	m.Check(StaticPrefix{System: "SYS", Tools: tools})  // pin
+	m.Check(StaticPrefix{System: "SYS", Tools: tools})  // stable
+	m.Check(StaticPrefix{System: "SYS2", Tools: tools}) // drift
 	r := m.StabilityRatio()
 	// 2 stable out of 3 checks
 	if r != float64(2)/float64(3) {

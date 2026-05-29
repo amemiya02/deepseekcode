@@ -37,8 +37,13 @@ func TestSwitchProfileCreatesEpochAndExpectsCacheMiss(t *testing.T) {
 	if second.AgentProfileID != "explore" {
 		t.Errorf("new epoch AgentProfileID = %q, want explore", second.AgentProfileID)
 	}
-	if second.StaticPrefixHash == first.StaticPrefixHash {
-		t.Error("profile change must change the static prefix hash (profile hash component)")
+	// Under P1 the profile name is latent (not in the fingerprint). The test
+	// registry has no profile-tier tools, so the model-visible bytes are
+	// unchanged and the fingerprint stays the same — the new epoch is minted by
+	// policy and the expected cache miss is driven by SwitchEpoch, not by a hash
+	// change (docs/adr/0001).
+	if second.StaticPrefixHash != first.StaticPrefixHash {
+		t.Error("profile switch with no visible-tool change must not move the fingerprint")
 	}
 	if !a.epochMgr.ExpectedCacheMiss() {
 		t.Error("first turn after a profile switch must expect a cache miss")

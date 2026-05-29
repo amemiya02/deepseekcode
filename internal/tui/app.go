@@ -932,6 +932,30 @@ func hasShiftEnter(km tea.KeyPressMsg) bool {
 	return strings.Contains(strings.ToLower(km.String()), "shift")
 }
 
+// formatReloadResult renders a /reload-skills outcome for the chat log. It
+// distinguishes a real, prefix-moving reload (one deliberate cache miss next
+// turn) from a no-op or a disk-only change that left the cached prefix intact.
+func formatReloadResult(res agent.ReloadResult) string {
+	var added, removed, changed int
+	for _, c := range res.Changes {
+		switch c.Kind {
+		case "added":
+			added++
+		case "removed":
+			removed++
+		case "body_changed":
+			changed++
+		}
+	}
+	if !res.FingerprintMoved {
+		if added+removed+changed == 0 {
+			return "skills reloaded — no changes (prefix unchanged, no cache miss)"
+		}
+		return fmt.Sprintf("skills reloaded: +%d -%d ~%d (prefix unchanged, no cache miss)", added, removed, changed)
+	}
+	return fmt.Sprintf("skills reloaded: +%d added, -%d removed, ~%d changed — new prefix epoch minted (one cache miss expected next turn)", added, removed, changed)
+}
+
 // handleSlash dispatches /commands. Unknown slash commands are echoed
 // to the chat for visibility.
 func (a *App) handleSlash(line string) tea.Cmd {
@@ -985,6 +1009,27 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			}
 		}
 		a.applyUndo(n)
+	case "/reload-skills", "/reload":
+		// Re-scan skills mid-session. The agent is not concurrency-safe, and
+		// ReloadSkills mutates a.System / the shared store / the epoch state. The
+		// shared skill store is also read by skill_read inside a still-live async
+		// subagent, which outlives the main loop — so refuse while EITHER the main
+		// loop (a.running) or any background job is in flight, not just the former.
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running || a.agent.HasActiveBackgroundWork() {
+			a.scrollback.AppendInfo("/reload-skills unavailable while the agent or a background job is running — wait until it's idle, then retry")
+			a.refreshView()
+			return nil
+		}
+		home, _ := os.UserHomeDir()
+		if res, err := a.agent.ReloadSkills(a.cwd, home); err != nil {
+			a.scrollback.AppendError("reload-skills: " + err.Error())
+		} else {
+			a.scrollback.AppendInfo(formatReloadResult(res))
+		}
+		a.refreshView()
 	case "/compact":
 		// Force a compaction now, regardless of the auto threshold.
 		// Runs off the UI goroutine so a slow ReplaceWithCompaction
@@ -1100,6 +1145,7 @@ func helpText() string {
 		"  /export    open full scrollback in $PAGER for native mouse copy",
 		"  /undo      revert the last edit step",
 		"  /compact   force-compact the running message list",
+		"  /reload-skills  re-scan skills mid-session (mints a new cache epoch)",
 	}, "\n")
 }
 

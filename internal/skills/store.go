@@ -144,7 +144,11 @@ const maxScanDepth = 8
 // edit takes effect on the next session; VersionHash()/Diff() exist to compare
 // two stores across that boundary, not to hot-reload within one. Reloading
 // every turn would re-detect the same drift against the frozen baseline on
-// every step, so it is intentionally not done.
+// every step, so it is intentionally not done. The one sanctioned mid-session
+// reload is the explicit /reload-skills command (Agent.ReloadSkills): it
+// re-scans via this loader, swaps the store in place (ReplaceFrom), and mints a
+// new prefix epoch so the single resulting cache miss is deliberate, not silent
+// per-turn drift.
 func LoadScan(cwd, home string) (*Store, error) {
 	if cwd == "" {
 		return nil, fmt.Errorf("LoadScan: empty cwd")
@@ -471,6 +475,25 @@ func (s *Store) Diff(old *Store) []SkillChange {
 	}
 
 	return changes
+}
+
+// ReplaceFrom swaps this store's contents for other's, in place. Every holder
+// of the *Store pointer sees the new skills at once — the agent's capability set
+// and the skill_read dispatcher share one pointer, so a reload need not re-thread
+// a new store through them. nil other empties the store.
+//
+// This is the mechanism behind Agent.ReloadSkills / the /reload-skills command,
+// the sanctioned exception to the session-start-only rule documented on
+// LoadScan. Not safe to call concurrently with readers: the caller (the agent
+// loop must be idle) guarantees no in-flight turn is reading the store.
+func (s *Store) ReplaceFrom(other *Store) {
+	if other == nil {
+		s.skills = nil
+		s.byName = map[string]int{}
+		return
+	}
+	s.skills = other.skills
+	s.byName = other.byName
 }
 
 func hashString(s string) string {

@@ -324,14 +324,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		mcpNotices = append(mcpNotices, fmt.Sprintf("lsp: connected to %s", name))
 	}
 
-	mode := permissions.ModeDefault
-	switch {
-	case mf.yolo:
-		mode = permissions.ModeYolo
-	case mf.readOnly:
-		mode = permissions.ModeReadOnly
-	case mf.askAll:
-		mode = permissions.ModeAskAll
+	mode, merr := resolveLaunchMode(mf, cwd, sandboxEffectiveFor(sb))
+	if merr != nil {
+		return merr
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
@@ -709,14 +704,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	lspReg.Start(context.Background(), cwd)
 	reg.Register(tools.NewLSPTool(lspReg))
 
-	mode := permissions.ModeDefault
-	switch {
-	case mf.yolo:
-		mode = permissions.ModeYolo
-	case mf.readOnly:
-		mode = permissions.ModeReadOnly
-	case mf.askAll:
-		mode = permissions.ModeAskAll
+	mode, merr := resolveLaunchMode(mf, cwd, sandboxEffectiveFor(sb))
+	if merr != nil {
+		return merr
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))

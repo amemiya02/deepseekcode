@@ -7,20 +7,29 @@ import (
 
 // AgentDef is a sub-agent definition loaded from .deepseek/agent/<name>.md.
 type AgentDef struct {
-	Name        string   // relative path minus .md (filled by Load)
-	Description string   // frontmatter "description"
-	Mode        string   // frontmatter "mode": "subagent" (default) or "plan"
-	Model       string   // frontmatter "model" (empty = inherit parent)
-	Tools       []string // frontmatter "tools": comma-separated whitelist; nil = inherit parent full set
-	Worktree    bool     // frontmatter "worktree": true|false — isolate in git worktree
-	Prompt      string   // body after frontmatter (trimmed)
-	Path        string   // absolute path (filled by Load)
+	Name              string   // relative path minus .md (filled by Load)
+	Description       string   // frontmatter "description"
+	Mode              string   // frontmatter "mode": "subagent" (default) or "plan"
+	Model             string   // frontmatter "model" (empty = inherit parent)
+	Tools             []string // frontmatter "tools": comma-separated whitelist; nil = inherit parent full set
+	Worktree          bool     // frontmatter "worktree": true|false — isolate in git worktree
+	Prompt            string   // body after frontmatter (trimmed)
+	Path              string   // absolute path (filled by Load)
 	Hidden            bool
 	MaxSteps          int
 	PermissionRuleset string
 	Temperature       *float64
 	TopP              *float64
 	DefaultAgent      string
+
+	// OmitProjectContext drops the parent's per-turn project context block
+	// (cwd/date/git status/diff) from the system prompt the child inherits.
+	// It saves a potentially large git diff on every request to a read-only or
+	// explore subagent that does not need it. It only affects a child that
+	// inherits the parent prompt (no own `prompt:`); a def with its own prompt
+	// never carried project context, so the flag is a no-op there. Named for
+	// exactly what it omits — the project *context* block, not skills or memory.
+	OmitProjectContext bool
 }
 
 // AgentProfile is a first-class runtime unit that governs tool tiers,
@@ -81,10 +90,10 @@ func DefaultProfiles() map[string]AgentProfile {
 			},
 		},
 		"autonomous": {
-			Name:            "autonomous",
-			Model:           "deepseek-v4-flash",
-			ReasoningEffort: "high",
-			ToolTiers:       []string{"core", "profile", "lazy"},
+			Name:             "autonomous",
+			Model:            "deepseek-v4-flash",
+			ReasoningEffort:  "high",
+			ToolTiers:        []string{"core", "profile", "lazy"},
 			PermissionPolicy: "auto-approve",
 			SubagentPolicy:   "allow",
 		},
@@ -159,6 +168,8 @@ func parseFrontmatter(fm, body string) (AgentDef, error) {
 			}
 		case "default_agent":
 			d.DefaultAgent = val
+		case "omit_project_context":
+			d.OmitProjectContext = parseBool(val)
 		}
 	}
 	if d.Mode == "" {

@@ -267,6 +267,13 @@ func ModeFromRuleset(name string) (Mode, bool) {
 	return ModeDefault, false
 }
 
+// ModeMoreDangerousThan reports whether mode a permits strictly more than b on
+// the same danger ordering clampMode uses. An admin floor (requirements.toml
+// max_mode) uses it to refuse a launch mode that exceeds the configured ceiling.
+func ModeMoreDangerousThan(a, b Mode) bool {
+	return danger(a) > danger(b)
+}
+
 // clampMode returns the safer (lower danger) of a and b.
 func clampMode(a, b Mode) Mode {
 	if danger(a) <= danger(b) {

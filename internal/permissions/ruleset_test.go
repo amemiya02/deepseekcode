@@ -27,6 +27,26 @@ func TestModeFromRuleset(t *testing.T) {
 	}
 }
 
+// TestModeMoreDangerousThan pins the danger ordering the admin floor
+// (requirements.toml max_mode) relies on to refuse an over-permissive launch.
+func TestModeMoreDangerousThan(t *testing.T) {
+	if !ModeMoreDangerousThan(ModeYolo, ModeDefault) {
+		t.Error("yolo must be more dangerous than default")
+	}
+	if !ModeMoreDangerousThan(ModeDefault, ModeReadOnly) {
+		t.Error("default must be more dangerous than read-only")
+	}
+	if ModeMoreDangerousThan(ModeReadOnly, ModeDefault) {
+		t.Error("read-only must not be more dangerous than default")
+	}
+	if ModeMoreDangerousThan(ModeDefault, ModeDefault) {
+		t.Error("a mode is not more dangerous than itself")
+	}
+	if ModeMoreDangerousThan(ModePlan, ModeReadOnly) || ModeMoreDangerousThan(ModeReadOnly, ModePlan) {
+		t.Error("plan and read-only sit at the same danger level")
+	}
+}
+
 // TestRulesetCannotEscalate confirms the restrict-only guarantee: a ruleset
 // name fed through DeriveChild can never raise a child above its parent.
 func TestRulesetCannotEscalate(t *testing.T) {

@@ -121,11 +121,7 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 
 	child := New(s.Client, subReg, childPol, model)
 	child.IsSubagent = true
-	if def.Prompt != "" {
-		child.System = def.Prompt
-	} else {
-		child.System = s.Parent.System
-	}
+	child.System = childSystem(def, s.Parent.System)
 	child.MaxToolCalls = 50
 
 	// Apply the remaining agent-def frontmatter (T7.1). MaxSteps drives the
@@ -254,6 +250,23 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 	})
 
 	return result, nil
+}
+
+// childSystem picks the system prompt a spawned child runs with. A def with its
+// own prompt uses it verbatim. Otherwise the child inherits the parent prompt —
+// minus the per-turn project context block (cwd/date/git status/diff) when the
+// def sets omit_project_context, so a read-only/explore child need not carry a
+// large git diff it cannot act on. The flag is a no-op for a def that supplies
+// its own prompt, which never carried project context to begin with.
+func childSystem(def agents.AgentDef, parentSystem string) string {
+	switch {
+	case def.Prompt != "":
+		return def.Prompt
+	case def.OmitProjectContext:
+		return staticPrefixOf(parentSystem)
+	default:
+		return parentSystem
+	}
 }
 
 // extractFinalText returns the concatenated text of the last assistant

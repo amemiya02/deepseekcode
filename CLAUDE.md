@@ -82,7 +82,7 @@ before any API call is made.
 
 ### Permissions (`internal/permissions/policy.go`)
 
-Tiered defaults: read-only auto-allow, write inside cwd auto-allow, secrets always ask, bash gated by `bashPattern` allowlist (reduces `"git status -sb"` → `"git status *"`). Mode flags (`--yolo`, `--read-only`, `--ask-all`) override the policy globally.
+Tiered defaults: read-only auto-allow, write inside cwd auto-allow, secrets always ask, bash gated by `bashPattern` allowlist (reduces `"git status -sb"` → `"git status *"`). Mode flags (`--yolo`, `--read-only`, `--ask-all`) override the policy globally. An optional, repo-committed `.deepseek/requirements.toml` (`config.LoadRequirements`) sits ABOVE the flags as an admin floor: `max_mode` caps permissiveness on the `danger()` ordering (`plan`/`read-only` < `ask-all` < `default` < `yolo`) and `require_sandbox` demands a real (non-noop, `Available()`) sandbox — a launch exceeding the floor is **refused at startup, not clamped**, on both `runTUI` and `runOneShot`. Enforced via `cmd/dsc` `resolveLaunchMode`/`enforceRequirements`; absent file = no floor (opt-in), malformed file = fail-loud.
 
 ### Sessions (`internal/session/`)
 
@@ -104,7 +104,8 @@ prints directly) so tests can assert on the output.
 
 - `dsc trace inspect TRACE.jsonl` — summarizes a JSONL trace via `internal/traceinspect`
 - `dsc agent list|show|new|validate` — manages `.deepseek/agent/*.md` definitions
-- Agent definitions support extended frontmatter: `hidden`, `max_steps`, `permission_ruleset`, `temperature`, `top_p`, `default_agent`
+- Agent definitions support extended frontmatter: `hidden`, `max_steps`, `permission_ruleset`, `temperature`, `top_p`, `default_agent`, `omit_project_context` (drops the inherited parent's per-turn project-context block for a lean read-only/explore child)
+- `/reload-skills` (TUI) re-scans skills mid-session via `agent.ReloadSkills`: swaps the shared `skills.Store` in place, rebuilds `a.System`, and mints a new prefix epoch **only when the model-visible prefix actually moved** (one deliberate cache miss). Refused while the main loop OR any background job is live (`HasActiveBackgroundWork`) — the shared store is read by `skill_read` inside still-live async subagents.
 
 ### Tools (`internal/tools/`)
 

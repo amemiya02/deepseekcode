@@ -1,6 +1,10 @@
 package llm
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // APIError is returned when DeepSeek's API replies with a non-2xx
 // status. The Body field carries the raw response so callers can
@@ -35,4 +39,31 @@ func IsTransient(err error) bool {
 		return false
 	}
 	return a.Status == 429 || a.Status >= 500
+}
+
+// IsContextOverflow reports whether err is a provider rejection for exceeding
+// the model's context window. DeepSeek signals this with HTTP 400 and a body
+// naming the maximum context length; there is no dedicated error code, so the
+// body is matched case-insensitively. Such a request can never succeed on a
+// blind retry — the only recovery is to shrink the conversation (compaction),
+// which is why the agent loop branches on this distinctly from IsTransient.
+func IsContextOverflow(err error) bool {
+	var a *APIError
+	if !errors.As(err, &a) || a.Status != 400 {
+		return false
+	}
+	b := strings.ToLower(a.Body)
+	for _, marker := range []string{
+		"context length",
+		"maximum context",
+		"context_length_exceeded",
+		"too many tokens",
+		"reduce the length",
+		"maximum length",
+	} {
+		if strings.Contains(b, marker) {
+			return true
+		}
+	}
+	return false
 }

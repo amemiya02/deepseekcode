@@ -350,6 +350,12 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		}
 	}
 
+	// overflowRetried gates the context-overflow recovery to a single attempt
+	// per fresh overflow: a 400 "context too long" triggers one compaction and
+	// re-attempt, and is reset after any step that completes, so a later
+	// overflow in a long run gets its own recovery rather than failing hard.
+	overflowRetried := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -367,6 +373,17 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		step, err := a.runStep(stepCtx)
 		if err != nil {
 			stepCancel()
+			// Context overflow can never succeed on a blind retry — the only
+			// recovery is to shrink the conversation. Compact once (deterministically,
+			// so the summarizer call cannot itself overflow) and re-attempt the
+			// step. This is distinct from the transient mid-stream re-issue inside
+			// runStep: that re-sends the same request, this changes it.
+			if llm.IsContextOverflow(err) && !overflowRetried {
+				overflowRetried = true
+				a.bus.Publish(EventInfo{Text: "context overflow; compacting and re-attempting turn"})
+				a.compactForOverflow(ctx)
+				continue
+			}
 			switch {
 			case errors.Is(err, context.Canceled):
 				// Parent context cancelled mid-step. Distinguish an explicit
@@ -385,6 +402,8 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 				return StopUnknown, err
 			}
 		}
+		// The step completed; allow a future overflow its own recovery attempt.
+		overflowRetried = false
 		a.steps = append(a.steps, step)
 
 		// finish-reason override: even if the model said finish_reason=stop,
@@ -433,6 +452,18 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 	defer func() { a.CompactionCfg = saved }()
 	a.CompactionCfg.AutoCompactInputTokens = 1
 	a.maybeCompact(ctx)
+}
+
+// compactForOverflow runs a forced compaction for context-overflow recovery.
+// It pins the deterministic path for the duration of the call: a semantic
+// (LLM) summary would itself send much of the already-too-large conversation
+// and could overflow again, so overflow recovery must never depend on a model
+// call. The original semantic setting is restored on return.
+func (a *Agent) compactForOverflow(ctx context.Context) {
+	savedSemantic := a.DisableSemanticCompaction
+	a.DisableSemanticCompaction = true
+	defer func() { a.DisableSemanticCompaction = savedSemantic }()
+	a.ForceCompact(ctx)
 }
 
 // maybeCompact runs the compaction pipeline and, if it produced a
@@ -762,84 +793,48 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		return StepRecord{FinishReason: "budget_blocked"}, nil
 	}
 
-	events, err := a.Client.Stream(ctx, req)
-	if err != nil {
-		return StepRecord{}, err
-	}
-
-	var (
-		text          string
-		reasoning     string
-		inReasoning   bool
-		assembledCall []llm.ToolCall
-		blocks        []llm.ContentBlock
-		finish        string
-		usage         llm.Usage
-		streamErr     error
-	)
-
-	for ev := range events {
-		switch ev.Type {
-		case llm.EventTextDelta:
-			text += ev.Text
-			if inReasoning {
-				a.bus.Publish(EventReasoningEnd{})
-				inReasoning = false
-			}
-			a.bus.Publish(EventTextDelta{Text: ev.Text})
-		case llm.EventReasoningDelta:
-			if !inReasoning {
-				a.bus.Publish(EventReasoningStart{})
-				inReasoning = true
-			}
-			reasoning += ev.Text
-			a.bus.Publish(EventReasoningDelta{Text: ev.Text})
-		case llm.EventToolUseDelta:
-			// tool-call deltas are aggregated by the client; we don't need
-			// per-delta tracking here. The EventFinish carries the
-			// assembled calls.
-		case llm.EventFinish:
-			if inReasoning {
-				a.bus.Publish(EventReasoningEnd{})
-				inReasoning = false
-			}
-			finish = ev.FinishReason
-			usage = ev.Usage
-			assembledCall = ev.ToolCalls
-			blocks = ev.Blocks
-		case llm.EventError:
-			// Capture and stop reading; the client closes the channel right
-			// after EventError, so the range exits on the next receive. We
-			// fall through to partial-turn persistence below rather than
-			// returning here, so a mid-stream failure does not discard the
-			// reasoning/text already streamed.
-			streamErr = ev.Err
+	// Stream the model turn, re-issuing once on a transient mid-stream stall.
+	// A first-token or chunk-stall timeout often clears on a single re-send of
+	// the identical request (which is cache-stable, so the re-send is also
+	// cache-cheap); a parse error or a context cancellation / step deadline
+	// does not, and must propagate. The partial turn is salvaged only when we
+	// finally give up, so a re-issue never duplicates a persisted turn.
+	const maxStreamReissues = 1
+	var sr streamResult
+	for attempt := 0; ; attempt++ {
+		events, err := a.Client.Stream(ctx, req)
+		if err != nil {
+			// Connect-phase failure (the client already retried transient
+			// 429/5xx). A context-overflow 400 is handled by Run, which
+			// compacts and re-attempts; everything else propagates as-is.
+			return StepRecord{}, err
 		}
-	}
-
-	if streamErr != nil {
-		if inReasoning {
-			a.bus.Publish(EventReasoningEnd{})
-			inReasoning = false
+		sr = a.consumeStream(events)
+		if sr.err == nil {
+			break // clean turn
 		}
-		// Persist the partial assistant turn (the reasoning and visible text
-		// accumulated before the stream broke) so a long turn's work and the
+		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
+			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
+			continue
+		}
+		// Give up. Persist the partial assistant turn (the reasoning and visible
+		// text accumulated before the final break) so a long turn's work and the
 		// persisted transcript survive a mid-stream failure. EventFinish never
-		// fired, so the client assembled no tool calls — the partial turn
-		// carries only thinking/text and cannot leave a dangling tool_call;
-		// SanitizeForDeepSeek still guards the next request. Nothing is
-		// appended when no content arrived (e.g. a first-token timeout).
-		if partial := partialBlocks(reasoning, text); len(partial) > 0 {
+		// fired, so the client assembled no tool calls — the partial carries
+		// only thinking/text and cannot leave a dangling tool_call;
+		// SanitizeForDeepSeek still guards the next request. Nothing is appended
+		// when no content arrived (e.g. a first-token timeout on attempt one).
+		if partial := partialBlocks(sr.reasoning, sr.text); len(partial) > 0 {
 			a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: partial})
 			if a.Persister != nil {
-				_, _ = a.Persister.AppendAssistant(context.Background(), partial, a.Model, usage)
+				_, _ = a.Persister.AppendAssistant(context.Background(), partial, a.Model, sr.usage)
 			}
 		}
-		return StepRecord{}, fmt.Errorf("stream error: %w", streamErr)
+		return StepRecord{}, fmt.Errorf("stream error: %w", sr.err)
 	}
 
 	// Repair pipeline: scavenge, repair args, storm-breaker filter.
-	assembledCall = a.repairToolCalls(ctx, reasoning, text, assembledCall, &blocks)
+	assembledCall := a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
 
 	// The wire flatten layer turns Blocks back into DeepSeek's
 	// {content, reasoning_content, tool_calls} shape on the next
@@ -847,16 +842,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// thinking-mode 400 stays away.
 	a.Messages = append(a.Messages, llm.Message{
 		Role:   "assistant",
-		Blocks: blocks,
+		Blocks: sr.blocks,
 	})
 	if a.Persister != nil {
-		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
+		_, _ = a.Persister.AppendAssistant(context.Background(), sr.blocks, a.Model, sr.usage)
 
 		if rp, ok := a.Persister.(ReceiptAppender); ok {
 			fp := llm.StaticPrefix{System: staticSys, Tools: req.Tools}.Fingerprint()
 			payload, _ := json.Marshal(map[string]any{
 				"model":                a.Model,
-				"usage":                usage,
+				"usage":                sr.usage,
 				"prefix_hash":          fp.CombinedSHA256,
 				"prefix_system_hash":   fp.SystemSHA256,
 				"prefix_tools_hash":    fp.ToolsSHA256,
@@ -883,13 +878,13 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	}
 
 	// Accumulate observed model cost into session budget state.
-	if cost := llm.Cost(a.Model, usage); cost > 0 {
+	if cost := llm.Cost(a.Model, sr.usage); cost > 0 {
 		a.BudgetState.SpentCNY += cost
 	}
 
 	return StepRecord{
-		FinishReason:      finish,
-		Usage:             usage,
+		FinishReason:      sr.finish,
+		Usage:             sr.usage,
 		ToolCalls:         assembledCall,
 		EpochID:           epoch.EpochID,
 		StaticPrefixHash:  epoch.StaticPrefixHash,
@@ -912,6 +907,86 @@ func partialBlocks(reasoning, text string) []llm.ContentBlock {
 		blocks = append(blocks, llm.TextBlock{Text: text})
 	}
 	return blocks
+}
+
+// streamResult holds everything consumeStream accumulates from one model
+// stream attempt: the visible text, the reasoning channel, the assembled
+// content blocks and tool calls, the finish reason, and the usage frame. A
+// non-nil err means the stream broke before EventFinish (timeout, parse error,
+// or context cancellation); the caller decides whether to re-issue, salvage,
+// or proceed.
+type streamResult struct {
+	text      string
+	reasoning string
+	blocks    []llm.ContentBlock
+	toolCalls []llm.ToolCall
+	finish    string
+	usage     llm.Usage
+	err       error
+}
+
+// consumeStream drains one model stream, republishing reasoning/text deltas on
+// the bus and accumulating the assistant turn into a streamResult. It returns
+// when the stream closes (EventFinish) or breaks (EventError). The client
+// closes the channel right after EventError, so the range exits on the next
+// receive; the error is captured rather than returned early so the caller can
+// salvage the partial turn. A reasoning block left open by a mid-stream break
+// is closed before returning so the UI never stalls on an unterminated fold.
+func (a *Agent) consumeStream(events <-chan llm.Event) streamResult {
+	var (
+		sr          streamResult
+		inReasoning bool
+	)
+	for ev := range events {
+		switch ev.Type {
+		case llm.EventTextDelta:
+			sr.text += ev.Text
+			if inReasoning {
+				a.bus.Publish(EventReasoningEnd{})
+				inReasoning = false
+			}
+			a.bus.Publish(EventTextDelta{Text: ev.Text})
+		case llm.EventReasoningDelta:
+			if !inReasoning {
+				a.bus.Publish(EventReasoningStart{})
+				inReasoning = true
+			}
+			sr.reasoning += ev.Text
+			a.bus.Publish(EventReasoningDelta{Text: ev.Text})
+		case llm.EventToolUseDelta:
+			// tool-call deltas are aggregated by the client; we don't need
+			// per-delta tracking here. The EventFinish carries the assembled
+			// calls.
+		case llm.EventFinish:
+			if inReasoning {
+				a.bus.Publish(EventReasoningEnd{})
+				inReasoning = false
+			}
+			sr.finish = ev.FinishReason
+			sr.usage = ev.Usage
+			sr.toolCalls = ev.ToolCalls
+			sr.blocks = ev.Blocks
+		case llm.EventError:
+			sr.err = ev.Err
+		}
+	}
+	if inReasoning {
+		a.bus.Publish(EventReasoningEnd{})
+	}
+	return sr
+}
+
+// isReissuableStreamErr reports whether a mid-stream error is a transient stall
+// that re-sending the identical request may clear. Only the two stream-timeout
+// tiers qualify. A malformed-chunk parse error would likely repeat, and a
+// context cancellation or step deadline (context.Canceled /
+// context.DeadlineExceeded) must propagate — re-issuing would either ignore the
+// user's stop or busy-loop against an already-expired deadline.
+func isReissuableStreamErr(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, llm.ErrFirstTokenTimeout) || errors.Is(err, llm.ErrChunkStall)
 }
 
 // refreshGitContext repopulates the builder's GitStatus / GitDiff /

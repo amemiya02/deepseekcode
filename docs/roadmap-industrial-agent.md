@@ -21,14 +21,15 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T1.1 | ✅ done | Partial assistant turn persisted on mid-stream error instead of discarded. |
 | T1.2 | ✅ done | `Replay` repairs dangling `tool_calls` from an interrupted session; the other two pieces were already handled (see the T1.2 entry below). |
 | T1.3 | ◧ partial | `StopStepTimeout` (non-success) + `StopUserRequested` wired + `IsSuccess()`. Deferred: budget/denied EventInfo → typed events; remove the unreachable tool-error abort branch. |
+| T1.4 | ✅ done | Mid-stream stall (first-token / chunk-stall) re-issues the identical request **once** before salvaging the partial (T1.1); a parse error or cancel/step-deadline never re-issues. A 400 context-overflow routes to a single deterministic compaction + re-attempt (`llm.IsContextOverflow`, typed `ErrFirstTokenTimeout`/`ErrChunkStall` sentinels). No duplicate persisted turn. |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-Next up: **T1.4** (mid-stream salvage + one bounded re-issue), then **T2** (loop
-nudge, fuzzy edit replacer, model-escalation, MCP liveness), **T4** (token
-reconciliation, cache-aware budget, cache-preserving compaction), and the
-remaining T3/T5/T6/T7 stages.
+T1 is closed except the T1.3 leftovers. Next up: **T2** (loop nudge, fuzzy edit
+replacer, model-escalation, MCP liveness), then **T4** (token reconciliation,
+cache-aware budget, cache-preserving compaction), and the remaining
+T3/T5/T6/T7 stages.
 
 ---
 

@@ -14,6 +14,17 @@ import (
 	"time"
 )
 
+// ErrFirstTokenTimeout and ErrChunkStall are sentinel causes for the two
+// stream-timeout tiers. readSSE wraps them with %w (preserving a
+// human-readable "<tier> after <dur>" message) so a caller can classify a
+// transient mid-stream stall — which re-sending the identical request may
+// clear — apart from a malformed-chunk parse error or a context cancellation,
+// which it cannot. Match with errors.Is, not string comparison.
+var (
+	ErrFirstTokenTimeout = errors.New("first-token timeout")
+	ErrChunkStall        = errors.New("chunk stall timeout")
+)
+
 // Client is a thin HTTP+SSE wrapper for DeepSeek's chat completions API.
 type Client struct {
 	HTTPClient *http.Client
@@ -196,11 +207,11 @@ func (c *Client) readSSE(ctx context.Context, body io.ReadCloser, out chan<- Eve
 			return
 		case <-firstTimer.C:
 			if !seenFirstByte {
-				emit(Event{Type: EventError, Err: fmt.Errorf("first-token timeout after %s", c.FirstTokenTimeout)})
+				emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrFirstTokenTimeout, c.FirstTokenTimeout)})
 				return
 			}
 		case <-stallTimer.C:
-			emit(Event{Type: EventError, Err: fmt.Errorf("chunk stall timeout after %s", c.ChunkStallTimeout)})
+			emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrChunkStall, c.ChunkStallTimeout)})
 			return
 		case sr = <-lines:
 		}

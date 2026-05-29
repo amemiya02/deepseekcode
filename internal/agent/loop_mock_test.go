@@ -120,12 +120,17 @@ func TestLoopThinkingSerializesAsStruct(t *testing.T) {
 	})
 }
 
-// TestLoopFirstTokenTimeout pins that a stalled connect-to-first-token gap
-// surfaces as a first-token timeout the loop reports (not a silent hang).
+// TestLoopFirstTokenTimeout pins that a first-token stall that persists across
+// the one bounded re-issue (T1.4) surfaces as a first-token timeout the loop
+// reports (not a silent hang). The first stall is re-issued; the second is
+// fatal, so the error appears only after exactly two requests.
 func TestLoopFirstTokenTimeout(t *testing.T) {
-	// The mock effectively never sends a first chunk, so the first-token
-	// timer is guaranteed to fire first regardless of scheduler load.
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"})
+	// Both turns effectively never send a first chunk, so the first-token timer
+	// is guaranteed to fire first on each attempt regardless of scheduler load.
+	srv := llmtest.NewServer(
+		llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"},
+		llmtest.Turn{DelayFirst: time.Second, Text: "never arrives either"},
+	)
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
@@ -134,7 +139,7 @@ func TestLoopFirstTokenTimeout(t *testing.T) {
 
 	reason, err := a.Run(context.Background(), "x")
 	if err == nil {
-		t.Fatal("expected a first-token timeout error")
+		t.Fatal("expected a first-token timeout error after the re-issue was exhausted")
 	}
 	if reason != StopUnknown {
 		t.Errorf("reason = %v, want StopUnknown", reason)
@@ -142,14 +147,23 @@ func TestLoopFirstTokenTimeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "first-token timeout") {
 		t.Errorf("error %q is not a first-token timeout", err)
 	}
+	if srv.Count() != 2 {
+		t.Errorf("served %d requests, want 2 (original + one bounded re-issue)", srv.Count())
+	}
 }
 
-// TestLoopChunkStallTimeout pins the second tier: once streaming has begun,
-// a gap between chunks longer than ChunkStallTimeout aborts the turn.
+// TestLoopChunkStallTimeout pins the second tier: once streaming has begun, a
+// gap between chunks longer than ChunkStallTimeout aborts the turn. As with the
+// first-token tier, T1.4 re-issues once, so the error surfaces only after both
+// the original and the re-issue stall.
 func TestLoopChunkStallTimeout(t *testing.T) {
-	// Reasoning arrives immediately (starting the stall timer), then the next
-	// chunk never comes within the window, so the stall timer always wins.
-	srv := llmtest.NewServer(llmtest.Turn{Reasoning: "thinking", DelayChunk: time.Second, Text: "slow"})
+	// Reasoning arrives immediately on each turn (starting the stall timer),
+	// then the next chunk never comes within the window, so the stall timer
+	// always wins.
+	srv := llmtest.NewServer(
+		llmtest.Turn{Reasoning: "thinking", DelayChunk: time.Second, Text: "slow"},
+		llmtest.Turn{Reasoning: "thinking again", DelayChunk: time.Second, Text: "still slow"},
+	)
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
@@ -158,10 +172,144 @@ func TestLoopChunkStallTimeout(t *testing.T) {
 
 	_, err := a.Run(context.Background(), "x")
 	if err == nil {
-		t.Fatal("expected a chunk-stall timeout error")
+		t.Fatal("expected a chunk-stall timeout error after the re-issue was exhausted")
 	}
 	if !strings.Contains(err.Error(), "chunk stall") {
 		t.Errorf("error %q is not a chunk-stall timeout", err)
+	}
+	if srv.Count() != 2 {
+		t.Errorf("served %d requests, want 2 (original + one bounded re-issue)", srv.Count())
+	}
+}
+
+// TestLoopReissuesOnceThenRecovers pins the T1.4 happy path: a single transient
+// mid-stream stall is cleared by one re-issue of the identical request, the
+// turn completes, and exactly one (non-duplicated) assistant turn is recorded —
+// the stalled partial is discarded, not persisted alongside the recovered turn.
+func TestLoopReissuesOnceThenRecovers(t *testing.T) {
+	srv := llmtest.NewServer(
+		// Turn 1 stalls after some reasoning (chunk-stall); turn 2 succeeds.
+		llmtest.Turn{Reasoning: "thinking", DelayChunk: time.Second, Text: "stalled"},
+		llmtest.Turn{Text: "recovered answer"},
+	)
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.Client.FirstTokenTimeout = 5 * time.Second
+	a.Client.ChunkStallTimeout = 50 * time.Millisecond
+	a.StepTimeout = 0 // don't let a step deadline pre-empt the re-issue
+
+	reason, err := a.Run(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("Run: %v (a single stall should be recovered by one re-issue)", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+	if srv.Count() != 2 {
+		t.Fatalf("served %d requests, want 2 (one stall + one re-issue)", srv.Count())
+	}
+
+	var assistant []llm.Message
+	for _, m := range a.Messages {
+		if m.Role == "assistant" {
+			assistant = append(assistant, m)
+		}
+	}
+	if len(assistant) != 1 {
+		t.Fatalf("recorded %d assistant turns, want exactly 1 — the stalled partial must not be persisted alongside the recovered turn", len(assistant))
+	}
+	var gotText string
+	for _, b := range assistant[0].Blocks {
+		if tb, ok := b.(llm.TextBlock); ok {
+			gotText = tb.Text
+		}
+	}
+	if !strings.Contains(gotText, "recovered answer") {
+		t.Errorf("assistant turn = %q, want the recovered answer (not the stalled partial)", gotText)
+	}
+}
+
+// TestLoopReissuesAtMostOnce pins the bound: after one re-issue the loop gives
+// up and salvages the partial from the final attempt (T1.1), rather than
+// re-issuing indefinitely. Exactly two requests are served.
+func TestLoopReissuesAtMostOnce(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{Reasoning: "first try", DelayChunk: time.Second, Text: "x"},
+		llmtest.Turn{Reasoning: "second try", DelayChunk: time.Second, Text: "y"},
+		// A third turn exists; if the loop wrongly re-issued again it would be
+		// served and the run would succeed, failing the assertions below.
+		llmtest.Turn{Text: "should never be reached"},
+	)
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.Client.FirstTokenTimeout = 5 * time.Second
+	a.Client.ChunkStallTimeout = 50 * time.Millisecond
+	a.StepTimeout = 0
+
+	_, err := a.Run(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected an error after the single re-issue was exhausted")
+	}
+	if srv.Count() != 2 {
+		t.Fatalf("served %d requests, want exactly 2 (original + one re-issue, no more)", srv.Count())
+	}
+	// The partial salvaged on give-up is the SECOND attempt's reasoning.
+	if len(a.Messages) == 0 {
+		t.Fatal("no messages recorded")
+	}
+	last := a.Messages[len(a.Messages)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("last message role = %q, want the salvaged partial assistant turn", last.Role)
+	}
+	var gotThinking string
+	for _, b := range last.Blocks {
+		if tb, ok := b.(llm.ThinkingBlock); ok {
+			gotThinking = tb.Text
+		}
+	}
+	if !strings.Contains(gotThinking, "second try") {
+		t.Errorf("salvaged partial reasoning = %q, want the final attempt's reasoning", gotThinking)
+	}
+}
+
+// TestLoopContextOverflowRoutesToCompaction pins T1.4's other half: a 400
+// context-overflow is not retried blindly — the loop compacts and re-attempts
+// the step exactly once. The second request (after compaction) succeeds.
+func TestLoopContextOverflowRoutesToCompaction(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{Status: 400, Body: "This model's maximum context length is 1000000 tokens. However, you requested 1200000 tokens."},
+		llmtest.Turn{Text: "ok after compaction"},
+	)
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+
+	// Capture EventInfo so we can assert the overflow was routed to compaction
+	// rather than surfaced as a hard error.
+	sub := a.Bus().Subscribe(64)
+	var sawOverflowNotice atomic.Bool
+	go func() {
+		for env := range sub.C {
+			if info, ok := env.Event.(EventInfo); ok && strings.Contains(info.Text, "context overflow") {
+				sawOverflowNotice.Store(true)
+			}
+		}
+	}()
+
+	reason, err := a.Run(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("Run: %v (overflow should route to compaction, not fail)", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+	if srv.Count() != 2 {
+		t.Fatalf("served %d requests, want 2 (overflow + one compacted re-attempt)", srv.Count())
+	}
+	if !sawOverflowNotice.Load() {
+		t.Error("expected a 'context overflow' notice signalling the compaction route")
 	}
 }
 
@@ -227,11 +375,15 @@ func TestLoopPartialPersistOnMidStreamError(t *testing.T) {
 	}
 }
 
-// TestLoopFirstTokenTimeoutAppendsNothing pins the complement: when the
-// stream fails before any content (first-token timeout), there is nothing to
-// salvage, so no partial assistant turn is appended.
+// TestLoopFirstTokenTimeoutAppendsNothing pins the complement: when the stream
+// fails before any content (first-token timeout) on both the original attempt
+// and the re-issue, there is nothing to salvage, so no partial assistant turn
+// is appended.
 func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"})
+	srv := llmtest.NewServer(
+		llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"},
+		llmtest.Turn{DelayFirst: time.Second, Text: "never arrives either"},
+	)
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
@@ -239,7 +391,7 @@ func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
 	a.Client.ChunkStallTimeout = 5 * time.Second
 
 	if _, err := a.Run(context.Background(), "x"); err == nil {
-		t.Fatal("expected a first-token timeout error")
+		t.Fatal("expected a first-token timeout error after the re-issue was exhausted")
 	}
 	for _, m := range a.Messages {
 		if m.Role == "assistant" {

@@ -70,10 +70,17 @@ func summarizeMessages(removed []llm.Message) string {
 				collectKeyFiles(v.Text, keyFiles)
 				collectPending(v.Text, pending)
 				if m.Role == "assistant" {
-					currentWork = truncateRunes(v.Text, currentWorkPreviewChars)
+					// singleLine collapses embedded newlines: a stored field that
+					// kept a "\n- tools_used: …" line would, on a later
+					// parseSummaryFields round-trip (now wired into production via
+					// mergeCompactSummaries, T4.3), masquerade as a real field
+					// header at indent 0 and overwrite it. Timeline already routes
+					// through singleLine; current_work and recent_requests are the
+					// two raw-text fields that must too.
+					currentWork = singleLine(truncateRunes(v.Text, currentWorkPreviewChars))
 				}
 				if m.Role == "user" {
-					recentRequests = appendRecent(recentRequests, truncateRunes(v.Text, recentRequestPreviewChars))
+					recentRequests = appendRecent(recentRequests, singleLine(truncateRunes(v.Text, recentRequestPreviewChars)))
 				}
 			case llm.ThinkingBlock:
 				collectKeyFiles(v.Text, keyFiles)
@@ -119,6 +126,16 @@ func appendRecent(buf []string, item string) []string {
 		buf = buf[len(buf)-maxRecentRequests:]
 	}
 	return buf
+}
+
+// lastN returns the last n elements of s (all of s when len(s) <= n). Used to
+// cap the unioned recent_requests across a cross-round merge to the most-recent
+// maxRecentRequests, matching appendRecent's single-round cap.
+func lastN(s []string, n int) []string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 func collectKeyFiles(s string, into map[string]struct{}) {
@@ -186,6 +203,55 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+// priorSummaryText returns the <summary> text carried by a message that is
+// itself a previous compaction summary, or "" if the message is not a summary.
+// A compaction round leaves its summary as the first body message, so on the
+// next round that message sits at the front of the compaction window; detecting
+// it lets summarizeWithMerge fold the earlier summary forward instead of
+// re-summarizing it as opaque text (which would drop its structured fields).
+func priorSummaryText(m llm.Message) string {
+	for _, b := range m.Blocks {
+		if tb, ok := b.(llm.TextBlock); ok {
+			// Require the message to BE a summary (trimmed text starts with
+			// <summary> and ends with </summary>), not merely mention the tags in
+			// prose — otherwise a model message discussing compaction would be
+			// mis-detected as a prior summary and excluded from re-summarization.
+			t := strings.TrimSpace(tb.Text)
+			if strings.HasPrefix(t, "<summary>") && strings.HasSuffix(t, "</summary>") {
+				return tb.Text
+			}
+		}
+	}
+	return ""
+}
+
+// summarizeWithMerge produces the summary for one compaction window. When the
+// window's first message is itself a prior compaction summary, its fields are
+// merged into the fresh summary of the remaining messages (via
+// mergeCompactSummaries) so early-session facts survive across rounds rather
+// than decaying into a summary-of-a-summary. Returns "" only when there is
+// genuinely nothing to summarize.
+func summarizeWithMerge(window []llm.Message) string {
+	if len(window) == 0 {
+		return ""
+	}
+	prior := priorSummaryText(window[0])
+	rest := window
+	if prior != "" {
+		rest = window[1:]
+	}
+	fresh := summarizeMessages(rest)
+	if prior == "" {
+		return fresh
+	}
+	if fresh == "" {
+		// Nothing new past the prior summary — carry it forward verbatim so a
+		// compaction that only re-folds an existing summary is a no-op on facts.
+		return prior
+	}
+	return mergeCompactSummaries(prior, fresh)
+}
+
 // mergeCompactSummaries folds an earlier <summary> block (from a
 // previous compaction round) into a fresh one, deduplicating the
 // list fields (tools_used, key_files) and taking current_work from
@@ -203,14 +269,27 @@ func mergeCompactSummaries(previousSummary, newSummary string) string {
 		return previousSummary + "\n\n--- merged with newer summary ---\n\n" + newSummary
 	}
 
+	// current_work prefers the newer window, but falls back to the prior when
+	// the newer window ends on a tool_use with no assistant text (so
+	// summarizeMessages yielded "") — otherwise a meaningful prior would be
+	// blanked across the round.
+	currentWork := next.currentWork
+	if strings.TrimSpace(currentWork) == "" {
+		currentWork = prev.currentWork
+	}
+
 	merged := summaryFields{
-		messages:       next.messages, // newer count wins
+		// messages count and timeline reflect the most-recent window only by
+		// design: they describe activity volume/order, which is inherently
+		// per-round; the cross-round facts (tools_used, key_files, pending,
+		// recent_requests) are unioned forward instead.
+		messages:       next.messages,
 		toolsUsed:      dedupSort(append(prev.toolsUsed, next.toolsUsed...)),
-		recentRequests: next.recentRequests, // newer is more relevant
+		recentRequests: lastN(append(append([]string{}, prev.recentRequests...), next.recentRequests...), maxRecentRequests),
 		pending:        dedupSort(append(prev.pending, next.pending...)),
 		keyFiles:       dedupSort(append(prev.keyFiles, next.keyFiles...)),
-		currentWork:    next.currentWork,
-		timeline:       next.timeline, // newer timeline only
+		currentWork:    currentWork,
+		timeline:       next.timeline,
 	}
 	return renderSummary(merged)
 }

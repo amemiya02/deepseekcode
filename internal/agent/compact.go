@@ -123,12 +123,20 @@ func CompactSession(messages []llm.Message, cfg CompactionConfig, charsPerToken 
 	if toIdx <= fromIdx {
 		return CompactionResult{}
 	}
-	summary := summarizeMessages(messages[fromIdx:toIdx])
+	// summarizeWithMerge folds a prior compaction summary (if the window opens
+	// with one) into the fresh summary so early facts survive multi-round
+	// compaction (T4.3).
+	summary := summarizeWithMerge(messages[fromIdx:toIdx])
 	if summary == "" {
 		return CompactionResult{}
 	}
+	// The summary is an assistant-role body message, not a second system
+	// message wedged after the real system prompt (T4.3). staticSystem() only
+	// fingerprints a.System, so a body message — whatever its role — never
+	// enters the cache prefix; assistant role keeps the wire shape
+	// provider-conventional (one system message, at the head).
 	summaryMsg := llm.Message{
-		Role:   "system",
+		Role:   "assistant",
 		Blocks: []llm.ContentBlock{llm.TextBlock{Text: summary}},
 	}
 	kept := make([]llm.Message, len(messages)-toIdx)

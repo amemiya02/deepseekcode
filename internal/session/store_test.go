@@ -379,8 +379,8 @@ func TestReplaceWithCompactionAtomic(t *testing.T) {
 			t.Errorf("msg[%d].Idx = %d, want %d", i, m.Idx, wantIdxs[i])
 		}
 	}
-	if msgs[2].Role != "system" {
-		t.Errorf("msgs[2].Role = %q, want system (summary)", msgs[2].Role)
+	if msgs[2].Role != "assistant" {
+		t.Errorf("msgs[2].Role = %q, want assistant (T4.3: summary is an assistant body message)", msgs[2].Role)
 	}
 	if tb, ok := msgs[2].Blocks[0].(llm.TextBlock); !ok || tb.Text != "SUMMARY" {
 		t.Errorf("summary blocks[0] = %#v", msgs[2].Blocks[0])

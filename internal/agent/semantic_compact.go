@@ -165,8 +165,10 @@ func SemanticCompact(
 	}
 
 	cost := llm.Cost(cfg.SummaryModel, usage)
+	// Assistant-role body message, consistent with the deterministic path
+	// (T4.3) — never a second system message in the wire.
 	summaryMsg := llm.Message{
-		Role:   "system",
+		Role:   "assistant",
 		Blocks: []llm.ContentBlock{llm.TextBlock{Text: summary}},
 	}
 
@@ -281,7 +283,8 @@ func buildSemanticSummaryPrompt(messages []llm.Message) string {
 	b.WriteString("2. **Current objective/task**: what the user is trying to accomplish RIGHT NOW\n")
 	b.WriteString("3. **Negative constraints**: things explicitly forbidden or to avoid\n")
 	b.WriteString("4. **Changed file paths**: all file paths that were read, modified, or discussed\n")
-	b.WriteString("5. **Recent tool evidence**: key results from the last few tool calls\n\n")
+	b.WriteString("5. **Recent tool evidence**: key results from the last few tool calls\n")
+	b.WriteString("6. **Prior summary carry-forward**: if any message below is itself a <summary>...</summary> block from an earlier compaction, you MUST preserve ALL of its facts (every file path, tool, and constraint) in your summary — those facts are from the start of the session and exist ONLY in that block. Never drop them.\n\n")
 	b.WriteString("Format your response as:\n")
 	b.WriteString("<summary>\n")
 	b.WriteString("- objective: (current task/goal)\n")
@@ -295,6 +298,14 @@ func buildSemanticSummaryPrompt(messages []llm.Message) string {
 	b.WriteString("Messages to summarize:\n")
 	for i, m := range messages {
 		fmt.Fprintf(&b, "[%d] %s: ", i+1, m.Role)
+		// A prior compaction summary holds the only copy of early-session facts;
+		// include it in full (not truncated to 500 chars) so constraint 6 has the
+		// facts to carry forward.
+		if prior := priorSummaryText(m); prior != "" {
+			b.WriteString(prior)
+			b.WriteString("\n")
+			continue
+		}
 		for _, blk := range m.Blocks {
 			switch v := blk.(type) {
 			case llm.TextBlock:

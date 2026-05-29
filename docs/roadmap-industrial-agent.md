@@ -27,19 +27,20 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T2.3 | ✅ done | Model-driven escalation: `<<<NEEDS_PRO>>>` marker (whole-first-line) or ≥3 unrecoverable repair errors re-issues the turn once on `deepseek-v4-pro` via the shared `streamWithReissue`. Only `req.Model` changes → fingerprint unmoved; flash turn discarded (no duplicate persist); `respModel` drives persistence/cost/trace; opt-in contract (`EnableEscalation`) keeps the default golden untouched. **Hardened after a 3-lens adversarial workflow** (storm-history pollution → `StormBreaker` Snapshot/Restore; flash spend charged + pro re-gated; trace attribution; marker tightened). |
 | T2.4 | ✅ done | MCP stdio liveness watcher: process exit → `StateDegraded` (tools drop via the existing `State!=StateConnected` filter), then exactly one bounded reconnect with negative-result backoff. `r.mu` sole authority, no IO under lock, watcher bound to its transport's `Done()` by value; `-race` clean. ADR-0001 invariant (degrade surfaces as `PendingMCPToolRemoved`, never mid-epoch fingerprint movement) covered compositionally by the new mcp-layer `DriftRemoved` test + existing `TestCapabilityDiff_MCPAddRemove`/`TestEpochMutationsAfterFreezeBecomePending`. |
 | T4.1 | ✅ done | Per-session calibrated chars-per-token ratio learned from `usage.PromptTokens` (EMA α=0.3, clamped [1.0,12.0], zero-usage no-op), fed into the compaction trigger (`ContextPressure`/`ShouldCompact`) and the budget projection (`ProjectedTurnCostCNY`). `EstimateTokensCalibrated` with `EstimateTokens` as the char/4 cold-start wrapper — turn-1 byte-identical to today. No tokenizer; touchesFingerprint=false (golden unmoved). |
+| T4.2 | ✅ done | Cache-aware budget projection: `ProjectedTurnCostCNY` discounts input by the rolling session cache-hit rate (`BudgetState.SessionCacheHitRate`, folded from each committed turn's authoritative usage via `FoldCacheUsage`; hit-token split floored → conservative; rate clamped [0,1]; cold-start rate 0 reproduces the all-miss floor exactly). Unknown-model free pass closed: a model with no pricing table warns once per session (`BudgetState.UnknownModelWarned`). touchesFingerprint=false (golden unmoved, `-race` green). |
+| T4.3 | ✅ done | Compaction summary is now an **assistant-role body message** (not a 2nd `system` message wedged after the prompt) — `staticSystem()` only fingerprints `a.System`, so the wire shape changes with zero fingerprint/cache movement (the cache lens of the adversarial pass returned **zero** real defects). `mergeCompactSummaries` wired into production via `summarizeWithMerge` so multi-round compaction unions early facts forward (head-of-body placement is what keeps the prior summary inside the next compaction window — required for merge; "tail" in the original spec was inconsistent with its own merge requirement). **Hardened after a 3-lens adversarial workflow** which reproduced a real HIGH fact-corruption bug: a user message embedding a `- tools_used: […]` line masqueraded as a field header on the now-production `parseSummaryFields` round-trip → fixed by `singleLine()`-collapsing the two raw-text fields (`current_work`, `recent_requests`); also semantic-path carry-forward (prompt instruction + full prior-summary inclusion, since the LLM summary's field vocabulary differs and can't be structurally merged), `current_work`/`recent_requests` cross-round retention, prose false-positive guard, and a scoped store.go comment. touchesFingerprint=false (golden unmoved, full suite + `-race` green). |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-**T1 and T2 are complete** (bar T1.3 leftovers). **T4 in progress: T4.1 landed.**
-A T4 design pass (4 specs + critic) produced the vetted order and a shared-file
-map (compact.go/budget_projection.go/agent.go are shared → sequential). Next:
-**T4.2** (cache-aware budget projection: discount by rolling cache-hit rate; warn
-on unknown models — spec go-ahead) → **T4.3** (cache-preserving compaction:
-summary as assistant-role tail, wire `mergeCompactSummaries` — the critic flagged
-its `ReplaceWithCompaction` signature change has **6 callers** + two store tests
-asserting the old system-role summary; needs an adversarial pass) → **T4.4**
-(unify triggers; delete dead `context_fold.go`). Then the remaining T3/T5/T6/T7.
+**T1 and T2 are complete** (bar T1.3 leftovers). **T4 in progress: T4.1, T4.2,
+and T4.3 landed** (each via the vetted sequential order from the T4 design pass;
+T4.3 additionally hardened by a 3-lens adversarial workflow that caught a real
+HIGH fact-corruption bug). The avoided 6-caller `ReplaceWithCompaction` signature
+churn the critic flagged: a one-line hardcoded-role change in the store sufficed,
+since no caller needs a variable role. Next: **T4.4** (reconcile the absolute vs
+ratio compaction triggers so they can't disagree; delete dead `context_fold.go` —
+deletion-impact grep first). Then the remaining T1.3 leftovers and T3/T5/T6/T7.
 
 ---
 

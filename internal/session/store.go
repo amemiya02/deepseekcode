@@ -440,8 +440,15 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 }
 
 // ReplaceWithCompaction atomically collapses messages in [fromIdx,
-// toIdx) into a single synthetic system message containing the
+// toIdx) into a single synthetic assistant message containing the
 // summary, then renumbers later messages so idx stays contiguous.
+// The role is assistant (not system) so a session compacted under
+// T4.3+ replays the same body-message shape the live agent uses — one
+// system message at the head, the summary in the body. (Sessions
+// compacted under older code persisted a role='system' summary row;
+// LoadMessages replays that verbatim, so a legacy summary still
+// re-enters as a mid-body system message. That is tolerated by
+// DeepSeek; it is simply the pre-T4.3 shape, not the new guarantee.)
 //
 // Snapshots in this project are filesystem-backed (no SQL table to
 // UPDATE), so step_idx shifting for snapshots lives in
@@ -506,7 +513,7 @@ func (s *Store) ReplaceWithCompaction(ctx context.Context, sessionID string, fro
 		 (session_id, idx, role, content, reasoning_content, tool_calls,
 		  tool_results, tool_call_id, model,
 		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts, blocks)
-		 VALUES (?, ?, 'system', '', '', '', '', '', '', 0, 0, 0, 0, ?, ?)`,
+		 VALUES (?, ?, 'assistant', '', '', '', '', '', '', 0, 0, 0, 0, ?, ?)`,
 		sessionID, fromIdx, ts.Unix(), string(blocksJSON)); err != nil {
 		return 0, fmt.Errorf("insert summary: %w", err)
 	}

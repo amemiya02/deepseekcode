@@ -9,6 +9,29 @@ points at a concrete file and line range from the inventory.
 
 ---
 
+## Progress log
+
+Living status of implementation (branch `feat/industrial-agent`). Each entry
+is a landed, independently-verified commit (`go test ./...` green, golden
+cache bytes unmoved, `go vet` clean, `-race` where relevant).
+
+| Stage | Status | Notes |
+|---|---|---|
+| T6.3 | ✅ done | `internal/llmtest` offline mock-DeepSeek SSE harness + end-to-end loop tests (finish-reason override, tool-pairing, thinking-struct, both timeout tiers). |
+| T1.1 | ✅ done | Partial assistant turn persisted on mid-stream error instead of discarded. |
+| T1.2 | ✅ done | `Replay` repairs dangling `tool_calls` from an interrupted session; the other two pieces were already handled (see the T1.2 entry below). |
+| T1.3 | ◧ partial | `StopStepTimeout` (non-success) + `StopUserRequested` wired + `IsSuccess()`. Deferred: budget/denied EventInfo → typed events; remove the unreachable tool-error abort branch. |
+| T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
+| T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
+| T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
+
+Next up: **T1.4** (mid-stream salvage + one bounded re-issue), then **T2** (loop
+nudge, fuzzy edit replacer, model-escalation, MCP liveness), **T4** (token
+reconciliation, cache-aware budget, cache-preserving compaction), and the
+remaining T3/T5/T6/T7 stages.
+
+---
+
 ## 1. Executive summary
 
 `deepseekcode` is already a mature, DeepSeek-native coding agent, not a

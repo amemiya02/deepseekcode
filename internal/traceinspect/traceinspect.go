@@ -7,21 +7,14 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/traceschema"
 )
 
-type record struct {
-	Type             string   `json:"type"`
-	EpochID          string   `json:"epoch_id"`
-	AgentRole        string   `json:"agent_role"`
-	ParentEpochID    string   `json:"parent_epoch_id"`
-	StaticPrefixHash string   `json:"static_prefix_hash"`
-	Turn             *int     `json:"turn"`
-	CacheHitTokens   *int     `json:"cache_hit_tokens"`
-	CacheMissTokens  *int     `json:"cache_miss_tokens"`
-	OutputTokens     *int     `json:"output_tokens"`
-	CostCNY          *float64 `json:"cost_cny"`
-	Reason           string   `json:"reason"`
-}
+// record aliases the canonical agent-trace record (traceschema.Record), shared
+// with the emitter (internal/agent) and the benchmark harness, so a field
+// rename breaks this reader at compile time instead of silently (T6.1).
+type record = traceschema.Record
 
 type EpochSummary struct {
 	EpochID     string

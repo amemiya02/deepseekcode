@@ -7,7 +7,34 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/traceschema"
 )
+
+// TestTraceRecordsCarrySchemaVersion pins the T6.1 acceptance: every emitted
+// record is stamped with schema_version = traceschema.Version, regardless of
+// emit site, because the stamp lives at the single encode chokepoint.
+func TestTraceRecordsCarrySchemaVersion(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewTraceSink(&buf, "deepseek-v4-flash")
+	s.Handle(EventEpochCreated{EpochID: "e1", StaticPrefixHash: "h", ToolsHash: "t", Reason: "session_start"})
+	s.Handle(EventStepFinish{Reason: StopModelDone, Usage: llm.Usage{PromptCacheHitTokens: 10, PromptCacheMissTokens: 5, CompletionTokens: 3}})
+	s.Handle(EventDriftBlocked{EpochID: "e1", Which: "tools"})
+
+	recs := decodeTrace(t, buf.Bytes())
+	if len(recs) == 0 {
+		t.Fatal("no records emitted")
+	}
+	for _, r := range recs {
+		v, ok := r["schema_version"]
+		if !ok {
+			t.Errorf("record type=%v missing schema_version", r["type"])
+			continue
+		}
+		if int(v.(float64)) != traceschema.Version {
+			t.Errorf("record type=%v schema_version = %v, want %d", r["type"], v, traceschema.Version)
+		}
+	}
+}
 
 func decodeTrace(t *testing.T, b []byte) []map[string]any {
 	t.Helper()

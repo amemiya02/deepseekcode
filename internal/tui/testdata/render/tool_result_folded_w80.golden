@@ -1,0 +1,12 @@
+▌ ✓ bash: ls -la /very/long/path/that/forces/header/trunc... (15 lines)  3ms
+▌  line 1 of command output
+▌  line 2 of command output
+▌  line 3 of command output
+▌  line 4 of command output
+▌  line 5 of command output
+▌  line 6 of command output
+▌  line 7 of command output
+▌  line 8 of command output
+▌  line 9 of command output
+▌  line 10 of command output
+▌  … 6 more lines, press e to expand

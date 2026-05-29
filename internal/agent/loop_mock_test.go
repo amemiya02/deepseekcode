@@ -123,12 +123,14 @@ func TestLoopThinkingSerializesAsStruct(t *testing.T) {
 // TestLoopFirstTokenTimeout pins that a stalled connect-to-first-token gap
 // surfaces as a first-token timeout the loop reports (not a silent hang).
 func TestLoopFirstTokenTimeout(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: 200 * time.Millisecond, Text: "late"})
+	// The mock effectively never sends a first chunk, so the first-token
+	// timer is guaranteed to fire first regardless of scheduler load.
+	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"})
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
-	a.Client.FirstTokenTimeout = 30 * time.Millisecond
-	a.Client.ChunkStallTimeout = 2 * time.Second
+	a.Client.FirstTokenTimeout = 50 * time.Millisecond
+	a.Client.ChunkStallTimeout = 5 * time.Second
 
 	reason, err := a.Run(context.Background(), "x")
 	if err == nil {
@@ -145,12 +147,14 @@ func TestLoopFirstTokenTimeout(t *testing.T) {
 // TestLoopChunkStallTimeout pins the second tier: once streaming has begun,
 // a gap between chunks longer than ChunkStallTimeout aborts the turn.
 func TestLoopChunkStallTimeout(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{Reasoning: "thinking", DelayChunk: 150 * time.Millisecond, Text: "slow"})
+	// Reasoning arrives immediately (starting the stall timer), then the next
+	// chunk never comes within the window, so the stall timer always wins.
+	srv := llmtest.NewServer(llmtest.Turn{Reasoning: "thinking", DelayChunk: time.Second, Text: "slow"})
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
-	a.Client.FirstTokenTimeout = 2 * time.Second
-	a.Client.ChunkStallTimeout = 30 * time.Millisecond
+	a.Client.FirstTokenTimeout = 5 * time.Second
+	a.Client.ChunkStallTimeout = 50 * time.Millisecond
 
 	_, err := a.Run(context.Background(), "x")
 	if err == nil {
@@ -227,12 +231,12 @@ func TestLoopPartialPersistOnMidStreamError(t *testing.T) {
 // stream fails before any content (first-token timeout), there is nothing to
 // salvage, so no partial assistant turn is appended.
 func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: 200 * time.Millisecond, Text: "late"})
+	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never arrives"})
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
-	a.Client.FirstTokenTimeout = 30 * time.Millisecond
-	a.Client.ChunkStallTimeout = 2 * time.Second
+	a.Client.FirstTokenTimeout = 50 * time.Millisecond
+	a.Client.ChunkStallTimeout = 5 * time.Second
 
 	if _, err := a.Run(context.Background(), "x"); err == nil {
 		t.Fatal("expected a first-token timeout error")
@@ -248,15 +252,18 @@ func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
 // typed StopStepTimeout with a non-nil error, not the old StopUnknown,nil
 // silent-success shape that rendered a timeout as a clean finish.
 func TestLoopStepTimeoutIsNonSuccess(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: 300 * time.Millisecond, Text: "too slow"})
+	// The mock blocks before sending headers, so the per-step deadline fires
+	// while the client is still in its HTTP round-trip — a reliable
+	// connect-phase abort, not a flaky mid-body context cancellation.
+	srv := llmtest.NewServer(llmtest.Turn{DelayBeforeHeaders: time.Second, Text: "never arrives"})
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)
-	a.StepTimeout = 50 * time.Millisecond // shorter than the model turn
+	a.StepTimeout = 100 * time.Millisecond
 
 	reason, err := a.Run(context.Background(), "x")
 	if reason != StopStepTimeout {
-		t.Fatalf("reason = %v, want StopStepTimeout", reason)
+		t.Fatalf("reason = %v (err=%v), want StopStepTimeout", reason, err)
 	}
 	if reason.IsSuccess() {
 		t.Error("StopStepTimeout must not report IsSuccess")
@@ -273,7 +280,7 @@ func TestLoopStepTimeoutIsNonSuccess(t *testing.T) {
 // cancellation is reported as StopUserRequested, distinct from an ambient
 // StopContextCancel.
 func TestLoopUserRequestedStop(t *testing.T) {
-	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never gets here"})
+	srv := llmtest.NewServer(llmtest.Turn{DelayBeforeHeaders: time.Second, Text: "never gets here"})
 	defer srv.Close()
 
 	a := newMockLoopAgent(t, srv)

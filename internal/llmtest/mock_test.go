@@ -2,6 +2,7 @@ package llmtest
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -99,12 +100,16 @@ func TestServer_StatusFaultIsAPIError(t *testing.T) {
 }
 
 func TestServer_FirstTokenTimeout(t *testing.T) {
-	srv := NewServer(Turn{DelayFirst: 200 * time.Millisecond, Text: "late"})
+	// Delay comfortably longer than the timeout so the first-token timer always
+	// wins the race regardless of scheduler load. The mock holds the
+	// connection open for the delay (Server.Close blocks that long), so the
+	// client only ever observes its timeout, never a clean empty stream.
+	srv := NewServer(Turn{DelayFirst: time.Second, Text: "never arrives"})
 	defer srv.Close()
 
 	c := srv.Client()
-	c.FirstTokenTimeout = 30 * time.Millisecond
-	c.ChunkStallTimeout = time.Second
+	c.FirstTokenTimeout = 50 * time.Millisecond
+	c.ChunkStallTimeout = 5 * time.Second
 
 	ch, err := c.Stream(context.Background(), llm.Request{Model: "deepseek-v4-flash"})
 	if err != nil {
@@ -130,5 +135,27 @@ func TestServer_AutoTerminatesWhenUnderScripted(t *testing.T) {
 	final, _, _ := collect(t, ch)
 	if final.Type != llm.EventFinish || final.FinishReason != "stop" {
 		t.Fatalf("synthetic terminal turn should finish with stop, got %v/%q", final.Type, final.FinishReason)
+	}
+}
+
+// TestServer_ContextCancelAtConnectAborts pins that a request-context deadline
+// firing while the client is still waiting for headers aborts the call (the
+// reliable connect-phase abort the agent's step-deadline path relies on).
+func TestServer_ContextCancelAtConnectAborts(t *testing.T) {
+	srv := NewServer(Turn{DelayBeforeHeaders: time.Second, Text: "late"})
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	ch, err := srv.Client().Stream(ctx, llm.Request{Model: "deepseek-v4-flash"})
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Stream error is not a deadline: %v", err)
+		}
+		return // aborted at Do() — the expected path
+	}
+	// Headers somehow arrived first; the stream must still terminate in error.
+	final, _, _ := collect(t, ch)
+	if final.Type != llm.EventError {
+		t.Fatalf("want EventError from ctx deadline, got type=%v finish=%q", final.Type, final.FinishReason)
 	}
 }

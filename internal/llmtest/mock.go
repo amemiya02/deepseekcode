@@ -79,9 +79,17 @@ type Turn struct {
 	Status int
 	Body   string
 
-	// DelayFirst delays the first SSE chunk, to trip the client's
-	// first-token timeout. DelayChunk delays every chunk after the first,
-	// to trip the chunk-stall timeout.
+	// DelayBeforeHeaders delays before the response headers are sent, so the
+	// client's HTTP round-trip (Client.Stream → Do) is still blocked waiting
+	// for headers when a short request-context deadline or cancellation fires.
+	// Context abort at this connect/headers phase is reliable (Do honours the
+	// request context), unlike a context deadline that fires mid-body. Use it
+	// to exercise per-step-deadline and user-cancellation paths.
+	DelayBeforeHeaders time.Duration
+
+	// DelayFirst delays the first SSE chunk (after headers), to trip the
+	// client's first-token timeout. DelayChunk delays every chunk after the
+	// first, to trip the chunk-stall timeout.
 	DelayFirst time.Duration
 	DelayChunk time.Duration
 
@@ -177,6 +185,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Delay before headers: leaves the client blocked in its HTTP round-trip,
+	// so a short request-context deadline/cancel aborts at the connect phase.
+	if turn.DelayBeforeHeaders > 0 {
+		time.Sleep(turn.DelayBeforeHeaders)
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher, ok := w.(http.Flusher)
@@ -191,6 +205,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// Delays use a plain sleep, which holds the connection open for the whole
+	// delay. That is deliberate: at the instant a client timeout fires, the
+	// response has produced no end-of-stream, so the client observes only its
+	// own timeout and can never read a clean (empty) stream-end and misreport
+	// the turn as finished. The cost is that Server.Close blocks until the
+	// delay elapses, so tests keep delays modest but comfortably larger than
+	// the timeout they exercise.
 	if turn.DelayFirst > 0 {
 		time.Sleep(turn.DelayFirst)
 	}

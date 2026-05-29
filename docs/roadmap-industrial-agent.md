@@ -227,15 +227,26 @@ user saw (`agent.go:774-786`). *Risk:* the partial assistant turn must satisfy
 `SanitizeForDeepSeek` (thinking placeholder) or the next request 400s — covered
 by T1.2.
 
-**T1.2 Cancel/error synthesizes tool results; replay hygiene.**
-*Goal:* on cancel or mid-stream abort, synthesize `{role:"tool", content:"user cancelled"}`
-for every in-flight `tool_call` without a result before persisting; add
-load-time `stampMissingReasoning` + `fixToolCallPairing` on `Replay`. *Modules:*
-`agent.go:334-337`, `internal/session/branch.go`, `internal/llm/sanitize.go`.
-*Why:* dangling tool_calls and unpaired/empty `reasoning_content` make DeepSeek
-400 on resume (`design.md:238-240`; Reasonix `healing.ts`; CodeWhale). *Risk:*
-synthesized messages must not perturb the cached prefix — they ride the message
-tail, never the Static Prefix.
+**T1.2 Replay hygiene — repair dangling tool calls on load. — DONE.**
+On scoping, two of the three pieces were already handled and only the third
+was a real gap:
+- *Within-Run cancel pairing — already safe.* `runToolCalls` synthesizes a
+  result for every call even on a cancelled context (`executeOne` returns
+  `"user cancelled"` on `context.Canceled`) and appends one tool-result
+  message per call, so a cancel never leaves a dangling `tool_call` in the
+  live history.
+- *`stampMissingReasoning` — already covered.* `MarshalCacheStable` calls
+  `SanitizeForDeepSeek` on every request, so the thinking placeholder is
+  stamped on fresh, replayed, and branched messages alike.
+- *The real gap — crash between persists.* A process interrupted between
+  persisting an assistant `tool_call` turn and persisting its results
+  reloads via `Replay` with a dangling `tool_call` that DeepSeek 400s.
+  Fixed in `internal/session/tool_pairing.go`: `Replay` now calls
+  `repairDanglingToolCalls`, which synthesizes an `IsError` placeholder
+  result for any unmatched `tool_call` id, inserted after the assistant
+  message that issued it. No-op (no allocation) when already paired, so the
+  cache-stable wire bytes built from a clean history are untouched, and the
+  synthesized messages ride the tail, never the Static Prefix.
 
 **T1.3 Typed stop reasons + structured control events.**
 *Goal:* emit `StopUserRequested` from TUI cancel (`tui/app.go:684`), add

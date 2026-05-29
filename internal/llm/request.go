@@ -3,7 +3,6 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"sort"
 )
 
@@ -103,17 +102,12 @@ type ResponseFmt struct {
 func (r Request) MarshalCacheStable() ([]byte, error) {
 	// Sanitize first so thinking-mode replay is stable
 	r = r.SanitizeForDeepSeek()
-	tools := make([]Tool, len(r.Tools))
-	copy(tools, r.Tools)
-	sort.SliceStable(tools, func(i, j int) bool {
-		return tools[i].Function.Name < tools[j].Function.Name
-	})
-	for i, t := range tools {
-		canon, err := canonicalJSON(t.Function.Parameters)
-		if err != nil {
-			return nil, fmt.Errorf("canonicalizing tool %q parameters: %w", t.Function.Name, err)
-		}
-		tools[i].Function.Parameters = canon
+	// canonicalizeTools is the single shared canonicalization with the Prefix
+	// Fingerprint (static_prefix.go), so the tool bytes on the wire and the
+	// bytes the fingerprint hashes are produced by the same code.
+	tools, err := canonicalizeTools(r.Tools)
+	if err != nil {
+		return nil, err
 	}
 
 	wireMsgs := make([]wireMessage, 0, len(r.Messages))

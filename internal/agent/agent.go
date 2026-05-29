@@ -558,7 +558,7 @@ func staticPrefixOf(system string) string {
 // pair built with this so the benchmark can verify the prefix did not move,
 // rather than the agent asserting it with a hardcoded boolean.
 func staticPrefixHash(system string, toolSpecs []llm.Tool) string {
-	return llm.ComputeFingerprint(llm.PrefixInput{SystemPrompt: system, Tools: toolSpecs}).CombinedSHA256
+	return llm.StaticPrefix{System: system, Tools: toolSpecs}.Fingerprint().CombinedSHA256
 }
 
 // CurrentEpochID returns the current epoch's ID, or "" when no epoch has been
@@ -707,7 +707,8 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 
 	expectedCacheMiss := a.epochMgr.ExpectedCacheMiss()
 
-	prefixChanged, prefixWhich := a.prefixMon.Check(staticSys, req.Tools)
+	prefixDiff, prefixChanged := a.prefixMon.Check(llm.StaticPrefix{System: staticSys, Tools: req.Tools})
+	prefixWhich := prefixDiff.Which()
 	if prefixChanged {
 		a.bus.Publish(EventInfo{Text: "prefix cache invalidated: " + prefixWhich})
 		if a.epochMgr.IsFrozen() {
@@ -796,10 +797,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
 
 		if rp, ok := a.Persister.(ReceiptAppender); ok {
-			fp := llm.ComputeFingerprint(llm.PrefixInput{
-				SystemPrompt: staticSys,
-				Tools:        req.Tools,
-			})
+			fp := llm.StaticPrefix{System: staticSys, Tools: req.Tools}.Fingerprint()
 			payload, _ := json.Marshal(map[string]any{
 				"model":                a.Model,
 				"usage":                usage,

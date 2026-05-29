@@ -740,6 +740,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		blocks        []llm.ContentBlock
 		finish        string
 		usage         llm.Usage
+		streamErr     error
 	)
 
 	for ev := range events {
@@ -772,8 +773,34 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			assembledCall = ev.ToolCalls
 			blocks = ev.Blocks
 		case llm.EventError:
-			return StepRecord{}, fmt.Errorf("stream error: %w", ev.Err)
+			// Capture and stop reading; the client closes the channel right
+			// after EventError, so the range exits on the next receive. We
+			// fall through to partial-turn persistence below rather than
+			// returning here, so a mid-stream failure does not discard the
+			// reasoning/text already streamed.
+			streamErr = ev.Err
 		}
+	}
+
+	if streamErr != nil {
+		if inReasoning {
+			a.bus.Publish(EventReasoningEnd{})
+			inReasoning = false
+		}
+		// Persist the partial assistant turn (the reasoning and visible text
+		// accumulated before the stream broke) so a long turn's work and the
+		// persisted transcript survive a mid-stream failure. EventFinish never
+		// fired, so the client assembled no tool calls — the partial turn
+		// carries only thinking/text and cannot leave a dangling tool_call;
+		// SanitizeForDeepSeek still guards the next request. Nothing is
+		// appended when no content arrived (e.g. a first-token timeout).
+		if partial := partialBlocks(reasoning, text); len(partial) > 0 {
+			a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: partial})
+			if a.Persister != nil {
+				_, _ = a.Persister.AppendAssistant(context.Background(), partial, a.Model, usage)
+			}
+		}
+		return StepRecord{}, fmt.Errorf("stream error: %w", streamErr)
 	}
 
 	// Repair pipeline: scavenge, repair args, storm-breaker filter.
@@ -833,6 +860,23 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		StaticPrefixHash:  epoch.StaticPrefixHash,
 		ExpectedCacheMiss: expectedCacheMiss,
 	}, nil
+}
+
+// partialBlocks assembles the content blocks captured before a stream broke
+// mid-turn: the reasoning channel (if any) followed by the visible text (if
+// any), in DeepSeek's logical emission order. Tool calls are deliberately
+// excluded — a mid-stream failure means the client never assembled them, and
+// emitting a half-formed ToolUseBlock would risk a dangling tool_call on the
+// next request. Returns nil when nothing was streamed.
+func partialBlocks(reasoning, text string) []llm.ContentBlock {
+	var blocks []llm.ContentBlock
+	if reasoning != "" {
+		blocks = append(blocks, llm.ThinkingBlock{Text: reasoning})
+	}
+	if text != "" {
+		blocks = append(blocks, llm.TextBlock{Text: text})
+	}
+	return blocks
 }
 
 // refreshGitContext repopulates the builder's GitStatus / GitDiff /

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/llmtest"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -176,6 +177,70 @@ func TestLoopAPIErrorPropagates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Errorf("error %q does not mention status 500", err)
+	}
+}
+
+// TestLoopPartialPersistOnMidStreamError pins T1.1: when a stream breaks
+// mid-turn after some reasoning/text has arrived, that partial assistant
+// turn is appended to the message history (and persisted) rather than
+// discarded, while the turn still surfaces the error.
+func TestLoopPartialPersistOnMidStreamError(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{
+		Reasoning:     "partial reasoning",
+		Text:          "partial answer so far",
+		MalformedTail: true, // content arrives, then the stream breaks
+	})
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+
+	_, err := a.Run(context.Background(), "x")
+	if err == nil {
+		t.Fatal("expected a mid-stream error to surface from Run")
+	}
+
+	if len(a.Messages) == 0 {
+		t.Fatal("no messages recorded")
+	}
+	last := a.Messages[len(a.Messages)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("last message role = %q, want assistant (partial turn should be appended)", last.Role)
+	}
+	var gotText, gotThinking string
+	for _, b := range last.Blocks {
+		switch tb := b.(type) {
+		case llm.TextBlock:
+			gotText = tb.Text
+		case llm.ThinkingBlock:
+			gotThinking = tb.Text
+		}
+	}
+	if !strings.Contains(gotText, "partial answer so far") {
+		t.Errorf("partial text not preserved; got %q", gotText)
+	}
+	if !strings.Contains(gotThinking, "partial reasoning") {
+		t.Errorf("partial reasoning not preserved; got %q", gotThinking)
+	}
+}
+
+// TestLoopFirstTokenTimeoutAppendsNothing pins the complement: when the
+// stream fails before any content (first-token timeout), there is nothing to
+// salvage, so no partial assistant turn is appended.
+func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: 200 * time.Millisecond, Text: "late"})
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.Client.FirstTokenTimeout = 30 * time.Millisecond
+	a.Client.ChunkStallTimeout = 2 * time.Second
+
+	if _, err := a.Run(context.Background(), "x"); err == nil {
+		t.Fatal("expected a first-token timeout error")
+	}
+	for _, m := range a.Messages {
+		if m.Role == "assistant" {
+			t.Fatalf("no content arrived, but an assistant message was appended: %+v", m)
+		}
 	}
 }
 

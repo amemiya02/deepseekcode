@@ -88,6 +88,13 @@ type Turn struct {
 	// OmitDone suppresses the trailing "data: [DONE]" sentinel, modelling a
 	// truncated stream.
 	OmitDone bool
+
+	// MalformedTail emits a malformed SSE data line after the content chunks
+	// (reasoning/text/tool calls) and before any finish or usage frame. The
+	// client accumulates the content it already received, then fails parsing
+	// the bad line — modelling a mid-stream break with partial content
+	// already in hand (the case partial-turn persistence must survive).
+	MalformedTail bool
 }
 
 // Server is a scripted mock DeepSeek endpoint. Construct it with NewServer
@@ -213,6 +220,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(turn.DelayChunk)
 		}
 		s.writeChunk(w, flusher, chunk{Choices: []choice{{Delta: delta{Content: turn.Text}}}})
+	}
+
+	if turn.MalformedTail {
+		_, _ = fmt.Fprint(w, "data: {not-valid-json\n\n")
+		flusher.Flush()
+		return
 	}
 
 	finish := turn.Finish

@@ -12,6 +12,7 @@ const (
 	ToolFinished        = "tool.finished"
 	SubagentStarted     = "subagent.started"
 	SubagentFinished    = "subagent.finished"
+	PolicyEscalated     = "policy.escalated"
 )
 
 var known = map[string]bool{
@@ -26,6 +27,7 @@ var known = map[string]bool{
 	ToolFinished:        true,
 	SubagentStarted:     true,
 	SubagentFinished:    true,
+	PolicyEscalated:     true,
 }
 
 func Known(name string) bool {

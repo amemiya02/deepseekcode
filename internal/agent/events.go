@@ -72,15 +72,29 @@ type EventToolCallResult struct {
 }
 
 // EventStepFinish ends one ReAct step. The consumer updates its
-// status counters / cost HUD here.
+// status counters / cost HUD here. Model is the model that produced the step
+// (an escalated turn reports the stronger model); empty means the loop model.
 type EventStepFinish struct {
 	Reason StopReason
 	Usage  llm.Usage
+	Model  string
 }
 
 // EventInfo is an out-of-band notice (retry attempt, validator
 // skipped, tool-call rate warning). Surfaced as a chat line.
 type EventInfo struct{ Text string }
+
+// EventEscalated reports that the current turn was re-issued on a stronger
+// model (the Two-Model escalation). Trigger is "marker" (the model emitted a
+// <<<NEEDS_PRO>>> self-declaration) or "repair_errors" (the per-turn repair
+// failure count crossed the threshold). FromModel/ToModel record the switch.
+// Traced as eventschema.PolicyEscalated.
+type EventEscalated struct {
+	Trigger   string
+	FromModel string
+	ToModel   string
+	Reason    string
+}
 
 // EventPermissionAsk requests user approval for a tool call. The
 // consumer MUST send a PermissionResponse on Reply — the agent
@@ -141,6 +155,7 @@ func (EventToolCallStart) isAgentEvent()  {}
 func (EventToolCallResult) isAgentEvent() {}
 func (EventStepFinish) isAgentEvent()     {}
 func (EventInfo) isAgentEvent()           {}
+func (EventEscalated) isAgentEvent()      {}
 func (EventPermissionAsk) isAgentEvent()  {}
 func (EventQuestionAsk) isAgentEvent()    {}
 func (EventDone) isAgentEvent()           {}

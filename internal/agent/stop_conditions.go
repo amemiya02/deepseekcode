@@ -16,6 +16,10 @@ type StepRecord struct {
 	EpochID           string
 	StaticPrefixHash  string
 	ExpectedCacheMiss bool
+	// Model is the model that actually produced this step. It usually equals
+	// the loop model, but an escalated turn (T2.3) records the stronger model
+	// so cost/trace attribution follows the turn, not the static loop model.
+	Model string
 }
 
 // StopReason describes why the loop terminated.

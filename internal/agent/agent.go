@@ -85,6 +85,16 @@ type Agent struct {
 	Model    string
 	Thinking bool
 
+	// EscalationModel, when non-empty and different from Model, enables
+	// model-driven escalation (T2.3): a turn is re-issued once on this model
+	// when the assistant emits a <<<NEEDS_PRO>>> self-declaration or the
+	// per-turn repair-error count crosses escalationRepairThreshold. Empty (the
+	// default) disables escalation entirely — the mechanism is a no-op and adds
+	// no wire bytes. The marker *contract* (telling the model the marker exists)
+	// is a separate, opt-in system-prompt addition (see escalationContract); the
+	// detection here works regardless and never moves the Prefix Fingerprint.
+	EscalationModel string
+
 	// AutoReasoning enables per-turn thinking selection via
 	// llm.SelectThinking. When true, runStep calls SelectThinking
 	// with the last user message text to decide thinking on/off.
@@ -446,19 +456,19 @@ agentLoop:
 					a.loopFloor = len(a.steps)
 					a.injectLoopBreakNudge(step.ToolCalls)
 					a.bus.Publish(EventInfo{Text: "loop detected; nudging the model to change approach (one chance before hard stop)"})
-					a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage})
+					a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 					stepCancel()
 					continue agentLoop
 				}
 				stepCancel()
-				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage})
+				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage, Model: step.Model})
 				return reason, nil
 			}
 		}
 
 		if !hasTools {
 			stepCancel()
-			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage})
+			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage, Model: step.Model})
 			return StopModelDone, nil
 		}
 
@@ -469,7 +479,7 @@ agentLoop:
 		if toolErr != nil {
 			return StopUnknown, toolErr
 		}
-		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage})
+		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
 		// Compaction check runs between turns (the next iteration's
 		// runStep will rebuild the wire request). A failure here is
@@ -829,48 +839,77 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		return StepRecord{FinishReason: "budget_blocked"}, nil
 	}
 
-	// Stream the model turn, re-issuing once on a transient mid-stream stall.
-	// A first-token or chunk-stall timeout often clears on a single re-send of
-	// the identical request (which is cache-stable, so the re-send is also
-	// cache-cheap); a parse error or a context cancellation / step deadline
-	// does not, and must propagate. The partial turn is salvaged only when we
-	// finally give up, so a re-issue never duplicates a persisted turn.
-	const maxStreamReissues = 1
-	var sr streamResult
-	for attempt := 0; ; attempt++ {
-		events, err := a.Client.Stream(ctx, req)
-		if err != nil {
-			// Connect-phase failure (the client already retried transient
-			// 429/5xx). A context-overflow 400 is handled by Run, which
-			// compacts and re-attempts; everything else propagates as-is.
-			return StepRecord{}, err
-		}
-		sr = a.consumeStream(events)
-		if sr.err == nil {
-			break // clean turn
-		}
-		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
-			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
-			continue
-		}
-		// Give up. Persist the partial assistant turn (the reasoning and visible
-		// text accumulated before the final break) so a long turn's work and the
-		// persisted transcript survive a mid-stream failure. EventFinish never
-		// fired, so the client assembled no tool calls — the partial carries
-		// only thinking/text and cannot leave a dangling tool_call;
-		// SanitizeForDeepSeek still guards the next request. Nothing is appended
-		// when no content arrived (e.g. a first-token timeout on attempt one).
-		if partial := partialBlocks(sr.reasoning, sr.text); len(partial) > 0 {
-			a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: partial})
-			if a.Persister != nil {
-				_, _ = a.Persister.AppendAssistant(context.Background(), partial, a.Model, sr.usage)
-			}
-		}
-		return StepRecord{}, fmt.Errorf("stream error: %w", sr.err)
+	// Stream the model turn (with the bounded mid-stream re-issue, T1.4).
+	sr, err := a.streamWithReissue(ctx, req)
+	if err != nil {
+		return StepRecord{}, err
+	}
+
+	// Snapshot storm-breaker history before the repair so an escalated-away
+	// (discarded) flash turn cannot pollute the suppression state the committed
+	// turn is judged against. Only needed when escalation is possible.
+	escalating := a.escalationEnabled()
+	var stormSnap repair.StormSnapshot
+	if escalating {
+		stormSnap = a.stormBreaker.Snapshot()
 	}
 
 	// Repair pipeline: scavenge, repair args, storm-breaker filter.
-	assembledCall := a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+	assembledCall, repairErrors := a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+
+	// respModel is the model that actually produced the turn being committed.
+	// Escalation may swap it to the stronger model below; it then drives
+	// persistence, cost, and trace attribution so none is mis-recorded.
+	respModel := a.Model
+
+	// Model-driven escalation (T2.3): re-issue the SAME turn once on the
+	// stronger model when the assistant self-declares out of depth
+	// (<<<NEEDS_PRO>>>) or the per-turn repair-error count crosses the
+	// threshold. The flash turn is discarded — only the escalated turn is
+	// appended / persisted / committed to suppression history — so escalation
+	// never duplicates a persisted turn. It composes with the mid-stream
+	// re-issue (the escalated turn gets the same stall-resilience) and runs at
+	// most once per step. Changing only req.Model keeps the system+tools prefix
+	// bytes identical, so the Prefix Fingerprint does not move for the re-issue.
+	if escalating {
+		if trigger, reason := a.escalationTrigger(sr.text, repairErrors); trigger != "" {
+			proReq := req
+			proReq.Model = a.EscalationModel
+
+			// Re-gate the budget: the pro re-issue is genuine extra spend on top
+			// of the flash turn (which streamed and was billed). Price both the
+			// flash turn (now realized) and the pro re-issue (projected all-miss,
+			// like the main gate) against the session cap. When it would not fit,
+			// skip escalation and commit the flash turn rather than overshoot.
+			flashCost := llm.Cost(a.Model, sr.usage)
+			gateState := a.BudgetState
+			gateState.SpentCNY += flashCost
+			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq))
+			if !allow {
+				a.bus.Publish(EventInfo{Text: "escalation skipped: projected cost would exceed the session budget"})
+			} else {
+				// Charge the realized flash turn (it is about to be discarded) and
+				// rewind its storm-history pollution before the committed pro turn.
+				if flashCost > 0 {
+					a.BudgetState.SpentCNY += flashCost
+				}
+				a.stormBreaker.Restore(stormSnap)
+				a.bus.Publish(EventEscalated{
+					Trigger:   trigger,
+					FromModel: a.Model,
+					ToModel:   a.EscalationModel,
+					Reason:    reason,
+				})
+				proSR, proErr := a.streamWithReissue(ctx, proReq)
+				if proErr != nil {
+					return StepRecord{}, proErr
+				}
+				sr = proSR
+				respModel = a.EscalationModel
+				assembledCall, _ = a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+			}
+		}
+	}
 
 	// The wire flatten layer turns Blocks back into DeepSeek's
 	// {content, reasoning_content, tool_calls} shape on the next
@@ -881,12 +920,12 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		Blocks: sr.blocks,
 	})
 	if a.Persister != nil {
-		_, _ = a.Persister.AppendAssistant(context.Background(), sr.blocks, a.Model, sr.usage)
+		_, _ = a.Persister.AppendAssistant(context.Background(), sr.blocks, respModel, sr.usage)
 
 		if rp, ok := a.Persister.(ReceiptAppender); ok {
 			fp := llm.StaticPrefix{System: staticSys, Tools: req.Tools}.Fingerprint()
 			payload, _ := json.Marshal(map[string]any{
-				"model":                a.Model,
+				"model":                respModel,
 				"usage":                sr.usage,
 				"prefix_hash":          fp.CombinedSHA256,
 				"prefix_system_hash":   fp.SystemSHA256,
@@ -913,8 +952,9 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Accumulate observed model cost into session budget state.
-	if cost := llm.Cost(a.Model, sr.usage); cost > 0 {
+	// Accumulate observed model cost into session budget state. respModel
+	// reflects an escalation so the stronger model's pricing is charged.
+	if cost := llm.Cost(respModel, sr.usage); cost > 0 {
 		a.BudgetState.SpentCNY += cost
 	}
 
@@ -925,6 +965,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		EpochID:           epoch.EpochID,
 		StaticPrefixHash:  epoch.StaticPrefixHash,
 		ExpectedCacheMiss: expectedCacheMiss,
+		Model:             respModel,
 	}, nil
 }
 
@@ -943,6 +984,49 @@ func partialBlocks(reasoning, text string) []llm.ContentBlock {
 		blocks = append(blocks, llm.TextBlock{Text: text})
 	}
 	return blocks
+}
+
+// streamWithReissue streams one model turn and, on a transient mid-stream stall
+// (first-token / chunk-stall timeout), re-issues the identical request once
+// before giving up (T1.4). The request is sent verbatim, so a re-issue is
+// cache-cheap. A parse error or a context cancellation / step deadline is NOT
+// re-issued and propagates. On give-up it salvages and persists the partial
+// assistant turn (T1.1) — keyed to req.Model so an escalated re-issue's partial
+// is attributed correctly — then returns the error. On success it returns the
+// assembled streamResult with a nil error; the caller does the repair, append,
+// and persistence so only the FINAL (possibly escalated) turn is committed.
+func (a *Agent) streamWithReissue(ctx context.Context, req llm.Request) (streamResult, error) {
+	const maxStreamReissues = 1
+	for attempt := 0; ; attempt++ {
+		events, err := a.Client.Stream(ctx, req)
+		if err != nil {
+			// Connect-phase failure (the client already retried transient
+			// 429/5xx). A context-overflow 400 is handled by Run, which
+			// compacts and re-attempts; everything else propagates as-is.
+			return streamResult{}, err
+		}
+		sr := a.consumeStream(events)
+		if sr.err == nil {
+			return sr, nil // clean turn
+		}
+		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
+			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
+			continue
+		}
+		// Give up. Persist the partial assistant turn (reasoning + visible text
+		// accumulated before the final break). EventFinish never fired, so no
+		// tool calls were assembled — the partial carries only thinking/text and
+		// cannot leave a dangling tool_call; SanitizeForDeepSeek still guards the
+		// next request. Nothing is appended when no content arrived (e.g. a
+		// first-token timeout on attempt one).
+		if partial := partialBlocks(sr.reasoning, sr.text); len(partial) > 0 {
+			a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: partial})
+			if a.Persister != nil {
+				_, _ = a.Persister.AppendAssistant(context.Background(), partial, req.Model, sr.usage)
+			}
+		}
+		return streamResult{}, fmt.Errorf("stream error: %w", sr.err)
+	}
 }
 
 // streamResult holds everything consumeStream accumulates from one model
@@ -1023,6 +1107,128 @@ func isReissuableStreamErr(err error) bool {
 		return false
 	}
 	return errors.Is(err, llm.ErrFirstTokenTimeout) || errors.Is(err, llm.ErrChunkStall)
+}
+
+// escalationRepairThreshold is the per-turn count of unrecoverable repair
+// reports (invalid args, storm-suppressed calls) that auto-escalates the turn
+// to the stronger model, even without an explicit <<<NEEDS_PRO>>> marker.
+const escalationRepairThreshold = 3
+
+// Escalation marker delimiters. The model self-declares it is out of depth by
+// opening its reply with <<<NEEDS_PRO>>> or <<<NEEDS_PRO: brief reason>>>.
+const (
+	needsProOpen  = "<<<NEEDS_PRO"
+	needsProClose = ">>>"
+)
+
+// escalationEnabled reports whether model-driven escalation is active: a target
+// model is configured and the loop is not already running on it. The
+// already-on-target guard mirrors the Duet's modelFn()=="deepseek-v4-pro"
+// self-skip, so a pro main loop never escalates to itself.
+func (a *Agent) escalationEnabled() bool {
+	return a.EscalationModel != "" && a.Model != a.EscalationModel
+}
+
+// escalationTrigger decides whether the just-completed turn should be re-issued
+// on the stronger model and why. Marker wins over the repair-count threshold so
+// an explicit self-declaration is attributed as such. Returns ("","") when no
+// escalation is warranted.
+func (a *Agent) escalationTrigger(text string, repairErrors int) (trigger, reason string) {
+	if reason, ok := needsProMarker(text); ok {
+		if reason == "" {
+			reason = "model requested a stronger model"
+		}
+		return "marker", reason
+	}
+	if repairErrors >= escalationRepairThreshold {
+		return "repair_errors", fmt.Sprintf("%d unrecoverable repair errors this turn", repairErrors)
+	}
+	return "", ""
+}
+
+// needsProMarker reports whether the assistant's visible text opens with the
+// escalation marker, returning the optional reason. Only the first non-empty
+// line is inspected; the marker must be a complete <<<NEEDS_PRO ... >>> token.
+func needsProMarker(text string) (reason string, ok bool) {
+	line := firstNonEmptyLine(text)
+	if !strings.HasPrefix(line, needsProOpen) {
+		return "", false
+	}
+	rest := line[len(needsProOpen):]
+	end := strings.Index(rest, needsProClose)
+	if end < 0 {
+		return "", false
+	}
+	// The marker must be the WHOLE first line — nothing after the closing
+	// >>> — so a line that merely quotes the token mid-sentence (e.g. echoing
+	// a log) does not spuriously escalate. The contract asks for the marker as
+	// the entire first line.
+	if strings.TrimSpace(rest[end+len(needsProClose):]) != "" {
+		return "", false
+	}
+	mid := strings.TrimSpace(rest[:end])
+	mid = strings.TrimSpace(strings.TrimPrefix(mid, ":"))
+	return mid, true
+}
+
+// firstNonEmptyLine returns the first line of s that is not blank after
+// trimming surrounding whitespace, or "" when there is none.
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// escalationContract is the system-prompt instruction that teaches the model
+// the <<<NEEDS_PRO>>> marker. It is OPT-IN: callers add it to the static system
+// prompt only when escalation is configured, so the default DefaultSystemPrompt
+// (and thus the committed cache-stable golden) is untouched. When added, the
+// MODEL NAME is the only interpolant, so the Prefix Fingerprint stays
+// byte-stable across turns for a given escalation target. It must be inserted
+// before prompt.DynamicContextBoundary so it lands in the fingerprinted prefix.
+func escalationContract(model string) string {
+	return "\n\nEscalation: if a task is genuinely beyond your depth — it needs deeper " +
+		"reasoning or you are stuck after repeated failed attempts — make the FIRST line of " +
+		"your reply exactly `<<<NEEDS_PRO: brief reason>>>` (or `<<<NEEDS_PRO>>>`). The turn " +
+		"will be re-issued on " + model + ". Use this sparingly, only when truly warranted."
+}
+
+// EnableEscalation turns on model-driven escalation to the given model and adds
+// the marker contract to the static system prompt so the model knows to emit
+// <<<NEEDS_PRO>>>. Call it BEFORE Run (before epoch #1 freezes) so the contract
+// is part of the frozen, fingerprinted prefix; it is inserted just before
+// prompt.DynamicContextBoundary (when present) so per-turn dynamic context still
+// follows it. Adding the contract deliberately moves the Prefix Fingerprint for
+// this session — the model name is the only interpolant, so it stays byte-stable
+// across turns — while the default (escalation off) leaves DefaultSystemPrompt
+// and the committed cache-stable golden untouched. No-op when model is empty or
+// already the active model. NOTE: when a PromptBuilder is set it rebuilds
+// a.System each turn, overwriting this injection; such assemblies must add the
+// contract through the builder's static section instead.
+func (a *Agent) EnableEscalation(model string) {
+	if model == "" || model == a.Model {
+		return
+	}
+	a.EscalationModel = model
+	// When a PromptBuilder owns the system prompt it rebuilds a.System every
+	// turn (Run / refreshGitContext), so injecting the contract here would be
+	// silently wiped on the first turn — leaving a live-vs-frozen system byte
+	// divergence that llm.PrefixMonitor would flag as drift (EventDriftBlocked).
+	// (DetectDrift would not catch it; it compares only the Capability Set, not
+	// system bytes.) Such assemblies must add the contract through the builder's
+	// static section; we only inject for the direct-System case.
+	if a.PromptBuilder != nil {
+		return
+	}
+	contract := escalationContract(model)
+	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
+		a.System = a.System[:i] + contract + a.System[i:]
+	} else {
+		a.System += contract
+	}
 }
 
 // refreshGitContext repopulates the builder's GitStatus / GitDiff /
@@ -1450,8 +1656,13 @@ func (a *Agent) publishRepairEvent(ev EventRepair) {
 
 // repairToolCalls runs the repair pipeline on tool calls after streaming.
 // It scavenges hidden calls, repairs args, and applies storm-breaker filtering.
-// Returns the kept calls and updates blocks in-place to reflect repaired/kept calls.
-func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) []llm.ToolCall {
+// Returns the kept calls, updates blocks in-place to reflect repaired/kept
+// calls, and reports the per-turn count of UNRECOVERABLE repair signals
+// (arguments that stayed invalid after repair + storm-suppressed calls). That
+// count drives the T2.3 auto-escalation threshold; KindArgsCompleted (a
+// successful repair) is deliberately not counted — only failures escalate.
+func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) ([]llm.ToolCall, int) {
+	repairErrors := 0
 	// Build allowed tool-name map from the registry
 	allowed := make(map[string]struct{})
 	for _, t := range a.Tools.AsLLMToolsFiltered(a.ActiveTiers...) {
@@ -1492,6 +1703,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 			})
 		}
 		if !repairResult.Valid {
+			repairErrors++
 			a.publishRepairEvent(EventRepair{
 				Kind:    string(repair.KindArgsInvalid),
 				Tool:    call.Function.Name,
@@ -1515,6 +1727,9 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	// Step 5: Apply storm-breaker filter
 	filtered := a.stormBreaker.Filter(repairedCalls, kinds)
 	for _, r := range filtered.Reports {
+		if r.Kind == repair.KindSuppressed {
+			repairErrors++
+		}
 		a.publishRepairEvent(EventRepair{
 			Kind:       string(r.Kind),
 			Tool:       r.Tool,
@@ -1546,7 +1761,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	}
 	*blocks = newBlocks
 
-	return filtered.Calls
+	return filtered.Calls, repairErrors
 }
 
 // AskQuestion implements tools.Questioner. It emits an EventQuestionAsk

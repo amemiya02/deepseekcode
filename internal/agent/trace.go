@@ -187,7 +187,15 @@ func (s *TraceSink) Handle(ev Event) {
 		hit := e.Usage.PromptCacheHitTokens
 		miss := e.Usage.PromptCacheMissTokens
 		out := e.Usage.CompletionTokens
-		cost := llm.Cost(s.model, e.Usage)
+		// Attribute usage to the model that actually produced the turn — an
+		// escalated turn (T2.3) carries the stronger model — falling back to the
+		// sink's loop model for steps that don't stamp one. This keeps the trace
+		// usage record consistent with the ReceiptModelFinal payload.
+		stepModel := e.Model
+		if stepModel == "" {
+			stepModel = s.model
+		}
+		cost := llm.Cost(stepModel, e.Usage)
 		// One snapshot per turn lets the harness prove the static prefix
 		// hash is identical across every turn of an epoch.
 		s.write(traceRecord{
@@ -201,7 +209,7 @@ func (s *TraceSink) Handle(ev Event) {
 			Type:            "usage",
 			Turn:            &turn,
 			EpochID:         s.curEpochID,
-			Model:           s.model,
+			Model:           stepModel,
 			CacheHitTokens:  &hit,
 			CacheMissTokens: &miss,
 			OutputTokens:    &out,
@@ -228,6 +236,18 @@ func (s *TraceSink) Handle(ev Event) {
 			BeforeStaticPrefixHash: e.StaticPrefixHashBefore,
 			AfterStaticPrefixHash:  e.StaticPrefixHashAfter,
 			SummaryCostCNY:         &cost,
+		})
+	case EventEscalated:
+		// The turn was re-issued on a stronger model. Kind carries the trigger
+		// (marker / repair_errors); Model is the model escalated TO. The literal
+		// "policy.escalated" equals eventschema.PolicyEscalated (T6.2 will
+		// converge the trace strings onto those constants wholesale).
+		s.write(traceRecord{
+			Type:        "policy.escalated",
+			EpochID:     s.curEpochID,
+			Kind:        e.Trigger,
+			Model:       e.ToModel,
+			Description: e.FromModel + " -> " + e.ToModel + ": " + e.Reason,
 		})
 	case EventDone:
 		// A terminal marker per agent. The root stamps agent_role="root"; a

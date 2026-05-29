@@ -1,6 +1,31 @@
 # Own the rendered background (paint the canvas)
 
-**Status:** accepted (2026-05-29)
+**Status:** amended (2026-05-30) — the full-screen canvas paint was **reverted**; the bg-tier panel ladder was **kept**. See _Update_ below. Originally accepted 2026-05-29.
+
+## Update (2026-05-30): full-screen paint reverted, panels retained
+
+Painting the whole screen with `bgBase` did not survive contact with real
+output. An outer lipgloss `Background` cannot reliably fill *behind* content
+rendered by glamour and the viewport, because those emit ANSI resets (`\x1b[0m`)
+throughout — each reset snaps the background to the terminal default mid-line,
+and the outer style cannot reassert itself across it. The result was ragged
+**black gaps** wherever a reset fired (prose and reasoning especially) — exactly
+the "fighting an unknown backdrop" failure this ADR set out to avoid, now coming
+from *within* our own content stream.
+
+Decision: **stop painting the full-screen canvas.** Prose / reasoning / status
+sit on the terminal's own background (uniform, no gaps). The valuable half — the
+**`bgWell` / `bgSurface` / `bgRaised` panel ladder** for tool results, diffs,
+reasoning panels, badges, and the role-bars — is **kept**: those render their
+own full-width per-line fills, contain no mid-line resets, and so never bleed.
+They read as "cards on the terminal background," which achieves the soft-panel
+depth goal without the fragile global paint. `ui.transparent_background` now
+disables the *panel* fills too (fully flat / fg-only); there is no longer any
+full-screen fill to opt out of.
+
+The original decision and its reasoning are preserved below for history.
+
+---
 
 The TUI **owns the rendered background**: the root canvas is painted with the
 theme's `bgBase`, and panels compose against a small **bg-tier ladder**

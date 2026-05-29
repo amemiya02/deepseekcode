@@ -111,9 +111,11 @@ type Config struct {
 	Theme    string
 	Cwd      string
 
-	// TransparentBackground opts out of the painted canvas (ui.transparent_background).
-	// When true, the canvas is not painted and bg-tier panels degrade to
-	// left-bars / separators (no opaque fills).
+	// TransparentBackground (ui.transparent_background) disables ALL background
+	// fills — the bg-tier panels (tool results, diffs, reasoning) degrade to
+	// left-bars / separators with no opaque fills. The full-screen canvas is no
+	// longer painted regardless (it bled through glamour/viewport resets; see
+	// ADR-0002), so this flag is now a "fully flat / fg-only" toggle.
 	TransparentBackground bool
 
 	// Optional persistence integration. Provide all three or none.
@@ -526,25 +528,14 @@ func (a *App) ensureTick() tea.Cmd {
 	return a.scheduleRedraw()
 }
 
-// paintCanvas wraps a fully-composed screen string in the painted canvas:
-// a lipgloss style backgrounded with the base surface, sized to the window.
-// It is a no-op (returns content unchanged) when the theme is in transparent
-// mode or the terminal is not truecolor, so the terminal's own background
-// shows through and bg-tier panels degrade gracefully. Overlays/modals are
-// part of the content string passed in, so they render correctly over the
-// painted fill.
-func (a *App) paintCanvas(content string) string {
-	if a.theme.Transparent() || !a.theme.Truecolor() {
-		return content
-	}
-	return lipgloss.NewStyle().
-		Background(a.theme.BgBase).
-		Width(a.width).
-		Height(a.height).
-		Render(content)
-}
-
 // View renders the whole UI.
+//
+// Note: we do NOT paint a full-screen background. An outer lipgloss Background
+// cannot reliably fill behind glamour / viewport output — those emit ANSI
+// resets (\x1b[0m) that snap the background to the terminal default mid-line,
+// leaving ragged black gaps (see ADR-0002). Backgrounds live only on explicit
+// panels / badges / diff bands, which render their own full-width per-line
+// fills and so never bleed; the screen sits on the terminal's own background.
 func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
 		return tea.View{Content: "starting…", AltScreen: true, MouseMode: tea.MouseModeCellMotion}
@@ -557,7 +548,7 @@ func (a *App) View() tea.View {
 	}
 
 	if a.overlay.IsOpen() {
-		return tea.View{Content: a.paintCanvas(a.renderOverlay()), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: a.renderOverlay(), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Pager is a modal body replacement: it takes the entire body band
@@ -598,11 +589,11 @@ func (a *App) View() tea.View {
 	// above the status line.
 	if permView != "" {
 		parts := []string{body, chrome, permView, divider, status}
-		return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 	if questionView != "" {
 		parts := []string{body, chrome, questionView, divider, status}
-		return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Choose input border style based on mode.
@@ -648,7 +639,7 @@ func (a *App) View() tea.View {
 	}
 
 	parts := []string{body, chrome, divider, status, inputBox, hint}
-	return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+	return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 }
 
 // modeChip returns a filled badge string for the active permission mode, or

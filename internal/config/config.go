@@ -41,10 +41,12 @@ type Config struct {
 // UIConfig holds presentational TUI options. Purely cosmetic — nothing
 // here touches the wire / prompt-cache path.
 type UIConfig struct {
-	// TransparentBackground, when true, suppresses the painted canvas so
-	// the terminal's own background shows through, and degrades bg-tier
-	// panels to left-bars / separators (no opaque fills). Default false
-	// (canvas painted).
+	// TransparentBackground, when true, degrades the bg-tier panels (tool
+	// results, diffs, reasoning) to left-bars / separators with no opaque
+	// fills — a fully flat / fg-only look. The full-screen canvas is not
+	// painted in either case (it bled through glamour/viewport ANSI resets;
+	// see docs/adr/0002), so this is a "no backgrounds at all" toggle.
+	// Default false (panels render their fills).
 	TransparentBackground bool `toml:"transparent_background"`
 }
 

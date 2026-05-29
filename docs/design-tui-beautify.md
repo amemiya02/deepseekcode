@@ -136,6 +136,15 @@ background fill so the caller's fallback (left-bar / separator) governs.
 
 ## 3. Canvas & rendering
 
+> **Amended 2026-05-30 (see ADR-0002):** the full-screen canvas paint described
+> in §3.1 was **reverted**. An outer `Background` cannot fill behind glamour /
+> viewport output (their ANSI resets snap the bg to the terminal default
+> mid-line → ragged black gaps). We no longer paint the frame; prose/reasoning
+> sit on the terminal's own background. The bg-tier **panel ladder** (§3.2,
+> `bgWell`/`bgSurface`/`bgRaised`) is **kept** — those render their own
+> full-width per-line fills and never bleed, reading as cards on the terminal
+> background. `ui.transparent_background` now disables the panel fills too.
+
 ### 3.1 Owning the background
 
 Today the TUI inherits the terminal's background. The new design **owns** the

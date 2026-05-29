@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
@@ -44,6 +46,7 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkGit(),
 		checkInstructions(),
 		checkHooks(cfg),
+		checkAgentDefs(),
 		checkRules(cfg),
 		checkMCP(cfg),
 		checkLSP(),
@@ -285,6 +288,67 @@ func checkHooks(cfg config.Config) checkResult {
 		return checkResult{"hooks", "ok", "none configured"}
 	}
 	return checkResult{"hooks", "ok", strings.Join(parts, ", ")}
+}
+
+func checkAgentDefs() checkResult {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return checkResult{"agent defs", "warn", "cannot resolve cwd: " + err.Error()}
+	}
+	home, _ := os.UserHomeDir()
+	return agentDefsResult(cwd, home)
+}
+
+// agentDefsResult is the testable core of checkAgentDefs. It loads agent
+// definitions, flags cwd .md files that were silently skipped (malformed or
+// over the 64 KiB cap), and warns on out-of-range numeric frontmatter. Skip
+// detection compares on-disk cwd files against loaded defs sourced from cwd
+// (via AgentDef.Path), so home-dir defs and name-shadowing don't false-positive.
+func agentDefsResult(cwd, home string) checkResult {
+	defs, err := agents.Load(cwd, home)
+	if err != nil {
+		return checkResult{"agent defs", "warn", "load error: " + err.Error()}
+	}
+
+	cwdAgentDir := filepath.Join(cwd, ".deepseek", "agent")
+	cwdMd := 0
+	_ = filepath.WalkDir(cwdAgentDir, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(p, ".md") {
+			cwdMd++
+		}
+		return nil
+	})
+	cwdLoaded := 0
+	for _, d := range defs {
+		if strings.HasPrefix(d.Path, cwdAgentDir) {
+			cwdLoaded++
+		}
+	}
+
+	if len(defs) == 0 && cwdMd == 0 {
+		return checkResult{"agent defs", "ok", "none configured"}
+	}
+
+	var warns []string
+	if cwdMd > cwdLoaded {
+		warns = append(warns, fmt.Sprintf("%d of %d cwd .md file(s) skipped (malformed or >64KiB) — run `dsc agent validate`", cwdMd-cwdLoaded, cwdMd))
+	}
+	for _, d := range defs {
+		if d.Temperature != nil && (*d.Temperature < 0 || *d.Temperature > 2) {
+			warns = append(warns, fmt.Sprintf("%s: temperature %.2f out of [0,2]", d.Name, *d.Temperature))
+		}
+		if d.TopP != nil && (*d.TopP < 0 || *d.TopP > 1) {
+			warns = append(warns, fmt.Sprintf("%s: top_p %.2f out of [0,1]", d.Name, *d.TopP))
+		}
+	}
+	if len(warns) > 0 {
+		sort.Strings(warns) // deterministic order (defs is a map)
+		return checkResult{"agent defs", "warn", fmt.Sprintf("%d loaded; %s", len(defs), strings.Join(warns, "; "))}
+	}
+	return checkResult{"agent defs", "ok", fmt.Sprintf("%d loaded, fields valid", len(defs))}
 }
 
 func checkRules(cfg config.Config) checkResult {

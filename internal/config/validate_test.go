@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,38 @@ func TestValidateStrictBuiltinNoName(t *testing.T) {
 	}
 	if errs[0].Path != "hooks[0].name" {
 		t.Errorf("path = %q, want hooks[0].name", errs[0].Path)
+	}
+}
+
+func TestValidateStrictBuiltinUnknownName(t *testing.T) {
+	// A typo'd builtin name must be rejected at validation time (it would
+	// otherwise fail-open silently at runtime).
+	cfg := Default()
+	cfg.Hooks = []HookItemConfig{
+		{Event: "PreToolUse", Type: "builtin", Name: "duett"},
+	}
+	errs := ValidateStrict(&cfg)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if errs[0].Path != "hooks[0].name" {
+		t.Errorf("path = %q, want hooks[0].name", errs[0].Path)
+	}
+	if !strings.Contains(errs[0].Message, "duet") {
+		t.Errorf("message %q should list the valid builtin name", errs[0].Message)
+	}
+}
+
+func TestValidateStrictBuiltinKnownName(t *testing.T) {
+	// Regression: the one registered builtin ("duet") must still pass.
+	cfg := Default()
+	cfg.Hooks = []HookItemConfig{
+		{Event: "PreToolUse", Type: "builtin", Name: "duet"},
+	}
+	for _, e := range ValidateStrict(&cfg) {
+		if strings.HasPrefix(e.Path, "hooks[0]") {
+			t.Errorf("known builtin should not error, got %v", e)
+		}
 	}
 }
 

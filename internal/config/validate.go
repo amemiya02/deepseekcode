@@ -1,6 +1,11 @@
 package config
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/hooks"
+)
 
 // ValidationError describes a single config validation problem.
 type ValidationError struct {
@@ -91,6 +96,11 @@ func ValidateStrict(c *Config) []ValidationError {
 			errs = append(errs, ValidationError{
 				Path:    pfx + ".name",
 				Message: "builtin hooks must have a name",
+			})
+		} else if h.Type == "builtin" && !hooks.IsKnownBuiltin(h.Name) {
+			errs = append(errs, ValidationError{
+				Path:    pfx + ".name",
+				Message: "unknown builtin " + quote(h.Name) + "; valid: " + strings.Join(hooks.KnownBuiltinNames, ", "),
 			})
 		}
 		if h.Type == "subprocess" && h.Command == "" {

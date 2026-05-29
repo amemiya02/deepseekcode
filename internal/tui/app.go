@@ -174,6 +174,15 @@ func New(cfg Config) *App {
 			activeAgent:     "coding-default",
 		},
 	}
+	// Thread the agent's real context window and first-token timeout into the
+	// status HUD / cold-start caption. Both are nil-safe so tests that build
+	// an App without an Agent (or a provider Client) still construct cleanly.
+	if cfg.Agent != nil {
+		app.status.contextLimit = cfg.Agent.MaxContextTokens
+		if cfg.Agent.Client != nil {
+			app.chrome.SetFirstTokenTimeout(cfg.Agent.Client.FirstTokenTimeout)
+		}
+	}
 	return app
 }
 
@@ -388,6 +397,7 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
 	case agent.EventToolCallResult:
+		a.chrome.ToolReady()
 		a.scrollback.AppendToolResult(e.CallID, e.Result, e.Dur)
 		a.refreshView()
 	case agent.EventHookFired:
@@ -395,12 +405,18 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 	case agent.EventStepFinish:
 		a.stepTotal++
+		// Close the current tool batch at the step boundary so the next
+		// tool turn's "N ready" counter starts fresh even when the model's
+		// next turn is a pure tool-call turn (no reasoning/text to flip the
+		// chrome phase away from phaseTool).
+		a.chrome.EndToolBatch()
 		a.status.steps = a.stepTotal
 		a.status.usage.PromptTokens += e.Usage.PromptTokens
 		a.status.usage.CompletionTokens += e.Usage.CompletionTokens
 		a.status.usage.PromptCacheHitTokens += e.Usage.PromptCacheHitTokens
 		a.status.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
 		a.status.costYuan += llm.Cost(a.model, e.Usage)
+		a.status.savedYuan += llm.CacheSavings(a.model, e.Usage)
 		a.status.costKnown = llm.CostKnown(a.model)
 		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
 		a.refreshView()
@@ -410,11 +426,11 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 	case agent.EventInfo:
 		a.scrollback.AppendInfo(e.Text)
-		// NOTE: reuses the generic hint slot; if other features write
-		// hint, drift chip gets overwritten. Consider a dedicated field
-		// if this becomes a conflict.
+		// The prefix-cache invalidation warning has its own slot
+		// (cacheNote) so it no longer clobbers the generic transient hint;
+		// the two coexist on the status line.
 		if strings.HasPrefix(e.Text, "prefix cache invalidated: ") {
-			a.status.hint = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
+			a.status.cacheNote = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
 		}
 		a.refreshView()
 	case agent.EventBudget:

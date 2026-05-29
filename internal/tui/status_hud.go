@@ -14,6 +14,7 @@ type HUDData struct {
 	CacheHitRatio   float64
 	InputHitTokens  int
 	InputMissTokens int
+	SavedCNY        float64
 	OutputTokens    int
 	ReasoningTokens int
 	StepCNY         float64
@@ -44,11 +45,17 @@ func RenderHUD(data HUDData, width int) string {
 		parts = append(parts, model)
 	}
 
-	// Cache ratio (only when hit+miss token data exists)
+	// Cache ratio (only when hit+miss token data exists). The persistent
+	// "cache % · saved ¥X" chip makes the cache-stability investment visible;
+	// the saved-¥ suffix is shown only once a positive saving has accrued.
 	totalInput := data.InputHitTokens + data.InputMissTokens
 	if totalInput > 0 {
 		ratio := float64(data.InputHitTokens) / float64(totalInput) * 100
-		parts = append(parts, fmt.Sprintf("cache %.1f%%", ratio))
+		chip := fmt.Sprintf("cache %.1f%%", ratio)
+		if data.SavedCNY > 0 {
+			chip += fmt.Sprintf(" · saved ¥%.3f", data.SavedCNY)
+		}
+		parts = append(parts, chip)
 	}
 
 	// Token counts
@@ -59,9 +66,11 @@ func RenderHUD(data HUDData, width int) string {
 		parts = append(parts, fmt.Sprintf("reason %d", data.ReasoningTokens))
 	}
 
-	// Context usage
+	// Context usage — a fixed-width fill bar plus human-readable token
+	// counts (e.g. "ctx [█████░░░░░] 64k/1M") so the 1M-window headroom is
+	// legible at a glance.
 	if data.ContextTokens > 0 && data.ContextLimit > 0 {
-		parts = append(parts, fmt.Sprintf("ctx %d/%d", data.ContextTokens, data.ContextLimit))
+		parts = append(parts, contextBar(data.ContextTokens, data.ContextLimit))
 	}
 
 	// CNY cost (only when > 0)
@@ -102,6 +111,45 @@ func RenderHUD(data HUDData, width int) string {
 		result = string(runes[:width-1]) + "…"
 	}
 	return result
+}
+
+// contextBar renders a fixed-width fill bar plus human-readable token
+// counts for the context window, e.g. "ctx [█████░░░░░] 64k/1M". The
+// fill is integer-rounded to the nearest of contextBarCells cells; it is
+// deterministic and pure (no time/locale), so it is golden-test safe.
+// Callers guarantee limit > 0.
+func contextBar(tokens, limit int) string {
+	const cells = 10
+	filled := 0
+	if limit > 0 {
+		// integer round-half-up of tokens/limit*cells, no math import
+		filled = (tokens*cells + limit/2) / limit
+		if filled < 0 {
+			filled = 0
+		}
+		if filled > cells {
+			filled = cells
+		}
+	}
+	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", cells-filled) + "]"
+	return fmt.Sprintf("ctx %s %s/%s", bar, humanTokens(tokens), humanTokens(limit))
+}
+
+// humanTokens formats a token count compactly: 1_000_000 → "1M",
+// 1_500_000 → "1.5M", 128_000 → "128k", 950 → "950".
+func humanTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		v := float64(n) / 1_000_000
+		if v == float64(int(v)) {
+			return fmt.Sprintf("%dM", int(v))
+		}
+		return fmt.Sprintf("%.1fM", v)
+	case n >= 1000:
+		return fmt.Sprintf("%dk", n/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func shortHUD(s string) string {

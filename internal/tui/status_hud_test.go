@@ -66,8 +66,9 @@ func TestRenderHUD_ReasoningTokens(t *testing.T) {
 func TestRenderHUD_ContextUsage(t *testing.T) {
 	data := HUDData{ContextTokens: 50000, ContextLimit: 100000}
 	result := RenderHUD(data, 80)
-	if !strings.Contains(result, "ctx 50000/100000") {
-		t.Errorf("expected context usage in output, got %q", result)
+	// T5.3: context usage now renders a fill bar + human-readable counts.
+	if !strings.Contains(result, "ctx [") || !strings.Contains(result, "50k/100k") {
+		t.Errorf("expected context fill bar with 50k/100k in output, got %q", result)
 	}
 }
 
@@ -311,6 +312,65 @@ func TestExtractJSONStringHandlesEscapes(t *testing.T) {
 	}
 }
 
+// TestRenderHUD_CacheSavingsChip pins the T5.3 "cache % · saved ¥X" chip:
+// the saved suffix appears only when SavedCNY > 0, and the cache % is
+// always present once input tokens exist.
+func TestRenderHUD_CacheSavingsChip(t *testing.T) {
+	withSavings := RenderHUD(HUDData{InputHitTokens: 950, InputMissTokens: 50, SavedCNY: 0.123}, 200)
+	if !strings.Contains(withSavings, "cache 95.0%") {
+		t.Errorf("expected cache ratio, got %q", withSavings)
+	}
+	if !strings.Contains(withSavings, "saved ¥0.123") {
+		t.Errorf("expected saved suffix, got %q", withSavings)
+	}
+	noSavings := RenderHUD(HUDData{InputHitTokens: 950, InputMissTokens: 50}, 200)
+	if strings.Contains(noSavings, "saved") {
+		t.Errorf("saved suffix must not appear when SavedCNY == 0, got %q", noSavings)
+	}
+}
+
+// TestContextBar checks the fill bar is proportional, clamped, and pure.
+func TestContextBar(t *testing.T) {
+	cases := []struct {
+		tokens, limit        int
+		wantFill, wantCounts string
+	}{
+		{0, 1_000_000, "[░░░░░░░░░░]", "0/1M"},
+		{500_000, 1_000_000, "[█████░░░░░]", "500k/1M"},
+		{1_000_000, 1_000_000, "[██████████]", "1M/1M"},
+		{2_000_000, 1_000_000, "[██████████]", "2M/1M"}, // clamp at full
+		{64_000, 128_000, "[█████░░░░░]", "64k/128k"},
+	}
+	for _, c := range cases {
+		got := contextBar(c.tokens, c.limit)
+		if !strings.Contains(got, c.wantFill) {
+			t.Errorf("contextBar(%d,%d) = %q, want fill %q", c.tokens, c.limit, got, c.wantFill)
+		}
+		if !strings.Contains(got, c.wantCounts) {
+			t.Errorf("contextBar(%d,%d) = %q, want counts %q", c.tokens, c.limit, got, c.wantCounts)
+		}
+	}
+	// Deterministic: same inputs → same output (no time/locale dependence).
+	if contextBar(123_456, 1_000_000) != contextBar(123_456, 1_000_000) {
+		t.Error("contextBar must be deterministic")
+	}
+}
+
+func TestHumanTokens(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"}, {950, "950"}, {64_000, "64k"}, {128_000, "128k"},
+		{1_000_000, "1M"}, {1_500_000, "1.5M"},
+	}
+	for _, c := range cases {
+		if got := humanTokens(c.n); got != c.want {
+			t.Errorf("humanTokens(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
 	got := RenderHUD(HUDData{
 		Model:           "deepseek-v4-flash",
@@ -331,7 +391,8 @@ func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
 
 	for _, want := range []string{
 		"cache 95.0%",
-		"ctx 64000/128000",
+		"ctx [",
+		"64k/128k",
 		"epoch abcdef12",
 		"pfx 12345678",
 		"pending 2",

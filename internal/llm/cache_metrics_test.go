@@ -107,6 +107,37 @@ func TestCacheHitRate(t *testing.T) {
 	}
 }
 
+func TestCacheSavings(t *testing.T) {
+	cases := []struct {
+		name  string
+		model string
+		hits  int
+		want  float64
+	}{
+		// flash: (miss 1.0 − hit 0.02) ¥/1M × 1M hit tokens = 0.98
+		{"flash 1M hits", "deepseek-v4-flash", 1_000_000, 0.98},
+		// pro: (miss 3.0 − hit 0.025) × 1M = 2.975
+		{"pro 1M hits", "deepseek-v4-pro", 1_000_000, 2.975},
+		{"no hits → 0", "deepseek-v4-flash", 0, 0},
+		{"unknown model → 0", "gpt-4o", 1_000_000, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := CacheSavings(c.model, Usage{PromptCacheHitTokens: c.hits})
+			if math.Abs(got-c.want) > 1e-9 {
+				t.Errorf("CacheSavings(%q, hits=%d) = %v, want %v", c.model, c.hits, got, c.want)
+			}
+		})
+	}
+	// Savings must never exceed the all-miss cost for the same tokens (it is
+	// the differential, not the full miss price).
+	u := Usage{PromptCacheHitTokens: 500_000}
+	missCost := Cost("deepseek-v4-flash", Usage{PromptCacheMissTokens: 500_000})
+	if s := CacheSavings("deepseek-v4-flash", u); s >= missCost {
+		t.Errorf("savings %v should be below all-miss cost %v", s, missCost)
+	}
+}
+
 func TestCostKnown(t *testing.T) {
 	cases := []struct {
 		model string

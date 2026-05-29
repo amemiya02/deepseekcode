@@ -35,6 +35,7 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 | T5.2 | ✅ done | Presentation-correctness fixes: tool summaries now use `lineCount` (counts the final line without a trailing newline) instead of `strings.Count` — a 3-line result reads "3 lines", not "2"; count shown only for multi-line output. `extractJSONString` hardened to parse via `encoding/json` (robust to escaped quotes/nesting) rather than substring scanning — NOT replaced by `compactArgs` (which renders all args, not a single field, so it would regress the `read foo.go`/`bash: cmd` summaries). Code-block syntax highlighting is theme-branched (`dracula` for dark, `github` for light) so light-terminal users get legible code. Fingerprint-safe (no wire/schema bytes); golden unmoved. |
+| T5.3 | ✅ done | DeepSeek cache surface + streaming progress. `HUDData.ContextLimit` is populated from `Agent.MaxContextTokens`, rendered as a fixed-width fill bar with human-readable counts (`ctx [█████░░░░░] 64k/1M`). New `llm.CacheSavings` prices the cache-hit tokens at the (miss−hit) differential; the live line carries a single `cache N% · saved ¥X` chip (the duplicate HUD cache chip was removed). The prefix-cache invalidation warning moved to its own `cacheNote` slot so it no longer clobbers the generic transient `hint` (they coexist). A multi-tool turn shows `running M tools… · N ready`; the cold-start caption now quotes the real `Client.FirstTokenTimeout`. Adversarial 3-lens pass caught a real MEDIUM: the "N ready" batch counters/timer failed to reset between two consecutive tool batches when the intervening model turn emitted no reasoning/text (a pure tool-call turn never leaves `phaseTool`) — fixed with an `EndToolBatch`/`batchClosed` step-boundary delimiter driven by `EventStepFinish`, with a fail-without/pass-with regression test. Fingerprint-safe; golden unmoved. |
 
 **T1, T2, and T4 are fully complete.** All of T4 (T4.1–T4.4) landed via the
 vetted sequential order from the T4 design pass; T4.3 was additionally hardened
@@ -45,8 +46,8 @@ variable role. **T3 is nearly done** (T3.1/T3.2/T3.3 landed). Remaining T3:
 **T3.4** (sandbox-on-by-default) is DEFERRED — it flips a security-relevant
 default the roadmap itself flags as the highest UX risk, so it stays opt-in
 pending an explicit decision; **T3.5** (/undo transcript reconcile) is next.
-Then **T5** (T5.2–T5.4 TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7**
-(docs/config/profiles).
+Then **T5** (T5.4 TUI — diff auto-detect + golden-per-width), **T6**
+(T6.1/T6.2/T6.4 bench/eval), **T7** (docs/config/profiles).
 
 ---
 

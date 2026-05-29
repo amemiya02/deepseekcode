@@ -89,7 +89,7 @@ func TestQAFrame_ToolResult(t *testing.T) {
 	t.Logf("Actual tool result frame:\n%s", view)
 
 	// Inline expected string for tool result (note: empty line has trailing space)
-	expected := "▌ ● read test.go\n▌ ✓ read test.go (2 lines)  100ms\n▌  package main\n▌  \n▌  func main() {}"
+	expected := "▌ ● read test.go\n▌ ✓ read test.go (3 lines)  100ms\n▌  package main\n▌  \n▌  func main() {}"
 	assertFrameSnapshot(t, frame, expected)
 }
 

@@ -27,7 +27,15 @@ func Highlight(t Theme, source, lang string) string {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	style := styles.Get("dracula")
+	// Pick a chroma style that matches the theme's background: dracula's dark
+	// palette is illegible on a light terminal, so the light theme gets a
+	// light-background style. styles.Get falls back internally on an unknown
+	// name; we also guard nil explicitly.
+	styleName := "dracula"
+	if t.Name == "light" {
+		styleName = "github"
+	}
+	style := styles.Get(styleName)
 	if style == nil {
 		style = styles.Fallback
 	}

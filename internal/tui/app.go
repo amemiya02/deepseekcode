@@ -417,6 +417,25 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 			a.status.hint = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
 		}
 		a.refreshView()
+	case agent.EventBudget:
+		// T1.3: budget-gate decisions are typed now; render them as info lines
+		// so the prior user-visible behavior is preserved.
+		switch e.Kind {
+		case agent.BudgetKindBlocked:
+			a.scrollback.AppendInfo("budget blocked: projected session cost reached hard threshold")
+		case agent.BudgetKindUnpriced:
+			a.scrollback.AppendInfo("budget gate: model " + e.Model + " has no known pricing; turns cannot be cost-gated")
+		default:
+			a.scrollback.AppendInfo("budget warning: projected session cost reached warning threshold")
+		}
+		a.refreshView()
+	case agent.EventPermissionDenied:
+		if e.ByRule {
+			a.scrollback.AppendInfo("denied by rule: " + e.Reason)
+		} else {
+			a.scrollback.AppendInfo("denied by permissions policy: " + e.Reason)
+		}
+		a.refreshView()
 	case agent.EventRepair:
 		a.scrollback.AppendRepair(e.Kind, e.Tool, e.Message)
 		a.refreshView()

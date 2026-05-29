@@ -249,6 +249,27 @@ func (s *TraceSink) Handle(ev Event) {
 			Model:       e.ToModel,
 			Description: e.FromModel + " -> " + e.ToModel + ": " + e.Reason,
 		})
+	case EventBudget:
+		// Session-budget gate decision (T1.3). The Type encodes the kind
+		// (budget.warning / budget.blocked / budget.unpriced); Model is the
+		// model gated. Literal strings mirror eventschema.Budget* (T6.2 will
+		// converge the trace strings onto those constants wholesale).
+		t := "budget.warning"
+		switch e.Kind {
+		case BudgetKindBlocked:
+			t = "budget.blocked"
+		case BudgetKindUnpriced:
+			t = "budget.unpriced"
+		}
+		s.write(traceRecord{Type: t, Model: e.Model})
+	case EventPermissionDenied:
+		// Tool call refused by the permission layer (T1.3). Kind is rule|policy;
+		// Description carries the tool name; Reason the cause.
+		kind := "policy"
+		if e.ByRule {
+			kind = "rule"
+		}
+		s.write(traceRecord{Type: "permission.denied", Kind: kind, Description: e.Tool, Reason: e.Reason})
 	case EventDone:
 		// A terminal marker per agent. The root stamps agent_role="root"; a
 		// subagent stamps "subagent" + parent_epoch_id. The benchmark requires

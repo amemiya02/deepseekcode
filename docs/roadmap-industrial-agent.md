@@ -20,7 +20,7 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T6.3 | ✅ done | `internal/llmtest` offline mock-DeepSeek SSE harness + end-to-end loop tests (finish-reason override, tool-pairing, thinking-struct, both timeout tiers). |
 | T1.1 | ✅ done | Partial assistant turn persisted on mid-stream error instead of discarded. |
 | T1.2 | ✅ done | `Replay` repairs dangling `tool_calls` from an interrupted session; the other two pieces were already handled (see the T1.2 entry below). |
-| T1.3 | ◧ partial | `StopStepTimeout` (non-success) + `StopUserRequested` wired + `IsSuccess()`. Deferred: budget/denied EventInfo → typed events; remove the unreachable tool-error abort branch. |
+| T1.3 | ✅ done | `StopStepTimeout` (non-success) + `StopUserRequested` + `IsSuccess()` (earlier). Now: budget gate decisions and permission denials are **typed events** (`EventBudget{Kind: warning/blocked/unpriced}`, `EventPermissionDenied{Tool,Reason,ByRule}`) instead of stringly-typed `EventInfo` — registered in `eventschema` (`budget.*`/`permission.denied`), traced, and rendered by all three consumers (TUI, CLI one-shot, trace) so display is preserved. Deleted the unreachable tool-error abort branch and dropped `runToolCalls`' always-nil `error` return (single caller). Golden bytes unmoved (events are runtime). |
 | T1.4 | ✅ done | Mid-stream stall (first-token / chunk-stall) re-issues the identical request **once** before salvaging the partial (T1.1); a parse error or cancel/step-deadline never re-issues. A 400 context-overflow routes to a single deterministic compaction + re-attempt (`llm.IsContextOverflow`, typed `ErrFirstTokenTimeout`/`ErrChunkStall` sentinels). No duplicate persisted turn. |
 | T2.1 | ✅ done | First loop detection per Run injects a synthetic-result-per-dangling-call + one user nudge and continues once; a per-Run `loopFloor` forgives the pre-nudge repeats so the recovery turn isn't instantly re-tripped; a second detection hard-stops. Nudge is message-tail only (fingerprint untouched). |
 | T2.2 | ✅ done | Fuzzy multi-strategy edit replacer (exact → line-trimmed → whitespace-normalized → indentation-flexible → block-anchor), first **unique** match wins, ambiguous rejected; `apply_patch` `locateChunk` now rejects ambiguous context too. 22-case corpus: exact-only baseline 0.091 → cascade 1.000 (asserted). Byte-fidelity preserved (original substrings, full-file `want`); `Description`/`Parameters` byte-identical so the fingerprint is unmoved. |
@@ -34,15 +34,13 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-**T1, T2, and T4 are complete** (bar T1.3 leftovers). All of T4 (T4.1–T4.4)
-landed via the vetted sequential order from the T4 design pass; T4.3 was
-additionally hardened by a 3-lens adversarial workflow that caught a real HIGH
-fact-corruption bug. The avoided 6-caller `ReplaceWithCompaction` signature
-churn the critic flagged: a one-line hardcoded-role change in the store sufficed,
-since no caller needs a variable role. Next: the remaining **T1.3 leftovers**
-(budget/denied EventInfo → typed events; drop the unreachable tool-error abort
-branch) and **T3** (T3.2 sandbox, T3.4/T3.5 undo/checkpoint), **T5** (T5.2–T5.4
-TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7** (docs/config/profiles).
+**T1, T2, and T4 are fully complete.** All of T4 (T4.1–T4.4) landed via the
+vetted sequential order from the T4 design pass; T4.3 was additionally hardened
+by a 3-lens adversarial workflow that caught a real HIGH fact-corruption bug.
+The avoided 6-caller `ReplaceWithCompaction` signature churn the critic flagged:
+a one-line hardcoded-role change in the store sufficed, since no caller needs a
+variable role. Next: **T3** (T3.2 sandbox, T3.4/T3.5 undo/checkpoint), **T5**
+(T5.2–T5.4 TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7** (docs/config/profiles).
 
 ---
 

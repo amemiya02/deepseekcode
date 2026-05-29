@@ -480,12 +480,11 @@ agentLoop:
 		}
 
 		// Tool execution shares the per-step deadline so a stuck tool
-		// can't run forever.
-		toolErr := a.runToolCalls(stepCtx, step.ToolCalls)
+		// can't run forever. runToolCalls never fails the loop: a tool
+		// error (infra or model-facing) is serialized into a tool-result
+		// block for the model to react to, so there is no abort branch here.
+		a.runToolCalls(stepCtx, step.ToolCalls)
 		stepCancel()
-		if toolErr != nil {
-			return StopUnknown, toolErr
-		}
 		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
 		// Compaction check runs between turns (the next iteration's
@@ -883,16 +882,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// rather than letting it slip the gate silently.
 	if !llm.CostKnown(a.Model) && !a.BudgetState.UnknownModelWarned {
 		a.BudgetState.UnknownModelWarned = true
-		a.bus.Publish(EventInfo{Text: "budget gate: model " + a.Model + " has no known pricing; turns cannot be cost-gated"})
+		a.bus.Publish(EventBudget{Kind: BudgetKindUnpriced, Model: a.Model, SpentCNY: a.BudgetState.SpentCNY})
 	}
 	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken, a.BudgetState.SessionCacheHitRate())
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true
-		a.bus.Publish(EventInfo{Text: "budget warning: projected session cost reached warning threshold"})
+		a.bus.Publish(EventBudget{Kind: BudgetKindWarning, ProjectedCNY: projectedCNY, SpentCNY: a.BudgetState.SpentCNY, Model: a.Model})
 	}
 	if !allow {
-		a.bus.Publish(EventInfo{Text: "budget blocked: projected session cost reached hard threshold"})
+		a.bus.Publish(EventBudget{Kind: BudgetKindBlocked, ProjectedCNY: projectedCNY, SpentCNY: a.BudgetState.SpentCNY, Model: a.Model})
 		return StepRecord{FinishReason: "budget_blocked"}, nil
 	}
 
@@ -1402,7 +1401,7 @@ func (a *Agent) injectLoopBreakNudge(calls []llm.ToolCall) {
 // Snapshots are taken serially before the parallel execution kicks off
 // so a /undo can revert all files touched by one step in a single
 // operation.
-func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
+func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) {
 	// Pre-tool snapshot: union of all statically-affected paths.
 	if a.Persister != nil {
 		var paths []string
@@ -1455,7 +1454,6 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 			_, _ = a.Persister.AppendToolResult(ctx, r.callID, block.Content, block.IsError)
 		}
 	}
-	return nil
 }
 
 // executeOne dispatches a single tool call: permission check → Duet
@@ -1510,10 +1508,10 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 			}
 		}
 		if strings.HasPrefix(reason, "matched deny rule:") {
-			a.bus.Publish(EventInfo{Text: "denied by rule: " + reason})
+			a.bus.Publish(EventPermissionDenied{Tool: tool.Name(), Reason: reason, ByRule: true})
 			return tools.Errf("denied by rule: %s", reason), nil
 		}
-		a.bus.Publish(EventInfo{Text: "denied by permissions policy: " + reason})
+		a.bus.Publish(EventPermissionDenied{Tool: tool.Name(), Reason: reason, ByRule: false})
 		return tools.Errf("denied by permissions policy: %s", reason), nil
 	case permissions.Ask:
 		// Emit a permission ask carrying its own reply channel, and

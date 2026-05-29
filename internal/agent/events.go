@@ -84,6 +84,36 @@ type EventStepFinish struct {
 // skipped, tool-call rate warning). Surfaced as a chat line.
 type EventInfo struct{ Text string }
 
+// Budget-gate event kinds (EventBudget.Kind), T1.3.
+const (
+	BudgetKindWarning  = "warning"  // crossed WarnCNY
+	BudgetKindBlocked  = "blocked"  // crossed HardCNY — the turn is refused
+	BudgetKindUnpriced = "unpriced" // model has no pricing table; gate can't price it
+)
+
+// EventBudget reports a session-budget gate decision (T1.3 — promoted from a
+// stringly-typed EventInfo so "warned" vs "blocked" vs "unpriced" are
+// distinguishable for analytics and programmatic gating). ProjectedCNY/SpentCNY
+// are the gate's inputs (ProjectedCNY is 0 for the unpriced kind, where it
+// cannot be computed); Model is the model being gated. Traced as
+// eventschema.Budget{Warning,Blocked,Unpriced}.
+type EventBudget struct {
+	Kind         string
+	ProjectedCNY float64
+	SpentCNY     float64
+	Model        string
+}
+
+// EventPermissionDenied reports a tool call refused by the permission layer
+// (T1.3 — promoted from EventInfo). ByRule distinguishes an explicit deny-rule
+// match from a policy-tier denial; Reason is the human-readable cause. Traced
+// as eventschema.PermissionDenied.
+type EventPermissionDenied struct {
+	Tool   string
+	Reason string
+	ByRule bool
+}
+
 // EventEscalated reports that the current turn was re-issued on a stronger
 // model (the Two-Model escalation). Trigger is "marker" (the model emitted a
 // <<<NEEDS_PRO>>> self-declaration) or "repair_errors" (the per-turn repair
@@ -147,20 +177,22 @@ type EventQuestionAsk struct {
 	Reply     chan<- tools.QuestionResponse
 }
 
-func (EventReasoningStart) isAgentEvent() {}
-func (EventReasoningDelta) isAgentEvent() {}
-func (EventReasoningEnd) isAgentEvent()   {}
-func (EventTextDelta) isAgentEvent()      {}
-func (EventToolCallStart) isAgentEvent()  {}
-func (EventToolCallResult) isAgentEvent() {}
-func (EventStepFinish) isAgentEvent()     {}
-func (EventInfo) isAgentEvent()           {}
-func (EventEscalated) isAgentEvent()      {}
-func (EventPermissionAsk) isAgentEvent()  {}
-func (EventQuestionAsk) isAgentEvent()    {}
-func (EventDone) isAgentEvent()           {}
-func (EventCompaction) isAgentEvent()     {}
-func (EventHookFired) isAgentEvent()      {}
+func (EventReasoningStart) isAgentEvent()   {}
+func (EventReasoningDelta) isAgentEvent()   {}
+func (EventReasoningEnd) isAgentEvent()     {}
+func (EventTextDelta) isAgentEvent()        {}
+func (EventToolCallStart) isAgentEvent()    {}
+func (EventToolCallResult) isAgentEvent()   {}
+func (EventStepFinish) isAgentEvent()       {}
+func (EventInfo) isAgentEvent()             {}
+func (EventBudget) isAgentEvent()           {}
+func (EventPermissionDenied) isAgentEvent() {}
+func (EventEscalated) isAgentEvent()        {}
+func (EventPermissionAsk) isAgentEvent()    {}
+func (EventQuestionAsk) isAgentEvent()      {}
+func (EventDone) isAgentEvent()             {}
+func (EventCompaction) isAgentEvent()       {}
+func (EventHookFired) isAgentEvent()        {}
 
 // EventSubagentStart signals that a sub-agent spawn has begun.
 type EventSubagentStart struct {

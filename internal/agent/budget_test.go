@@ -240,28 +240,21 @@ func TestBudgetWarnEmitsOnce(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Drain events synchronously with deadline
-	var infoEvents []string
+	// Drain events synchronously with deadline; budget warnings are typed
+	// (EventBudget, Kind=warning) since T1.3.
+	warnCount := 0
 	deadline := time.After(time.Second)
 done:
 	for {
 		select {
 		case env := <-sub.C:
-			if info, ok := env.Event.(EventInfo); ok {
-				infoEvents = append(infoEvents, info.Text)
+			if b, ok := env.Event.(EventBudget); ok && b.Kind == BudgetKindWarning {
+				warnCount++
 			}
 		case <-deadline:
 			break done
 		default:
 			break done
-		}
-	}
-
-	// Count budget warning events
-	warnCount := 0
-	for _, msg := range infoEvents {
-		if msg == "budget warning: projected session cost reached warning threshold" {
-			warnCount++
 		}
 	}
 
@@ -365,28 +358,20 @@ func TestBudgetWarnFromAccumulatedSpend(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Drain events
-	var infoEvents []string
+	// Drain events; budget warnings are typed (EventBudget) since T1.3.
+	warnCount := 0
 	deadline := time.After(time.Second)
 done:
 	for {
 		select {
 		case env := <-sub.C:
-			if info, ok := env.Event.(EventInfo); ok {
-				infoEvents = append(infoEvents, info.Text)
+			if b, ok := env.Event.(EventBudget); ok && b.Kind == BudgetKindWarning {
+				warnCount++
 			}
 		case <-deadline:
 			break done
 		default:
 			break done
-		}
-	}
-
-	// Count budget warning events
-	warnCount := 0
-	for _, msg := range infoEvents {
-		if msg == "budget warning: projected session cost reached warning threshold" {
-			warnCount++
 		}
 	}
 
@@ -514,14 +499,14 @@ func TestUnknownModelWarnsOnce(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
+	// Unknown-model warnings are typed (EventBudget, Kind=unpriced) since T1.3.
 	var warnCount int
 	deadline := time.After(time.Second)
 drain:
 	for {
 		select {
 		case env := <-sub.C:
-			if info, ok := env.Event.(EventInfo); ok &&
-				info.Text == "budget gate: model no-such-model has no known pricing; turns cannot be cost-gated" {
+			if b, ok := env.Event.(EventBudget); ok && b.Kind == BudgetKindUnpriced && b.Model == "no-such-model" {
 				warnCount++
 			}
 		case <-deadline:
@@ -539,6 +524,54 @@ drain:
 	}
 	if !a.BudgetState.UnknownModelWarned {
 		t.Error("BudgetState.UnknownModelWarned should be set after warning")
+	}
+}
+
+// TestBudgetBlockedEmitsTypedEvent: a hard-limit block emits a typed
+// EventBudget{Kind:blocked} carrying the gated model (T1.3), not a
+// stringly-typed EventInfo.
+func TestBudgetBlockedEmitsTypedEvent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w, `{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	a := New(client, tools.New(), permissions.New(permissions.ModeYolo, "", nil, nil, nil), "deepseek-v4-flash")
+	a.System = "sys"
+	a.BudgetPolicy = BudgetPolicy{HardCNY: 0.000001}
+
+	sub := a.Bus().Subscribe(256)
+	rec, err := a.runStep(context.Background())
+	if err != nil {
+		t.Fatalf("runStep: %v", err)
+	}
+	if rec.FinishReason != "budget_blocked" {
+		t.Fatalf("FinishReason = %q, want budget_blocked", rec.FinishReason)
+	}
+
+	blockedFound := false
+	deadline := time.After(time.Second)
+loop:
+	for {
+		select {
+		case env := <-sub.C:
+			if b, ok := env.Event.(EventBudget); ok && b.Kind == BudgetKindBlocked {
+				blockedFound = true
+				if b.Model != "deepseek-v4-flash" {
+					t.Errorf("EventBudget.Model = %q, want deepseek-v4-flash", b.Model)
+				}
+			}
+		case <-deadline:
+			break loop
+		default:
+			break loop
+		}
+	}
+	if !blockedFound {
+		t.Error("expected a typed EventBudget{Kind:blocked}, none found")
 	}
 }
 

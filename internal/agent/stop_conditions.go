@@ -16,6 +16,21 @@ type StepRecord struct {
 	EpochID           string
 	StaticPrefixHash  string
 	ExpectedCacheMiss bool
+	// Model is the model that actually produced this step. It usually equals
+	// the loop model, but an escalated turn (T2.3) records the stronger model
+	// so cost/trace attribution follows the turn, not the static loop model.
+	Model string
+	// MessageCount is len(a.Messages) captured BEFORE this step's model turn —
+	// the transcript boundary this step started from. /undo (T3.5) truncates
+	// a.Messages back to the boundary of the first undone step so the model's
+	// view matches the reverted files. Boundaries recorded before a compaction
+	// are stale (compaction renumbers messages), so undo refuses to cross one.
+	MessageCount int
+	// Snapshotted is true when this step took a file snapshot (i.e. it ran a
+	// mutating tool). /undo counts SNAPSHOTS, not steps — snapshots are sparse
+	// (read-only steps take none) — so ReconcileUndo walks snapshotted steps to
+	// find the same boundary the snapshot manager reverts files to (T3.5).
+	Snapshotted bool
 }
 
 // StopReason describes why the loop terminated.
@@ -28,6 +43,7 @@ const (
 	StopLoopDetected             // same tool call repeated too many times
 	StopContextCancel            // ctx.Err()
 	StopUserRequested            // explicit cancellation from TUI
+	StopStepTimeout              // per-step deadline exceeded (non-success)
 )
 
 func (r StopReason) String() string {
@@ -42,8 +58,18 @@ func (r StopReason) String() string {
 		return "context_cancel"
 	case StopUserRequested:
 		return "user_requested"
+	case StopStepTimeout:
+		return "step_timeout"
 	}
 	return "unknown"
+}
+
+// IsSuccess reports whether a stop reason represents a clean, complete run
+// (the model finished on its own). Every other reason — cancellation, a step
+// timeout, a loop or step-cap halt, or an unknown/error exit — is a
+// non-success termination and must not be rendered or recorded as "done".
+func (r StopReason) IsSuccess() bool {
+	return r == StopModelDone
 }
 
 // StopCondition examines recent history and returns (true, reason) when
@@ -85,6 +111,26 @@ func LoopDetection(window, maxRepeats int) StopCondition {
 			}
 		}
 		return false, StopUnknown
+	}
+}
+
+// loopDetection wraps the package-level LoopDetection so it only considers
+// steps recorded at or after a.loopFloor. The Run loop raises the floor to the
+// current step count when it injects the one-shot loop-break nudge, so the
+// repeats that tripped the detector are forgiven and the model's recovery turn
+// is judged on its own merits. With loopFloor==0 (the default and the
+// post-reset state) it behaves exactly like LoopDetection.
+func (a *Agent) loopDetection(window, maxRepeats int) StopCondition {
+	base := LoopDetection(window, maxRepeats)
+	return func(steps []StepRecord) (bool, StopReason) {
+		floor := a.loopFloor
+		if floor < 0 {
+			floor = 0
+		}
+		if floor > len(steps) {
+			floor = len(steps)
+		}
+		return base(steps[floor:])
 	}
 }
 

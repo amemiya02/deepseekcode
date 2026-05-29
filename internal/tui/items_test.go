@@ -51,6 +51,53 @@ func max(a, b int) int {
 	return b
 }
 
+// TestLooksLikeDiff pins the T5.4 diff scanner's boundaries: it must catch
+// git/unified diffs by their structural markers without misclassifying
+// ordinary shell output or source code that merely contains +/- characters.
+func TestLooksLikeDiff(t *testing.T) {
+	positives := map[string]string{
+		"git diff":                    "diff --git a/main.go b/main.go\nindex 1..2 100644\n--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,4 @@\n-old\n+new",
+		"unified diff -u (hunk only)": "--- a.txt\n+++ b.txt\n@@ -1 +1 @@\n-a\n+b",
+		"hunk with offsets":           "@@ -10,7 +10,9 @@ func main() {",
+	}
+	for name, content := range positives {
+		if !looksLikeDiff(content) {
+			t.Errorf("%s: expected looksLikeDiff=true", name)
+		}
+	}
+	negatives := map[string]string{
+		"empty":                "",
+		"plain bash output":    "total 8\ndrwxr-xr-x  2 user  staff  64 May 29 main.go",
+		"shell script with +x": "chmod +x script.sh\necho '+ done'\nVAR=-1",
+		"go source with +/-":   "x := a + b\ny := a - b\nreturn x - y",
+		"log line with @@":     "user@@host ran a job",
+		"markdown heading":     "## @@ not a hunk",
+	}
+	for name, content := range negatives {
+		if looksLikeDiff(content) {
+			t.Errorf("%s: expected looksLikeDiff=false, got true for %q", name, content)
+		}
+	}
+}
+
+// TestToolResultRoutesDiffThroughDiffLexer proves a diff produced by bash is
+// highlighted (ANSI present) and its text round-trips intact through the
+// renderer — i.e. detection routes it through the lexer without mangling.
+func TestToolResultRoutesDiffThroughDiffLexer(t *testing.T) {
+	diff := "diff --git a/x.go b/x.go\n@@ -1,2 +1,2 @@\n-was\n+now\n"
+	item := chatItem{kind: itemToolResult, tool: "bash", args: `{"command":"git diff"}`, result: tools.Result{Content: diff}, expanded: true}
+	out := item.render(DarkTheme(), 80)
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("expected ANSI highlight in diff render, got %q", out)
+	}
+	plain := stripANSI(out)
+	for _, want := range []string{"-was", "+now", "@@ -1,2 +1,2 @@"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("diff text %q missing from render:\n%s", want, plain)
+		}
+	}
+}
+
 // TestAssistantTextRendersMarkdown guards against regressing back to
 // raw `**bold**` literals showing in the scrollback. Glamour should
 // consume the markdown syntax and emit ANSI-styled output.

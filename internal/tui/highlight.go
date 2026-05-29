@@ -27,7 +27,15 @@ func Highlight(t Theme, source, lang string) string {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	style := styles.Get("dracula")
+	// Pick a chroma style that matches the theme's background: dracula's dark
+	// palette is illegible on a light terminal, so the light theme gets a
+	// light-background style. styles.Get falls back internally on an unknown
+	// name; we also guard nil explicitly.
+	styleName := "dracula"
+	if t.Name == "light" {
+		styleName = "github"
+	}
+	style := styles.Get(styleName)
 	if style == nil {
 		style = styles.Fallback
 	}
@@ -67,7 +75,23 @@ func chromaFormatter(bg color.Color) chroma.Formatter {
 			if entry.Underline == chroma.Yes {
 				s = s.Underline(true)
 			}
-			_, _ = io.WriteString(w, s.Render(tok.Value))
+			// Render each line of the token separately. lipgloss block-pads
+			// multi-line input to the widest line, and chroma emits whole
+			// lines (often with a trailing "\n") as single tokens — so a
+			// naive Render(tok.Value) injects spurious trailing spaces that
+			// surface as misaligned leading whitespace on the next line
+			// (most visibly in diffs). Splitting on "\n" keeps every Render
+			// call single-line; raw newlines are re-inserted between.
+			parts := strings.Split(tok.Value, "\n")
+			for i, part := range parts {
+				if i > 0 {
+					_, _ = io.WriteString(w, "\n")
+				}
+				if part == "" {
+					continue
+				}
+				_, _ = io.WriteString(w, s.Render(part))
+			}
 		}
 		return nil
 	})

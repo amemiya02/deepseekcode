@@ -18,6 +18,10 @@ import (
 type ReadFile struct {
 	MaxBytes int64  // default 5_242_880 (5 MiB); 0 means use default
 	CWD      string // project root for path safety; empty means os.Getwd
+	// Tracker, when set, records the file's on-disk state on a successful read
+	// so the write tools can detect out-of-band changes before editing (T3.2).
+	// nil disables the freshness guard.
+	Tracker *FileTracker
 }
 
 func (ReadFile) Name() string { return "read_file" }
@@ -120,6 +124,11 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	stat, err := f.Stat()
 	if err == nil && stat.Size() > maxBytes {
+		// Stamp even though the content is too large to display: the freshness
+		// signal is (mtime,size), not coverage, so a subsequent write_file/
+		// edit_file isn't dead-ended by a false "never read" rejection on a file
+		// the model legitimately engaged with (T3.2 / adversarial HIGH-2).
+		r.Tracker.RecordRead(p.Path)
 		return Errf("file too large (%d bytes; cap is %d). Use grep or a narrower start_line/end_line.",
 			stat.Size(), maxBytes), nil
 	}
@@ -157,10 +166,17 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 		return Errf("read error at line %d: %v", lineNum, err), nil
 	}
 	if lineNum == 0 {
+		// Empty file is still a successful read — stamp it so a later write
+		// against an unchanged empty file is allowed.
+		r.Tracker.RecordRead(p.Path)
 		return Result{Content: fmt.Sprintf("(empty file: %s)", p.Path)}, nil
 	}
 	if start > lineNum {
 		return Errf("start_line=%d is past end of file (%d lines)", start, lineNum), nil
 	}
+	// Stamp the file's on-disk state so the write tools can detect a change
+	// between this read and a subsequent edit (T3.2). A partial (ranged) read
+	// still counts — the stamp tracks disk freshness, not coverage.
+	r.Tracker.RecordRead(p.Path)
 	return Result{Content: out.String()}, nil
 }

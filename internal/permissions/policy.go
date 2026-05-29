@@ -14,7 +14,9 @@ package permissions
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -134,17 +136,23 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 	}
 
 	// File-touching tools: check affected paths against cwd + secret patterns.
+	//
+	// Symlinks are resolved before classification so the gate agrees with the
+	// tool layer's tools.ResolveAndCheck: a symlink inside cwd that points
+	// outside (or into .git / a secret path) must NOT pass as a "safe write
+	// inside cwd". Both the cwd anchor and the target are symlink-resolved; a
+	// non-existent leaf resolves via its deepest existing parent.
 	if pa, ok := c.Tool.(tools.PathAware); ok {
 		paths := pa.AffectedPaths(c.Args)
 		for _, raw := range paths {
-			abs, err := filepath.Abs(raw)
+			cwdReal, real, err := p.resolveAffected(raw)
 			if err != nil {
 				return Ask, "unresolvable path" // can't tell, be safe
 			}
-			if p.matchesSecret(abs) {
+			if p.matchesSecret(real) {
 				return Ask, "path matches secret pattern"
 			}
-			if !p.insideCwd(abs) {
+			if !withinCwd(cwdReal, real) {
 				return Ask, "path outside cwd"
 			}
 		}
@@ -235,6 +243,37 @@ func (p *Policy) DeriveChildWithCwd(requested Mode, cwd string) *Policy {
 	return child
 }
 
+// ModeFromRuleset maps a `permission_ruleset` agent-def frontmatter value to a
+// Mode. Recognized names: "default", "yolo", "read-only"/"readonly",
+// "ask-all"/"askall", "plan". Returns ok=false for an unrecognized name so the
+// caller can fall back and warn.
+//
+// Because spawn feeds the result through DeriveChild → clampMode, a ruleset can
+// only ever RESTRICT a child relative to its parent, never escalate it: a child
+// of a default-mode parent that requests "yolo" is clamped back to default.
+func ModeFromRuleset(name string) (Mode, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "default":
+		return ModeDefault, true
+	case "yolo":
+		return ModeYolo, true
+	case "read-only", "readonly":
+		return ModeReadOnly, true
+	case "ask-all", "askall":
+		return ModeAskAll, true
+	case "plan":
+		return ModePlan, true
+	}
+	return ModeDefault, false
+}
+
+// ModeMoreDangerousThan reports whether mode a permits strictly more than b on
+// the same danger ordering clampMode uses. An admin floor (requirements.toml
+// max_mode) uses it to refuse a launch mode that exceeds the configured ceiling.
+func ModeMoreDangerousThan(a, b Mode) bool {
+	return danger(a) > danger(b)
+}
+
 // clampMode returns the safer (lower danger) of a and b.
 func clampMode(a, b Mode) Mode {
 	if danger(a) <= danger(b) {
@@ -262,16 +301,79 @@ func danger(m Mode) int {
 	}
 }
 
-func (p *Policy) insideCwd(abs string) bool {
+// resolveAffected canonicalizes an affected path the way the tool layer's
+// tools.ResolveAndCheck does, so the permission gate classifies the same bytes
+// the tool will actually touch. It returns the symlink-resolved cwd anchor and
+// the symlink-resolved target.
+//
+// Resolution mirrors ResolveAndCheck/evalExistingPath: relative paths join
+// against the lexical cwd; symlinks are resolved on both the cwd anchor and the
+// target; a non-existent leaf resolves via its deepest existing parent. When
+// EvalSymlinks cannot run (e.g. the configured cwd does not exist on disk), the
+// helper falls back to the lexical absolute path, preserving the gate's prior
+// behavior for such configurations rather than failing closed everywhere.
+func (p *Policy) resolveAffected(raw string) (cwdReal, real string, err error) {
 	cwdAbs, err := filepath.Abs(p.Cwd)
 	if err != nil {
-		return false
+		return "", "", err
 	}
-	rel, err := filepath.Rel(cwdAbs, abs)
+	cwdReal = cwdAbs
+	if resolved, e := filepath.EvalSymlinks(cwdAbs); e == nil {
+		cwdReal = resolved
+	}
+
+	// Relative targets resolve against the lexical cwd (matching ResolveAndCheck,
+	// which joins against cwdAbs, not the symlink-resolved cwd).
+	target := raw
+	if !filepath.IsAbs(raw) {
+		target = filepath.Join(cwdAbs, raw)
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", err
+	}
+	real = evalExistingPath(abs)
+	return cwdReal, real, nil
+}
+
+// evalExistingPath resolves symlinks on the deepest existing ancestor of abs
+// and appends the non-existing remainder. This handles paths that do not exist
+// yet (e.g. write_file creating a new file). It mirrors the unexported helper
+// of the same name in internal/tools (which cannot be imported here), but never
+// errors: an unresolvable path falls back to its lexical form.
+func evalExistingPath(abs string) string {
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	existing := abs
+	for {
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return abs
+		}
+		existing = parent
+		if resolved, e := filepath.EvalSymlinks(existing); e == nil {
+			rel, _ := filepath.Rel(existing, abs)
+			return filepath.Join(resolved, rel)
+		}
+	}
+}
+
+// withinCwd reports whether path is equal to or resides inside root, after both
+// have been canonicalized by the caller. It mirrors tools.isWithin: case-
+// insensitive on Windows, and rejects parent-escapes and absolute rels.
+func withinCwd(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		root = strings.ToLower(root)
+		path = strings.ToLower(path)
+	}
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}
-	return !strings.HasPrefix(rel, "..") && rel != ".."
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".." && !filepath.IsAbs(rel))
 }
 
 func (p *Policy) matchesSecret(abs string) bool {

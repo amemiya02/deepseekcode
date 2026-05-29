@@ -1,8 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 // RenderToolSummary renders a one-line tool summary with width-aware
@@ -44,9 +44,11 @@ func renderReadFileSummary(args, result string, isError bool) string {
 		return fmt.Sprintf("✗ read %s", path)
 	}
 
-	// Count lines in result
-	lines := strings.Count(result, "\n")
-	if lines > 0 {
+	// Count lines in result. lineCount counts the final line even without a
+	// trailing newline (strings.Count undercounts it); show the count only for
+	// genuinely multi-line output.
+	lines := lineCount(result)
+	if lines > 1 {
 		return fmt.Sprintf("read %s (%d lines)", path, lines)
 	}
 	return fmt.Sprintf("read %s", path)
@@ -69,9 +71,9 @@ func renderBashSummary(args, result string, isError bool) string {
 		return fmt.Sprintf("✗ bash: %s", cmd)
 	}
 
-	// Count lines in result
-	lines := strings.Count(result, "\n")
-	if lines > 0 {
+	// Count lines in result (see renderReadFileSummary on lineCount vs strings.Count).
+	lines := lineCount(result)
+	if lines > 1 {
 		return fmt.Sprintf("bash: %s (%d lines)", cmd, lines)
 	}
 	return fmt.Sprintf("bash: %s", cmd)
@@ -94,9 +96,9 @@ func renderGrepSummary(args, result string, isError bool) string {
 		return fmt.Sprintf("✗ grep: %s", pattern)
 	}
 
-	// Count matches
-	matches := strings.Count(result, "\n")
-	if matches > 0 {
+	// Count matches (one per result line; lineCount counts the last line too).
+	matches := lineCount(result)
+	if matches > 1 {
 		return fmt.Sprintf("grep: %s (%d matches)", pattern, matches)
 	}
 	return fmt.Sprintf("grep: %s", pattern)
@@ -108,51 +110,25 @@ func renderDefaultSummary(tool, args, result string, isError bool) string {
 		return fmt.Sprintf("✗ %s", tool)
 	}
 
-	// Count lines in result
-	lines := strings.Count(result, "\n")
-	if lines > 0 {
+	// Count lines in result (see renderReadFileSummary on lineCount vs strings.Count).
+	lines := lineCount(result)
+	if lines > 1 {
 		return fmt.Sprintf("%s (%d lines)", tool, lines)
 	}
 	return tool
 }
 
-// extractJSONString extracts a string value from a JSON object.
-// Returns empty string if not found or not a string.
-func extractJSONString(json, key string) string {
-	// Simple extraction for common patterns
-	// Look for "key": "value" or "key":"value"
-	search := `"` + key + `"`
-	idx := strings.Index(json, search)
-	if idx < 0 {
+// extractJSONString returns the string value of key in a JSON object, or "" if
+// args isn't a well-formed object or key isn't a string. It parses with
+// encoding/json (the same approach as compactArgs) rather than substring
+// scanning, so escaped quotes and nested braces don't confuse it.
+func extractJSONString(args, key string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(args), &m) != nil {
 		return ""
 	}
-
-	// Find the colon after the key
-	colonIdx := strings.Index(json[idx+len(search):], ":")
-	if colonIdx < 0 {
-		return ""
+	if v, ok := m[key].(string); ok {
+		return v
 	}
-	colonIdx += idx + len(search)
-
-	// Find the opening quote
-	startIdx := strings.Index(json[colonIdx:], `"`)
-	if startIdx < 0 {
-		return ""
-	}
-	startIdx += colonIdx
-
-	// Find the closing quote (handle escaped quotes)
-	endIdx := startIdx + 1
-	for endIdx < len(json) {
-		if json[endIdx] == '"' && json[endIdx-1] != '\\' {
-			break
-		}
-		endIdx++
-	}
-
-	if endIdx >= len(json) {
-		return ""
-	}
-
-	return json[startIdx+1 : endIdx]
+	return ""
 }

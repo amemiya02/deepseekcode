@@ -8,51 +8,16 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/traceschema"
 )
 
-// traceRecord is one JSONL line in the agent trace. Field names mirror the
-// benchrunner's parser (bench/cmd/benchrunner) so the harness can read this
-// trace directly and compute the Cache Reliability gate from real epoch,
-// usage, compaction, and drift evidence — no placeholders.
-type traceRecord struct {
-	Type string `json:"type"`
-	Turn *int   `json:"turn,omitempty"`
-
-	// run_id/agent_role/parent_epoch_id identify which agent emitted the
-	// record. The root one-shot stamps agent_role="root" with no parent; a
-	// subagent (once child-trace emission is wired) stamps "subagent" plus
-	// the parent epoch it ran under. The benchmark uses these to tell a
-	// child epoch from the root epoch when judging parent/subagent cache
-	// pollution — instead of hardcoding a pass.
-	RunID         string `json:"run_id,omitempty"`
-	AgentRole     string `json:"agent_role,omitempty"`
-	ParentEpochID string `json:"parent_epoch_id,omitempty"`
-
-	EpochID          string `json:"epoch_id,omitempty"`
-	OldEpochID       string `json:"old_epoch_id,omitempty"`
-	Model            string `json:"model,omitempty"`
-	StaticPrefixHash string `json:"static_prefix_hash,omitempty"`
-	ToolsHash        string `json:"tools_hash,omitempty"`
-	Reason           string `json:"reason,omitempty"`
-
-	// usage
-	CacheHitTokens  *int     `json:"cache_hit_tokens,omitempty"`
-	CacheMissTokens *int     `json:"cache_miss_tokens,omitempty"`
-	OutputTokens    *int     `json:"output_tokens,omitempty"`
-	CostCNY         *float64 `json:"cost_cny,omitempty"`
-
-	// pending_change / drift.blocked
-	Kind        string `json:"kind,omitempty"`
-	Description string `json:"description,omitempty"`
-	Which       string `json:"which,omitempty"`
-
-	// compaction — the measured static-prefix fingerprints before and after
-	// compaction. The benchmark compares them itself; there is no hardcoded
-	// "changed" boolean. Equal means compaction reused the frozen prefix.
-	BeforeStaticPrefixHash string   `json:"before_static_prefix_hash,omitempty"`
-	AfterStaticPrefixHash  string   `json:"after_static_prefix_hash,omitempty"`
-	SummaryCostCNY         *float64 `json:"summary_cost_cny,omitempty"`
-}
+// traceRecord aliases the single canonical agent-trace record
+// (traceschema.Record). The emitter here, internal/traceinspect, and the
+// benchmark harness (bench/cmd/benchrunner) all share that one type, so a
+// field rename is a compile error in every consumer rather than a silent
+// reader breakage (T6.1). Every emitted record is stamped with
+// schema_version = traceschema.Version in encode.
+type traceRecord = traceschema.Record
 
 // traceWriter is the synchronized JSONL sink shared by a root TraceSink and
 // any subagent child sinks. Sharing one mutex+encoder keeps records from the
@@ -63,6 +28,9 @@ type traceWriter struct {
 }
 
 func (w *traceWriter) encode(r traceRecord) {
+	// Stamp the schema version on every record at the single write chokepoint
+	// so no emit site can forget it (T6.1).
+	r.SchemaVersion = traceschema.Version
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	_ = w.enc.Encode(r)
@@ -187,7 +155,15 @@ func (s *TraceSink) Handle(ev Event) {
 		hit := e.Usage.PromptCacheHitTokens
 		miss := e.Usage.PromptCacheMissTokens
 		out := e.Usage.CompletionTokens
-		cost := llm.Cost(s.model, e.Usage)
+		// Attribute usage to the model that actually produced the turn — an
+		// escalated turn (T2.3) carries the stronger model — falling back to the
+		// sink's loop model for steps that don't stamp one. This keeps the trace
+		// usage record consistent with the ReceiptModelFinal payload.
+		stepModel := e.Model
+		if stepModel == "" {
+			stepModel = s.model
+		}
+		cost := llm.Cost(stepModel, e.Usage)
 		// One snapshot per turn lets the harness prove the static prefix
 		// hash is identical across every turn of an epoch.
 		s.write(traceRecord{
@@ -201,7 +177,7 @@ func (s *TraceSink) Handle(ev Event) {
 			Type:            "usage",
 			Turn:            &turn,
 			EpochID:         s.curEpochID,
-			Model:           s.model,
+			Model:           stepModel,
 			CacheHitTokens:  &hit,
 			CacheMissTokens: &miss,
 			OutputTokens:    &out,
@@ -229,6 +205,43 @@ func (s *TraceSink) Handle(ev Event) {
 			AfterStaticPrefixHash:  e.StaticPrefixHashAfter,
 			SummaryCostCNY:         &cost,
 		})
+	case EventEscalated:
+		// The turn was re-issued on a stronger model. Kind carries the trigger
+		// (marker / repair_errors); Model is the model escalated TO.
+		s.write(traceRecord{
+			Type:        "policy.escalated",
+			EpochID:     s.curEpochID,
+			Kind:        e.Trigger,
+			Model:       e.ToModel,
+			Description: e.FromModel + " -> " + e.ToModel + ": " + e.Reason,
+		})
+	case EventBudget:
+		// Session-budget gate decision (T1.3). The Type encodes the kind
+		// (budget.warning / budget.blocked / budget.unpriced); Model is the
+		// model gated.
+		t := "budget.warning"
+		switch e.Kind {
+		case BudgetKindBlocked:
+			t = "budget.blocked"
+		case BudgetKindUnpriced:
+			t = "budget.unpriced"
+		}
+		rec := traceRecord{Type: t, Model: e.Model}
+		// Carry the projected turn cost so the inspector can show realized vs
+		// projected (T6.4). Unpriced gates have no computable projection.
+		if e.Kind != BudgetKindUnpriced {
+			pc := e.ProjectedCNY
+			rec.ProjectedCNY = &pc
+		}
+		s.write(rec)
+	case EventPermissionDenied:
+		// Tool call refused by the permission layer (T1.3). Kind is rule|policy;
+		// Description carries the tool name; Reason the cause.
+		kind := "policy"
+		if e.ByRule {
+			kind = "rule"
+		}
+		s.write(traceRecord{Type: "permission.denied", Kind: kind, Description: e.Tool, Reason: e.Reason})
 	case EventDone:
 		// A terminal marker per agent. The root stamps agent_role="root"; a
 		// subagent stamps "subagent" + parent_epoch_id. The benchmark requires

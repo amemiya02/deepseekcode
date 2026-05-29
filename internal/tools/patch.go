@@ -240,8 +240,11 @@ func DeriveNewContents(path string, chunks []UpdateChunk, original string) (stri
 			}
 			continue
 		}
-		pos := locateChunk(lines[cursor:], chunk.OldLines)
+		pos, ambiguous := locateChunk(lines[cursor:], chunk.OldLines)
 		if pos < 0 {
+			if ambiguous {
+				return "", fmt.Errorf("apply_patch: chunk %d in %s matches multiple locations; add more surrounding context lines", i+1, path)
+			}
 			return "", fmt.Errorf("apply_patch: cannot locate chunk %d in %s", i+1, path)
 		}
 		pos += cursor
@@ -266,32 +269,43 @@ func DeriveNewContents(path string, chunks []UpdateChunk, original string) (stri
 	return result, nil
 }
 
-// locateChunk finds the first occurrence of old in src using 4-pass matching.
-// Returns the index in src or -1 if not found.
-func locateChunk(src, old []string) int {
+// locateChunk finds the unique occurrence of old in src using 4-pass matching
+// (exact → rstrip → trim → collapse-whitespace), tried strictest first. For
+// each pass it counts every matching window: a pass with exactly one match wins
+// immediately; a pass with multiple matches is recorded as ambiguous and we
+// fall through to the next, stricter-normalized pass (so a unique exact match
+// always beats a loose multi-match). If no pass yields a unique match, it
+// returns (-1, ambiguous) where ambiguous is true iff some pass saw >1 match.
+//
+// Ambiguity is judged within src, which DeriveNewContents passes as
+// lines[cursor:]; that cursor-relative slice already disambiguates sequential
+// identical chunks, so this preserves the existing apply-in-order behavior.
+func locateChunk(src, old []string) (pos int, ambiguous bool) {
 	if len(old) == 0 {
-		return 0
+		return 0, false
 	}
-	// Pass 1: exact
-	if pos := matchLines(src, old, func(s string) string { return s }); pos >= 0 {
-		return pos
+	sawAmbiguous := false
+	for _, norm := range []func(string) string{
+		func(s string) string { return s },                           // exact
+		func(s string) string { return strings.TrimRight(s, " \t") }, // rstrip
+		strings.TrimSpace, // trim
+		collapseWS,        // collapse whitespace
+	} {
+		p, count := matchLines(src, old, norm)
+		if count == 1 {
+			return p, false
+		}
+		if count > 1 {
+			sawAmbiguous = true
+		}
 	}
-	// Pass 2: rstrip
-	if pos := matchLines(src, old, func(s string) string { return strings.TrimRight(s, " \t") }); pos >= 0 {
-		return pos
-	}
-	// Pass 3: trim
-	if pos := matchLines(src, old, func(s string) string { return strings.TrimSpace(s) }); pos >= 0 {
-		return pos
-	}
-	// Pass 4: collapse whitespace
-	if pos := matchLines(src, old, collapseWS); pos >= 0 {
-		return pos
-	}
-	return -1
+	return -1, sawAmbiguous
 }
 
-func matchLines(src, old []string, norm func(string) string) int {
+// matchLines scans every window of len(old) in src under norm, returning the
+// first matching index and the total number of matching windows.
+func matchLines(src, old []string, norm func(string) string) (pos, count int) {
+	pos = -1
 outer:
 	for i := 0; i <= len(src)-len(old); i++ {
 		for j := range old {
@@ -299,9 +313,12 @@ outer:
 				continue outer
 			}
 		}
-		return i
+		if pos < 0 {
+			pos = i
+		}
+		count++
 	}
-	return -1
+	return pos, count
 }
 
 func collapseWS(s string) string {

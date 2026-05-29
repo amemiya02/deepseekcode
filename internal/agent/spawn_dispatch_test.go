@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
+	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -155,6 +157,82 @@ func TestSpawnTaskExcludedByDefault(t *testing.T) {
 	}
 }
 
+func fptr(f float64) *float64 { return &f }
+
+// TestSpawnDefSamplingReachesRequest proves def.Temperature/def.TopP reach the
+// child's actual llm.Request wire body (T7.1).
+func TestSpawnDefSamplingReachesRequest(t *testing.T) {
+	var gotTemp, gotTopP *float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Temperature *float64 `json:"temperature"`
+			TopP        *float64 `json:"top_p"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotTemp, gotTopP = body.Temperature, body.TopP
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"content":"done"}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, tools.New(), pol, "test-model")
+	defs := map[string]agents.AgentDef{
+		"tuned": {Prompt: "x", Temperature: fptr(0.3), TopP: fptr(0.7)},
+	}
+	s := &LoopSpawner{Client: client, Parent: parent, Defs: defs}
+
+	if _, err := s.Spawn(context.Background(), tools.SpawnRequest{Agent: "tuned", Description: "go"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if gotTemp == nil || *gotTemp != 0.3 {
+		t.Errorf("temperature on wire = %v, want 0.3", gotTemp)
+	}
+	if gotTopP == nil || *gotTopP != 0.7 {
+		t.Errorf("top_p on wire = %v, want 0.7", gotTopP)
+	}
+}
+
+// TestSpawnDefMaxStepsCapsLoop proves def.MaxSteps drives the child's step cap:
+// the mock returns a fresh tool call every turn (distinct args, so neither loop
+// detection nor the storm breaker fires), so only MaxSteps can end the loop.
+// Without the wiring the child would run to the default cap (50), not 3.
+func TestSpawnDefMaxStepsCapsLoop(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := strconv.Itoa(int(atomic.AddInt32(&calls, 1)))
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c`+n+`","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"f`+n+`.go\"}"}}]}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	reg := tools.New()
+	reg.Register(stubTool{name: "read_file"})
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, reg, pol, "test-model")
+	defs := map[string]agents.AgentDef{
+		"capped": {Tools: []string{"read_file"}, Prompt: "x", MaxSteps: 3},
+	}
+	s := &LoopSpawner{Client: client, Parent: parent, Defs: defs}
+
+	if _, err := s.Spawn(context.Background(), tools.SpawnRequest{Agent: "capped", Description: "loop"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Errorf("model requests = %d, want 3 (def.MaxSteps cap; default would be 50)", got)
+	}
+}
+
 func TestSpawnWithDefTools(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +341,67 @@ func TestSpawnInheritsParentSystem(t *testing.T) {
 	_, err := s.Spawn(context.Background(), tools.SpawnRequest{Description: "x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestChildSystemSelection pins the spawned-child prompt selection (T7.3): own
+// prompt wins; default inherits the full parent prompt; omit_project_context
+// trims the parent's per-turn project context block; and the flag is a no-op
+// when the def supplies its own prompt.
+func TestChildSystemSelection(t *testing.T) {
+	parentSystem := "STATIC PREFIX" + prompt.DynamicContextBoundary + "\n## Project\n- cwd: /repo\n"
+	cases := []struct {
+		name string
+		def  agents.AgentDef
+		want string
+	}{
+		{"own prompt wins", agents.AgentDef{Prompt: "you are a scout"}, "you are a scout"},
+		{"inherit full parent by default", agents.AgentDef{}, parentSystem},
+		{"omit trims dynamic context", agents.AgentDef{OmitProjectContext: true}, "STATIC PREFIX"},
+		{"omit is a no-op when def has its own prompt", agents.AgentDef{Prompt: "p", OmitProjectContext: true}, "p"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := childSystem(c.def, parentSystem); got != c.want {
+				t.Errorf("childSystem = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestSpawnDefModelReachesRequest proves a def's model: frontmatter selects the
+// child's model on the wire — the cheaper-tier half of T7.3 (an explore/review
+// def can run on a cheaper model than the parent's).
+func TestSpawnDefModelReachesRequest(t *testing.T) {
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel = body.Model
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		emitSSE(w,
+			`{"choices":[{"index":0,"delta":{"content":"done"}}]}`,
+			`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+		)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("k", srv.URL)
+	pol := permissions.New(permissions.ModeYolo, "", nil, nil, nil)
+	parent := New(client, tools.New(), pol, "deepseek-v4-pro") // parent on the expensive tier
+	defs := map[string]agents.AgentDef{
+		"explore": {Prompt: "x", Model: "deepseek-v4-flash"},
+	}
+	s := &LoopSpawner{Client: client, Parent: parent, Defs: defs}
+
+	if _, err := s.Spawn(context.Background(), tools.SpawnRequest{Agent: "explore", Description: "go"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	if gotModel != "deepseek-v4-flash" {
+		t.Errorf("model on wire = %q, want deepseek-v4-flash (the def's cheaper tier, not the parent's deepseek-v4-pro)", gotModel)
 	}
 }
 

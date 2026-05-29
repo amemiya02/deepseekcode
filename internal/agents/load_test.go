@@ -249,12 +249,15 @@ func keys(m map[string]AgentDef) []string {
 }
 
 func TestParseAgentExtendedFrontmatter(t *testing.T) {
-	got, err := ParseAgent("---\ndescription: Scout the repo\nmode: all\nhidden: true\nmax_steps: 12\npermission_ruleset: read-only\ntemperature: 0.2\ntop_p: 0.9\ndefault_agent: scout\ntools: read_file, grep\n---\nScout instructions.")
+	got, err := ParseAgent("---\ndescription: Scout the repo\nmode: all\nhidden: true\nmax_steps: 12\npermission_ruleset: read-only\ntemperature: 0.2\ntop_p: 0.9\ndefault_agent: scout\nomit_project_context: true\ntools: read_file, grep\n---\nScout instructions.")
 	if err != nil {
 		t.Fatalf("ParseAgent returned error: %v", err)
 	}
 	if got.Mode != "all" || !got.Hidden || got.MaxSteps != 12 {
 		t.Fatalf("mode/hidden/max_steps not parsed: %+v", got)
+	}
+	if !got.OmitProjectContext {
+		t.Fatalf("OmitProjectContext not parsed: %+v", got)
 	}
 	if got.PermissionRuleset != "read-only" {
 		t.Fatalf("PermissionRuleset = %q", got.PermissionRuleset)

@@ -14,6 +14,10 @@ import (
 type WriteFile struct {
 	MaxBytes int64  // default 5_242_880 (5 MiB); 0 means use default
 	CWD      string // project root for path safety; empty means os.Getwd
+	// Tracker, when set, refuses to overwrite an existing file that was never
+	// read or that changed on disk since the read (T3.2). A new-file create
+	// (path absent on disk) always passes. nil disables the guard.
+	Tracker *FileTracker
 }
 
 func (WriteFile) Name() string { return "write_file" }
@@ -81,6 +85,14 @@ func (w WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, e
 	}
 	p.Path = checkedPath
 
+	// Read-before-write freshness guard (T3.2): overwriting an existing file
+	// that was never read (or that changed since the read) risks clobbering
+	// content the agent never saw. A brand-new file passes (CheckFresh returns
+	// nil when the path is absent on disk).
+	if err := w.Tracker.CheckFresh(p.Path); err != nil {
+		return Errf("%v", err), nil
+	}
+
 	maxBytes := w.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = 5 * 1024 * 1024 // 5 MiB default
@@ -116,6 +128,9 @@ func (w WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, e
 		_ = os.Remove(tmpName)
 		return Result{}, fmt.Errorf("rename %s -> %s: %w", tmpName, p.Path, err)
 	}
+	// Stamp the just-written state so a follow-up write/edit in the same
+	// session sees it as fresh (T3.2).
+	w.Tracker.RecordWrite(p.Path)
 
 	content := fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path)
 	if len(p.Content) > 1024*1024 {

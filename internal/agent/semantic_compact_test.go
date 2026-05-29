@@ -118,7 +118,7 @@ func TestContextPressure(t *testing.T) {
 			llm.TextBlock{Text: strings.Repeat("x", 400)}, // ~100 tokens
 		}},
 	}
-	pressure := ContextPressure(msgs, 1000)
+	pressure := ContextPressure(msgs, 1000, defaultCharsPerToken)
 	if pressure < 0.10 || pressure > 0.12 {
 		t.Errorf("expected ~0.10 pressure; got %f", pressure)
 	}
@@ -126,7 +126,7 @@ func TestContextPressure(t *testing.T) {
 
 func TestContextPressure_ZeroMax(t *testing.T) {
 	msgs := []llm.Message{{Role: "user"}}
-	if p := ContextPressure(msgs, 0); p != 0 {
+	if p := ContextPressure(msgs, 0, defaultCharsPerToken); p != 0 {
 		t.Errorf("expected 0 for zero max; got %f", p)
 	}
 }
@@ -143,9 +143,9 @@ func TestSemanticCompact_UsesFlashDisablesThinkingTimeoutCost(t *testing.T) {
 		// Capture the request body to verify model, thinking, max_tokens.
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Model     string              `json:"model"`
+			Model     string               `json:"model"`
 			Thinking  *llm.ThinkingOptions `json:"thinking,omitempty"`
-			MaxTokens int                 `json:"max_tokens"`
+			MaxTokens int                  `json:"max_tokens"`
 		}
 		_ = json.Unmarshal(body, &req)
 		receivedModel = req.Model
@@ -645,5 +645,29 @@ func TestDefaultSemanticCompactionConfig(t *testing.T) {
 	}
 	if cfg.MaxSummaryTokens != 2000 {
 		t.Errorf("MaxSummaryTokens: got %d want 2000", cfg.MaxSummaryTokens)
+	}
+}
+
+// TestSemanticPromptCarriesPriorSummaryForward covers the T4.3 semantic-path
+// fact-retention fix (the adversarial review's MEDIUM): a prior compaction
+// summary in the window is embedded in the summarizer prompt IN FULL (not
+// truncated to 500 chars) and an explicit carry-forward constraint instructs
+// the model to preserve its facts — the deterministic path's structural merge
+// is unavailable here because the LLM summary uses a different field vocabulary.
+func TestSemanticPromptCarriesPriorSummaryForward(t *testing.T) {
+	prior := "<summary>\n- tools_used: [early_tool]\n- key_files: [early_fact.go]\n- current_work: bootstrapping\n</summary>"
+	msgs := []llm.Message{
+		{Role: "assistant", Blocks: []llm.ContentBlock{llm.TextBlock{Text: prior}}},
+		{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "now do the next thing"}}},
+	}
+	prompt := buildSemanticSummaryPrompt(msgs)
+	if !strings.Contains(prompt, prior) {
+		t.Errorf("prior summary must be embedded in full; prompt:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Prior summary carry-forward") {
+		t.Errorf("prompt must instruct prior-summary preservation; prompt:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "early_tool") || !strings.Contains(prompt, "early_fact.go") {
+		t.Errorf("early facts missing from prompt:\n%s", prompt)
 	}
 }

@@ -174,6 +174,15 @@ func New(cfg Config) *App {
 			activeAgent:     "coding-default",
 		},
 	}
+	// Thread the agent's real context window and first-token timeout into the
+	// status HUD / cold-start caption. Both are nil-safe so tests that build
+	// an App without an Agent (or a provider Client) still construct cleanly.
+	if cfg.Agent != nil {
+		app.status.contextLimit = cfg.Agent.MaxContextTokens
+		if cfg.Agent.Client != nil {
+			app.chrome.SetFirstTokenTimeout(cfg.Agent.Client.FirstTokenTimeout)
+		}
+	}
 	return app
 }
 
@@ -388,6 +397,7 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 		cmds = append(cmds, a.ensureTick())
 	case agent.EventToolCallResult:
+		a.chrome.ToolReady()
 		a.scrollback.AppendToolResult(e.CallID, e.Result, e.Dur)
 		a.refreshView()
 	case agent.EventHookFired:
@@ -395,12 +405,18 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 	case agent.EventStepFinish:
 		a.stepTotal++
+		// Close the current tool batch at the step boundary so the next
+		// tool turn's "N ready" counter starts fresh even when the model's
+		// next turn is a pure tool-call turn (no reasoning/text to flip the
+		// chrome phase away from phaseTool).
+		a.chrome.EndToolBatch()
 		a.status.steps = a.stepTotal
 		a.status.usage.PromptTokens += e.Usage.PromptTokens
 		a.status.usage.CompletionTokens += e.Usage.CompletionTokens
 		a.status.usage.PromptCacheHitTokens += e.Usage.PromptCacheHitTokens
 		a.status.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
 		a.status.costYuan += llm.Cost(a.model, e.Usage)
+		a.status.savedYuan += llm.CacheSavings(a.model, e.Usage)
 		a.status.costKnown = llm.CostKnown(a.model)
 		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
 		a.refreshView()
@@ -410,11 +426,30 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.refreshView()
 	case agent.EventInfo:
 		a.scrollback.AppendInfo(e.Text)
-		// NOTE: reuses the generic hint slot; if other features write
-		// hint, drift chip gets overwritten. Consider a dedicated field
-		// if this becomes a conflict.
+		// The prefix-cache invalidation warning has its own slot
+		// (cacheNote) so it no longer clobbers the generic transient hint;
+		// the two coexist on the status line.
 		if strings.HasPrefix(e.Text, "prefix cache invalidated: ") {
-			a.status.hint = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
+			a.status.cacheNote = "⚠ cache:" + strings.TrimPrefix(e.Text, "prefix cache invalidated: ")
+		}
+		a.refreshView()
+	case agent.EventBudget:
+		// T1.3: budget-gate decisions are typed now; render them as info lines
+		// so the prior user-visible behavior is preserved.
+		switch e.Kind {
+		case agent.BudgetKindBlocked:
+			a.scrollback.AppendInfo("budget blocked: projected session cost reached hard threshold")
+		case agent.BudgetKindUnpriced:
+			a.scrollback.AppendInfo("budget gate: model " + e.Model + " has no known pricing; turns cannot be cost-gated")
+		default:
+			a.scrollback.AppendInfo("budget warning: projected session cost reached warning threshold")
+		}
+		a.refreshView()
+	case agent.EventPermissionDenied:
+		if e.ByRule {
+			a.scrollback.AppendInfo("denied by rule: " + e.Reason)
+		} else {
+			a.scrollback.AppendInfo("denied by permissions policy: " + e.Reason)
 		}
 		a.refreshView()
 	case agent.EventRepair:
@@ -681,6 +716,9 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		cancel := a.runCancel
 		a.runMu.Unlock()
 		if running && cancel != nil {
+			// Mark the stop as user-requested before cancelling so the run
+			// reports StopUserRequested rather than ambient StopContextCancel.
+			a.agent.RequestStop()
 			cancel()
 			return nil, true
 		}
@@ -894,6 +932,30 @@ func hasShiftEnter(km tea.KeyPressMsg) bool {
 	return strings.Contains(strings.ToLower(km.String()), "shift")
 }
 
+// formatReloadResult renders a /reload-skills outcome for the chat log. It
+// distinguishes a real, prefix-moving reload (one deliberate cache miss next
+// turn) from a no-op or a disk-only change that left the cached prefix intact.
+func formatReloadResult(res agent.ReloadResult) string {
+	var added, removed, changed int
+	for _, c := range res.Changes {
+		switch c.Kind {
+		case "added":
+			added++
+		case "removed":
+			removed++
+		case "body_changed":
+			changed++
+		}
+	}
+	if !res.FingerprintMoved {
+		if added+removed+changed == 0 {
+			return "skills reloaded — no changes (prefix unchanged, no cache miss)"
+		}
+		return fmt.Sprintf("skills reloaded: +%d -%d ~%d (prefix unchanged, no cache miss)", added, removed, changed)
+	}
+	return fmt.Sprintf("skills reloaded: +%d added, -%d removed, ~%d changed — new prefix epoch minted (one cache miss expected next turn)", added, removed, changed)
+}
+
 // handleSlash dispatches /commands. Unknown slash commands are echoed
 // to the chat for visibility.
 func (a *App) handleSlash(line string) tea.Cmd {
@@ -947,6 +1009,27 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			}
 		}
 		a.applyUndo(n)
+	case "/reload-skills", "/reload":
+		// Re-scan skills mid-session. The agent is not concurrency-safe, and
+		// ReloadSkills mutates a.System / the shared store / the epoch state. The
+		// shared skill store is also read by skill_read inside a still-live async
+		// subagent, which outlives the main loop — so refuse while EITHER the main
+		// loop (a.running) or any background job is in flight, not just the former.
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running || a.agent.HasActiveBackgroundWork() {
+			a.scrollback.AppendInfo("/reload-skills unavailable while the agent or a background job is running — wait until it's idle, then retry")
+			a.refreshView()
+			return nil
+		}
+		home, _ := os.UserHomeDir()
+		if res, err := a.agent.ReloadSkills(a.cwd, home); err != nil {
+			a.scrollback.AppendError("reload-skills: " + err.Error())
+		} else {
+			a.scrollback.AppendInfo(formatReloadResult(res))
+		}
+		a.refreshView()
 	case "/compact":
 		// Force a compaction now, regardless of the auto threshold.
 		// Runs off the UI goroutine so a slow ReplaceWithCompaction
@@ -1062,6 +1145,7 @@ func helpText() string {
 		"  /export    open full scrollback in $PAGER for native mouse copy",
 		"  /undo      revert the last edit step",
 		"  /compact   force-compact the running message list",
+		"  /reload-skills  re-scan skills mid-session (mints a new cache epoch)",
 	}, "\n")
 }
 
@@ -1241,13 +1325,41 @@ func (a *App) applyUndo(n int) {
 		a.refreshView()
 		return
 	}
+	// The transcript reconcile below mutates a.Messages, which the agent
+	// goroutine reads while running — refuse mid-turn (T3.5). Read the flag
+	// under the lock, matching the ctrl+c handler.
+	a.runMu.Lock()
+	running := a.running
+	a.runMu.Unlock()
+	if running {
+		a.scrollback.AppendInfo("/undo unavailable while the agent is running")
+		a.refreshView()
+		return
+	}
 	restored, err := a.session.undo(n)
 	if err != nil {
 		a.scrollback.AppendError("/undo: " + err.Error())
 		a.refreshView()
 		return
 	}
-	a.scrollback.AppendInfo(fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n))
+	msg := fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n)
+	// Reconcile the transcript so the model's view matches the reverted files
+	// (T3.5). The files are already reverted; surface a reconcile failure but
+	// do not try to roll them back.
+	if a.agent != nil {
+		switch removed, rerr := a.agent.ReconcileUndo(context.Background(), n); {
+		case rerr != nil:
+			msg += "; transcript NOT reconciled: " + rerr.Error()
+		case removed > 0:
+			msg += fmt.Sprintf("; rewound %d message(s)", removed)
+		case restored > 0:
+			// Files reverted but no step history to rewind (e.g. a resumed
+			// session, whose in-memory step records start empty). Warn so the
+			// file/model divergence is not silent.
+			msg += "; transcript NOT reconciled (no step history this session — resumed?); the model's view may now disagree with the reverted files"
+		}
+	}
+	a.scrollback.AppendInfo(msg)
 	a.refreshView()
 }
 

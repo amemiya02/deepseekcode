@@ -440,8 +440,15 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 }
 
 // ReplaceWithCompaction atomically collapses messages in [fromIdx,
-// toIdx) into a single synthetic system message containing the
+// toIdx) into a single synthetic assistant message containing the
 // summary, then renumbers later messages so idx stays contiguous.
+// The role is assistant (not system) so a session compacted under
+// T4.3+ replays the same body-message shape the live agent uses — one
+// system message at the head, the summary in the body. (Sessions
+// compacted under older code persisted a role='system' summary row;
+// LoadMessages replays that verbatim, so a legacy summary still
+// re-enters as a mid-body system message. That is tolerated by
+// DeepSeek; it is simply the pre-T4.3 shape, not the new guarantee.)
 //
 // Snapshots in this project are filesystem-backed (no SQL table to
 // UPDATE), so step_idx shifting for snapshots lives in
@@ -450,6 +457,36 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 // Returns the idx of the inserted summary row (== fromIdx). A
 // no-op call (fromIdx == toIdx) returns fromIdx with nil error.
 // toIdx larger than the current message count is clamped to count+1.
+// CountMessages returns the number of persisted messages for the session.
+// /undo reconcile (T3.5) uses it to verify the in-memory transcript is
+// index-aligned with disk before truncating disk.
+func (s *Store) CountMessages(ctx context.Context, sessionID string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
+	return n, nil
+}
+
+// TruncateMessages deletes all messages with idx >= keepCount for the session.
+// The deleted tail is contiguous from keepCount, so no renumbering is needed.
+// Used by /undo reconcile (T3.5) to make disk match the rewound in-memory
+// transcript. keepCount <= 0 clears all messages; returns the rows removed.
+func (s *Store) TruncateMessages(ctx context.Context, sessionID string, keepCount int) (int, error) {
+	if keepCount < 0 {
+		keepCount = 0
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM messages WHERE session_id = ? AND idx >= ?`,
+		sessionID, keepCount)
+	if err != nil {
+		return 0, fmt.Errorf("truncate messages: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *Store) ReplaceWithCompaction(ctx context.Context, sessionID string, fromIdx, toIdx int, summary string) (int, error) {
 	if fromIdx < 0 || toIdx < fromIdx {
 		return 0, fmt.Errorf("ReplaceWithCompaction: invalid range [%d,%d)", fromIdx, toIdx)
@@ -506,7 +543,7 @@ func (s *Store) ReplaceWithCompaction(ctx context.Context, sessionID string, fro
 		 (session_id, idx, role, content, reasoning_content, tool_calls,
 		  tool_results, tool_call_id, model,
 		  cache_hit_tokens, miss_tokens, output_tokens, cost_yuan, ts, blocks)
-		 VALUES (?, ?, 'system', '', '', '', '', '', '', 0, 0, 0, 0, ?, ?)`,
+		 VALUES (?, ?, 'assistant', '', '', '', '', '', '', 0, 0, 0, 0, ?, ?)`,
 		sessionID, fromIdx, ts.Unix(), string(blocksJSON)); err != nil {
 		return 0, fmt.Errorf("insert summary: %w", err)
 	}

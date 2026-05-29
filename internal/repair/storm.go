@@ -16,9 +16,9 @@ const (
 
 // StormBreaker suppresses repeated identical read-only tool calls.
 type StormBreaker struct {
-	window    int                // number of recent calls to track
-	threshold int                // occurrences needed to suppress
-	history   []callIdentity     // recent call identities
+	window    int            // number of recent calls to track
+	threshold int            // occurrences needed to suppress
+	history   []callIdentity // recent call identities
 }
 
 // callIdentity represents a unique call by tool name and canonical arguments.
@@ -96,6 +96,27 @@ func (s *StormBreaker) Filter(calls []llm.ToolCall, kinds map[string]ToolKind) R
 // Reset clears all history.
 func (s *StormBreaker) Reset() {
 	s.history = s.history[:0]
+}
+
+// StormSnapshot is an opaque, restorable copy of a StormBreaker's history.
+// Take one with Snapshot, rewind to it with Restore. It lets a caller run a
+// throwaway batch (e.g. a model turn that is later discarded) through Filter
+// and then unwind the suppression-history mutation, so only committed turns
+// contribute to future suppression decisions.
+type StormSnapshot struct {
+	history []callIdentity
+}
+
+// Snapshot returns a restorable copy of the current suppression history.
+func (s *StormBreaker) Snapshot() StormSnapshot {
+	cp := make([]callIdentity, len(s.history))
+	copy(cp, s.history)
+	return StormSnapshot{history: cp}
+}
+
+// Restore rewinds the suppression history to a previously taken Snapshot.
+func (s *StormBreaker) Restore(snap StormSnapshot) {
+	s.history = append(s.history[:0], snap.history...)
 }
 
 // countInWindow counts occurrences of identity in recent history.

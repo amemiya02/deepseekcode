@@ -43,6 +43,25 @@ func CostKnown(model string) bool {
 	return ok
 }
 
+// CacheSavings returns the ¥ saved by the prompt cache for one Usage
+// record: the cache-hit input tokens valued at the (miss − hit) price
+// differential — i.e. what those tokens would have cost at the full
+// cache-miss rate minus what they actually cost. Returns 0 for unknown
+// models and is clamped at 0 (miss ≥ hit in every published tier, so a
+// negative differential would only arise from a malformed price table).
+func CacheSavings(model string, u Usage) float64 {
+	p, ok := Prices[model]
+	if !ok {
+		return 0
+	}
+	saved := float64(u.PromptCacheHitTokens) * (p.InputCacheMiss - p.InputCacheHit)
+	if saved < 0 {
+		return 0
+	}
+	const million = 1_000_000.0
+	return saved / million
+}
+
 // CacheHitRate returns the cache-hit fraction in [0,1] over input tokens.
 // Returns 0 when there are no input tokens.
 func CacheHitRate(u Usage) float64 {

@@ -46,11 +46,32 @@ type Chrome struct {
 	frame      int
 	ramp       []color.Color // gradient ramp, lazily initialized
 
+	// Tool-batch progress. A "batch" is the set of tool calls the model
+	// emitted in one turn (runToolCalls executes them in parallel); the
+	// caption surfaces "N ready" so a multi-tool turn shows live progress.
+	// batchClosed is set at each step boundary (EndToolBatch, driven by
+	// EventStepFinish) and consumed by the next BeginTool so a fresh batch
+	// resets even when the intervening model turn emitted no reasoning/text
+	// (a pure tool-call turn never leaves phaseTool, so phase alone can't
+	// delimit batches).
+	toolsStarted int
+	toolsReady   int
+	batchClosed  bool
+
+	// firstTokenTimeout mirrors llm.Client.FirstTokenTimeout so the
+	// cold-start caption quotes the real timeout the agent honors rather
+	// than a hardcoded range. Zero → caption suppressed.
+	firstTokenTimeout time.Duration
+
 	tickActive bool
 }
 
 // NewChrome returns an idle Chrome with no scheduled tick.
 func NewChrome() *Chrome { return &Chrome{} }
+
+// SetFirstTokenTimeout records the agent's real first-token timeout so the
+// cold-start caption can quote it. Called once at App construction.
+func (c *Chrome) SetFirstTokenTimeout(d time.Duration) { c.firstTokenTimeout = d }
 
 // Active reports whether an activity is in progress (spinner shown).
 func (c *Chrome) Active() bool { return c.active }
@@ -87,13 +108,37 @@ func (c *Chrome) BeginWriting() {
 	c.tokens = 0
 }
 
-// BeginTool transitions to the "calling <tool>…" caption.
+// BeginTool transitions to the tool caption. It is called once per tool
+// call; a turn's parallel tool calls each call it. The first call of a
+// fresh batch (phase was not already tool) resets the batch counters and
+// the elapsed clock; subsequent calls in the same batch only bump the
+// started count so the caption can render "N ready" against the batch size.
 func (c *Chrome) BeginTool(name string) {
+	if c.phase != phaseTool || c.batchClosed {
+		c.toolsStarted = 0
+		c.toolsReady = 0
+		c.startedAt = time.Now()
+	}
+	c.batchClosed = false
 	c.active = true
 	c.phase = phaseTool
 	c.activeTool = name
-	c.startedAt = time.Now()
 	c.tokens = 0
+	c.toolsStarted++
+}
+
+// EndToolBatch marks the current tool batch closed at a step boundary
+// (called on EventStepFinish, once per step). The counters are NOT zeroed
+// here — that is deferred to the next BeginTool so the completed "N ready"
+// stays visible through the inter-step gap rather than flashing "0 ready".
+func (c *Chrome) EndToolBatch() { c.batchClosed = true }
+
+// ToolReady records that one tool call in the current batch has produced a
+// result. Clamped to the started count. No-op outside a tool batch.
+func (c *Chrome) ToolReady() {
+	if c.toolsReady < c.toolsStarted {
+		c.toolsReady++
+	}
 }
 
 // UpdateTokens refreshes the rolling token estimate shown in the caption.
@@ -105,6 +150,9 @@ func (c *Chrome) Reset() {
 	c.phase = ""
 	c.activeTool = ""
 	c.tokens = 0
+	c.toolsStarted = 0
+	c.toolsReady = 0
+	c.batchClosed = false
 }
 
 // Render returns the one-line band content. When idle and the user
@@ -123,14 +171,21 @@ func (c *Chrome) Render(t Theme, showNewBelow bool) string {
 	switch c.phase {
 	case phaseThinking:
 		caption = fmt.Sprintf("thinking… %.1fs · %d tokens", elapsed, c.tokens)
-		// Surface the FirstTokenTimeout reality the agent honors.
-		if elapsed > 5.0 && c.tokens == 0 {
-			caption += "  (reasoner cold start can take 30–45s)"
+		// Surface the real FirstTokenTimeout the agent honors, not a
+		// hardcoded range, so the caption matches the configured timeout.
+		if elapsed > 5.0 && c.tokens == 0 && c.firstTokenTimeout > 0 {
+			caption += fmt.Sprintf("  (reasoner cold start; first token within %.0fs)", c.firstTokenTimeout.Seconds())
 		}
 	case phaseWriting:
 		caption = fmt.Sprintf("writing… %.1fs · %d tokens", elapsed, c.tokens)
 	case phaseTool:
-		caption = fmt.Sprintf("calling %s… %.1fs", c.activeTool, elapsed)
+		// Multi-tool turn: show batch progress ("N ready"); single tool:
+		// name it.
+		if c.toolsStarted > 1 {
+			caption = fmt.Sprintf("running %d tools… %.1fs · %d ready", c.toolsStarted, elapsed, c.toolsReady)
+		} else {
+			caption = fmt.Sprintf("calling %s… %.1fs", c.activeTool, elapsed)
+		}
 	default:
 		caption = fmt.Sprintf("working… %.1fs", elapsed)
 	}

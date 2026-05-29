@@ -136,6 +136,16 @@ func (t *StdioTransport) Notify(ctx context.Context, method string, params any) 
 	return nil
 }
 
+// Done returns a channel that is closed when the reader goroutine exits
+// (on EOF, scanner error, or process death). This is the liveness signal
+// the Registry's watcher selects on: when the channel closes the server
+// process has stopped producing output and is considered dead. The reader
+// goroutine already closes readerDone in readLoop's defer; Done merely
+// exposes that signal without starting a new goroutine.
+func (t *StdioTransport) Done() <-chan struct{} {
+	return t.readerDone
+}
+
 // Close kills the subprocess and waits for it to exit.
 func (t *StdioTransport) Close() error {
 	t.closeOnce.Do(func() {

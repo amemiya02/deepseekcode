@@ -16,9 +16,12 @@ type statusState struct {
 	compactionCount int
 	usage           llm.Usage
 	costYuan        float64
+	savedYuan       float64
+	contextLimit    int
 	costKnown       bool
 	thinking        bool
 	hint            string
+	cacheNote       string
 	mode            appMode
 	epochID         string
 	prefixHash      string
@@ -45,18 +48,27 @@ func (s statusState) render(t Theme) string {
 		costStr = fmt.Sprintf("¥%.4f", s.costYuan)
 	}
 
+	// Single cache chip for the live line: "cache N% · saved ¥X". The cache
+	// hit/miss tokens are intentionally NOT fed into hudData below — doing so
+	// would render a second, redundant cache chip on the same line. RenderHUD
+	// retains its own cache+saved chip for callers that do pass those tokens
+	// (the HUD snapshot test and any future standalone HUD surface).
+	cacheChip := fmt.Sprintf("cache %.0f%%", hit)
+	if s.savedYuan > 0 {
+		cacheChip += fmt.Sprintf(" · saved ¥%.3f", s.savedYuan)
+	}
+
 	// Build HUD data for additional metrics (without model to avoid duplication)
 	hudData := HUDData{
-		ContextTokens:   s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
-		InputHitTokens:  s.usage.PromptCacheHitTokens,
-		InputMissTokens: s.usage.PromptCacheMissTokens,
-		OutputTokens:    s.usage.CompletionTokens,
-		EpochID:         s.epochID,
-		PrefixHash:      s.prefixHash,
-		PendingChanges:  s.pendingChanges,
-		DriftReason:     s.driftReason,
-		ActiveAgent:     s.activeAgent,
-		RunningJobs:     s.runningJobs,
+		ContextTokens:  s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
+		ContextLimit:   s.contextLimit,
+		OutputTokens:   s.usage.CompletionTokens,
+		EpochID:        s.epochID,
+		PrefixHash:     s.prefixHash,
+		PendingChanges: s.pendingChanges,
+		DriftReason:    s.driftReason,
+		ActiveAgent:    s.activeAgent,
+		RunningJobs:    s.runningJobs,
 	}
 
 	hudLine := RenderHUD(hudData, 200) // Use wide width for status line
@@ -64,13 +76,18 @@ func (s statusState) render(t Theme) string {
 	// Build the full status line preserving existing model/step/cost semantics
 	line1 := modeBadge + t.StatusModel.Render(shortModel(s.model)) +
 		dot + fmt.Sprintf("%d steps", s.steps) +
-		dot + fmt.Sprintf("cache %.0f%%", hit) +
+		dot + cacheChip +
 		dot + costStr
 	if hudLine != "" {
 		line1 += dot + hudLine
 	}
 	if s.compactionCount > 0 {
 		line1 += dot + fmt.Sprintf("compacted %d", s.compactionCount)
+	}
+	// cacheNote (prefix-cache invalidation warning) and the generic transient
+	// hint occupy separate slots so neither clobbers the other.
+	if s.cacheNote != "" {
+		line1 += t.Hint.Render("  · " + s.cacheNote)
 	}
 	if s.hint != "" {
 		line1 += t.Hint.Render("  · " + s.hint)

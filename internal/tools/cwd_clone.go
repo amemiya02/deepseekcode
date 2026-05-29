@@ -23,7 +23,9 @@ func CloneForCWD(t Tool, cwd string) Tool {
 		cp.CWD = cwd
 		return &cp
 	case *ApplyPatchTool:
-		return NewApplyPatchTool(cwd, v.maxWriteBytes)
+		cp := NewApplyPatchTool(cwd, v.maxWriteBytes)
+		cp.tracker = v.tracker // preserve the freshness guard across the clone (T3.2)
+		return cp
 	default:
 		return t
 	}

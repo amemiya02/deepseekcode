@@ -15,7 +15,7 @@ import (
 )
 
 // TestE2ERulesDenyTool validates that a deny rule:
-//  1. Emits an EventInfo with "denied by rule" reason.
+//  1. Emits a typed EventPermissionDenied{ByRule:true} (T1.3).
 //  2. Produces a tool error (ToolResultBlock.IsError=true) containing
 //     "denied by rule".
 func TestE2ERulesDenyTool(t *testing.T) {
@@ -76,17 +76,16 @@ drain:
 		}
 	}
 
-	// 1. Verify EventInfo emitted with "denied by rule".
-	infoFound := false
+	// 1. Verify a typed EventPermissionDenied (ByRule) was emitted (T1.3 —
+	//    promoted from the old stringly-typed EventInfo).
+	denyFound := false
 	for _, ev := range collected {
-		if info, ok := ev.(EventInfo); ok {
-			if strings.Contains(info.Text, "denied by rule") {
-				infoFound = true
-			}
+		if d, ok := ev.(EventPermissionDenied); ok && d.ByRule && strings.Contains(d.Reason, "matched deny rule:") {
+			denyFound = true
 		}
 	}
-	if !infoFound {
-		t.Error("expected EventInfo with 'denied by rule', none found")
+	if !denyFound {
+		t.Error("expected EventPermissionDenied{ByRule:true}, none found")
 	}
 
 	// 2. Verify ToolResultBlock with IsError and "denied by rule".

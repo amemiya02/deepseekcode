@@ -143,6 +143,25 @@ func NewJobRegistry() *JobRegistry {
 	}
 }
 
+// HasActive reports whether any job is currently in the JobRunning state.
+// /reload-skills uses it (via Agent.HasActiveBackgroundWork) to refuse a skill
+// reload while an async subagent or background_bash job is still live: those
+// goroutines outlive the parent loop and can read the shared skill store that
+// the reload mutates in place, so a.running alone does not cover them.
+func (r *JobRegistry) HasActive() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, job := range r.jobs {
+		job.mu.Lock()
+		running := job.State == JobRunning
+		job.mu.Unlock()
+		if running {
+			return true
+		}
+	}
+	return false
+}
+
 // Start creates a new job with State=JobRunning and returns it along with
 // a derived context. The caller holds the context and runs the actual work;
 // when done, call Finish to lock in the final state.

@@ -142,8 +142,11 @@ gap is the billed comparison run itself.
 
 - Agent frontmatter now parses hidden, max_steps, permission_ruleset,
   temperature, top_p, and default_agent.
-- Canonical event names defined in `internal/eventschema`. Downstream consumers
-  (CLI, dashboards) should import these constants instead of hard-coding strings.
+- Trace records share one canonical schema (`internal/traceschema.Record`),
+  aliased by the emitter, the inspector, and the benchmark harness so a field
+  rename is a compile error rather than a silent reader breakage (T6.1). The
+  former `internal/eventschema` name registry was retired (T6.2): it had zero
+  importers and constant values that matched no emitted string.
 
 **Blocked / not yet done**
 

@@ -42,6 +42,47 @@ func TestStoreNewAndLoad(t *testing.T) {
 	}
 }
 
+func TestStoreTruncateMessages(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	sess, _ := store.NewSession(ctx, "/p", "deepseek-v4-flash", true)
+	for i := 0; i < 5; i++ {
+		if _, err := store.AppendMessage(ctx, sess.ID, Message{Role: "user", Content: "m" + itoa(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Keep idx 0,1; drop idx 2,3,4.
+	removed, err := store.TruncateMessages(ctx, sess.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 3 {
+		t.Errorf("removed = %d, want 3", removed)
+	}
+	msgs, err := store.LoadMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].Content != "m0" || msgs[1].Content != "m1" {
+		t.Fatalf("after truncate got %d msgs (%v); want [m0 m1]", len(msgs), msgs)
+	}
+
+	// Truncate to 0 clears all remaining.
+	if _, err := store.TruncateMessages(ctx, sess.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.LoadMessages(ctx, sess.ID); len(got) != 0 {
+		t.Errorf("after truncate-to-0 got %d msgs, want 0", len(got))
+	}
+}
+
 func TestStoreAppendAndLoadMessages(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(filepath.Join(dir, "test.db"))
@@ -379,8 +420,8 @@ func TestReplaceWithCompactionAtomic(t *testing.T) {
 			t.Errorf("msg[%d].Idx = %d, want %d", i, m.Idx, wantIdxs[i])
 		}
 	}
-	if msgs[2].Role != "system" {
-		t.Errorf("msgs[2].Role = %q, want system (summary)", msgs[2].Role)
+	if msgs[2].Role != "assistant" {
+		t.Errorf("msgs[2].Role = %q, want assistant (T4.3: summary is an assistant body message)", msgs[2].Role)
 	}
 	if tb, ok := msgs[2].Blocks[0].(llm.TextBlock); !ok || tb.Text != "SUMMARY" {
 		t.Errorf("summary blocks[0] = %#v", msgs[2].Blocks[0])

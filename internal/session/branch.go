@@ -39,7 +39,10 @@ func (s *Store) Replay(ctx context.Context, sessionID string) ([]Message, error)
 		}
 		combined = append(combined, msgs...)
 	}
-	return combined, nil
+	// A session interrupted between persisting an assistant tool_call turn and
+	// its results would replay with a dangling tool_call that DeepSeek rejects;
+	// repair pairing before handing the history back. No-op when already paired.
+	return repairDanglingToolCalls(combined), nil
 }
 
 // link is one node in a parent → ... → leaf walk.

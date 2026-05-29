@@ -324,14 +324,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		mcpNotices = append(mcpNotices, fmt.Sprintf("lsp: connected to %s", name))
 	}
 
-	mode := permissions.ModeDefault
-	switch {
-	case mf.yolo:
-		mode = permissions.ModeYolo
-	case mf.readOnly:
-		mode = permissions.ModeReadOnly
-	case mf.askAll:
-		mode = permissions.ModeAskAll
+	mode, merr := resolveLaunchMode(mf, cwd, sandboxEffectiveFor(sb))
+	if merr != nil {
+		return merr
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
@@ -709,14 +704,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	lspReg.Start(context.Background(), cwd)
 	reg.Register(tools.NewLSPTool(lspReg))
 
-	mode := permissions.ModeDefault
-	switch {
-	case mf.yolo:
-		mode = permissions.ModeYolo
-	case mf.readOnly:
-		mode = permissions.ModeReadOnly
-	case mf.askAll:
-		mode = permissions.ModeAskAll
+	mode, merr := resolveLaunchMode(mf, cwd, sandboxEffectiveFor(sb))
+	if merr != nil {
+		return merr
 	}
 	pol := permissions.New(mode, cwd,
 		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
@@ -908,6 +898,23 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 				hit*100, costStr, time.Since(startStep).Round(time.Millisecond))
 		case agent.EventInfo:
 			fmt.Fprintf(os.Stderr, "\n\033[2m[info] %s\033[0m\n", e.Text)
+		case agent.EventBudget:
+			// T1.3: budget-gate decisions are typed; render them as info lines
+			// so CLI one-shot mode keeps surfacing them.
+			switch e.Kind {
+			case agent.BudgetKindBlocked:
+				fmt.Fprintf(os.Stderr, "\n\033[2m[budget] blocked: projected session cost reached hard threshold\033[0m\n")
+			case agent.BudgetKindUnpriced:
+				fmt.Fprintf(os.Stderr, "\n\033[2m[budget] model %s has no known pricing; turns cannot be cost-gated\033[0m\n", e.Model)
+			default:
+				fmt.Fprintf(os.Stderr, "\n\033[2m[budget] warning: projected session cost reached warning threshold\033[0m\n")
+			}
+		case agent.EventPermissionDenied:
+			which := "permissions policy"
+			if e.ByRule {
+				which = "rule"
+			}
+			fmt.Fprintf(os.Stderr, "\n\033[2m[denied by %s] %s\033[0m\n", which, e.Reason)
 		case agent.EventPermissionAsk:
 			fmt.Fprintf(os.Stderr,
 				"\n\033[33m? approve tool call:\033[0m %s\n  args: %s\n  [o]nce [s]ession [a]lways [d]eny > ",

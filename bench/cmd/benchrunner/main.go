@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amemiya02/deepseekcode/internal/traceschema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -226,18 +227,12 @@ type usageTurn struct {
 	turn, hit, miss int
 }
 
-type traceLine struct {
-	Type                   string `json:"type"`
-	EpochID                string `json:"epoch_id"`
-	StaticPrefixHash       string `json:"static_prefix_hash"`
-	Turn                   *int   `json:"turn"`
-	CacheHitTokens         *int   `json:"cache_hit_tokens"`
-	CacheMissTokens        *int   `json:"cache_miss_tokens"`
-	BeforeStaticPrefixHash string `json:"before_static_prefix_hash"`
-	AfterStaticPrefixHash  string `json:"after_static_prefix_hash"`
-	AgentRole              string `json:"agent_role"`
-	ParentEpochID          string `json:"parent_epoch_id"`
-}
+// traceLine aliases the canonical agent-trace record (traceschema.Record),
+// shared with the emitter (internal/agent) and the inspector
+// (internal/traceinspect), so a field rename breaks this parser at compile
+// time instead of silently mis-reading the trace (T6.1). The harness's own
+// run-summary writer is the separate TraceRecord type above.
+type traceLine = traceschema.Record
 
 // parseAgentTrace reads a JSONL trace emitted by `dsc -p --trace-jsonl`.
 // Returns (nil, err) when the file cannot be read; an empty-but-Found trace

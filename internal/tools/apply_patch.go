@@ -11,6 +11,10 @@ import (
 type ApplyPatchTool struct {
 	cwd           string
 	maxWriteBytes int64
+	// tracker, when set, is re-stamped after each write so a subsequent
+	// edit_file sees the patched file as fresh (T3.2). apply_patch does NOT
+	// gate on it — its hunk context lines already detect drift. nil disables.
+	tracker *FileTracker
 }
 
 func NewApplyPatchTool(cwd string, maxWriteBytes int64) *ApplyPatchTool {
@@ -119,6 +123,7 @@ func (t *ApplyPatchTool) applyHunk(h Hunk, absPath, absMove string) (string, err
 		if err := atomicWriteFile(absPath, []byte(h.Contents)); err != nil {
 			return "", fmt.Errorf("write %s: %v", absPath, err)
 		}
+		t.tracker.RecordWrite(absPath)
 		return absPath, nil
 	case "delete":
 		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
@@ -126,6 +131,12 @@ func (t *ApplyPatchTool) applyHunk(h Hunk, absPath, absMove string) (string, err
 		}
 		return absPath, nil
 	case "update":
+		// No read-before-write guard here (unlike edit_file/write_file, T3.2):
+		// an update hunk carries its own context lines, which DeriveNewContents
+		// fuzzy-matches against the current file — so a drifted file is rejected
+		// by a context mismatch already. apply_patch is self-validating; the
+		// explicit guard is reserved for the tools that carry little or no
+		// context (write_file overwrites blind; edit_file matches one snippet).
 		orig, err := os.ReadFile(absPath)
 		if err != nil {
 			return "", fmt.Errorf("update %q: %v", absPath, err)
@@ -151,6 +162,7 @@ func (t *ApplyPatchTool) applyHunk(h Hunk, absPath, absMove string) (string, err
 		if absMove != "" {
 			_ = os.Remove(absPath)
 		}
+		t.tracker.RecordWrite(tgt)
 		return tgt, nil
 	}
 	return "", nil

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
@@ -68,6 +69,12 @@ type Agent struct {
 	childTraceMu      sync.Mutex
 	childTraceHandles []*TraceSinkHandle
 
+	// stopRequested records an explicit user stop (e.g. the TUI's ctrl+c)
+	// so Run can report StopUserRequested instead of an ambient
+	// StopContextCancel. Reset at the start of each Run. Set from the UI
+	// goroutine, read from the agent goroutine, hence atomic.
+	stopRequested atomic.Bool
+
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
 	// (the -p one-shot mode runs this way).
@@ -77,6 +84,23 @@ type Agent struct {
 	// Changed mid-session via /models.
 	Model    string
 	Thinking bool
+
+	// Temperature and TopP, when non-nil, are sent on every model request as
+	// the OpenAI-shaped sampling controls. nil (the default) omits the field
+	// entirely so the main-loop wire bytes — and thus the cache fingerprint —
+	// are unchanged. Sub-agents set these from their def frontmatter (T7.1).
+	Temperature *float64
+	TopP        *float64
+
+	// EscalationModel, when non-empty and different from Model, enables
+	// model-driven escalation (T2.3): a turn is re-issued once on this model
+	// when the assistant emits a <<<NEEDS_PRO>>> self-declaration or the
+	// per-turn repair-error count crosses escalationRepairThreshold. Empty (the
+	// default) disables escalation entirely — the mechanism is a no-op and adds
+	// no wire bytes. The marker *contract* (telling the model the marker exists)
+	// is a separate, opt-in system-prompt addition (see escalationContract); the
+	// detection here works regardless and never moves the Prefix Fingerprint.
+	EscalationModel string
 
 	// AutoReasoning enables per-turn thinking selection via
 	// llm.SelectThinking. When true, runStep calls SelectThinking
@@ -187,6 +211,30 @@ type Agent struct {
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
+
+	// compactionFloor is the step index at/after which StepRecord.MessageCount
+	// boundaries are valid for /undo (T3.5). A compaction renumbers a.Messages,
+	// invalidating boundaries recorded by earlier steps, so it is raised to
+	// len(a.steps) whenever a compaction swaps the message slice; ReconcileUndo
+	// refuses to undo to a step below it. Session-scoped (NOT reset per Run).
+	compactionFloor int
+
+	// loopNudged records that the one-shot loop-break nudge has been spent in
+	// the current Run. loopFloor is the step index from which loop detection
+	// counts *after* a nudge: without it the pre-nudge repeats stay inside the
+	// detection window and re-trip the detector on the very next step, robbing
+	// the model of the single recovery turn the nudge is meant to grant. Both
+	// are per-Run, touched only on the single Run/runStep goroutine, and reset
+	// at the top of Run.
+	loopNudged bool
+	loopFloor  int
+
+	// charsPerToken is the per-session calibrated chars-per-token ratio (T4.1),
+	// learned from provider usage frames and consumed by the compaction trigger
+	// and the budget projection. 0 means uncalibrated → the cold-start char/4
+	// prior is used. Touched only on the single Run/runStep goroutine (like
+	// loopFloor), so it needs no lock.
+	charsPerToken float64
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -213,10 +261,13 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		MaxContextTokens: MaxContextTokens,
 		Jobs:             NewJobRegistry(),
 		stormBreaker:     repair.NewStormBreaker(6, 3),
-		StopWhen: []StopCondition{
-			MaxSteps(50),
-			LoopDetection(5, 3),
-		},
+	}
+
+	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
+	// after the literal rather than inside it.
+	a.StopWhen = []StopCondition{
+		MaxSteps(50),
+		a.loopDetection(5, 3),
 	}
 
 	a.bus = NewBus()
@@ -273,6 +324,15 @@ Behavioral rules:
 - When uncertain, ask the user. Don't guess at file paths or invent APIs.
 - Be concise. The user can see the diff; you don't need to narrate it.`
 
+// RequestStop marks the current run as explicitly stopped by the user, so a
+// subsequent context cancellation is reported as StopUserRequested rather than
+// the ambient StopContextCancel. Callers invoke it immediately before
+// cancelling the run's context (e.g. the TUI's ctrl+c handler). Safe to call
+// from a goroutine other than the one driving Run.
+func (a *Agent) RequestStop() {
+	a.stopRequested.Store(true)
+}
+
 // Run drives the loop until a stop condition fires or context cancels.
 // Returns the StopReason and any infrastructure error.
 //
@@ -285,6 +345,13 @@ Behavioral rules:
 // events channel for the "done" signal used to race trailing deltas
 // and leave the UI's chrome stuck on "writing…" — never do that.
 func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, err error) {
+	// Clear any stop request from a previous run so a stale ctrl+c can't
+	// mislabel this run's termination.
+	a.stopRequested.Store(false)
+	// Each Run gets its own single loop-break nudge and a fresh detection floor.
+	a.loopNudged = false
+	a.loopFloor = 0
+
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
 	}()
@@ -330,9 +397,19 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		}
 	}
 
+	// overflowRetried gates the context-overflow recovery to a single attempt
+	// per fresh overflow: a 400 "context too long" triggers one compaction and
+	// re-attempt, and is reset after any step that completes, so a later
+	// overflow in a long run gets its own recovery rather than failing hard.
+	overflowRetried := false
+
+agentLoop:
 	for {
 		select {
 		case <-ctx.Done():
+			if a.stopRequested.Load() {
+				return StopUserRequested, ctx.Err()
+			}
 			return StopContextCancel, ctx.Err()
 		default:
 		}
@@ -341,15 +418,44 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		// stepCancel is always non-nil so we can defer it unconditionally.
 		stepCtx, stepCancel := stepContext(ctx, a.StepTimeout)
 
+		// Transcript boundary this step starts from (before its model turn
+		// appends anything), recorded on the step for /undo reconcile (T3.5).
+		preStepMsgCount := len(a.Messages)
 		step, err := a.runStep(stepCtx)
 		if err != nil {
 			stepCancel()
-			if a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded) {
-				a.bus.Publish(EventInfo{Text: fmt.Sprintf("step timed out after %s", a.StepTimeout)})
-				return StopUnknown, nil
+			// Context overflow can never succeed on a blind retry — the only
+			// recovery is to shrink the conversation. Compact once (deterministically,
+			// so the summarizer call cannot itself overflow) and re-attempt the
+			// step. This is distinct from the transient mid-stream re-issue inside
+			// runStep: that re-sends the same request, this changes it.
+			if llm.IsContextOverflow(err) && !overflowRetried {
+				overflowRetried = true
+				a.bus.Publish(EventInfo{Text: "context overflow; compacting and re-attempting turn"})
+				a.compactForOverflow(ctx)
+				continue
 			}
-			return StopUnknown, err
+			switch {
+			case errors.Is(err, context.Canceled):
+				// Parent context cancelled mid-step. Distinguish an explicit
+				// user stop from an ambient cancellation for honest analytics.
+				if a.stopRequested.Load() {
+					return StopUserRequested, err
+				}
+				return StopContextCancel, err
+			case a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded):
+				// The per-step deadline fired. This is a non-success exit, not
+				// a clean finish: surface it as StopStepTimeout with a non-nil
+				// error so callers and the TUI never render it as a done row
+				// (the old path returned StopUnknown,nil — a silent success).
+				return StopStepTimeout, fmt.Errorf("step timed out after %s", a.StepTimeout)
+			default:
+				return StopUnknown, err
+			}
 		}
+		// The step completed; allow a future overflow its own recovery attempt.
+		overflowRetried = false
+		step.MessageCount = preStepMsgCount
 		a.steps = append(a.steps, step)
 
 		// finish-reason override: even if the model said finish_reason=stop,
@@ -360,26 +466,44 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		// check so loop-detection can fire on tool-emitting steps too.
 		for _, sc := range a.StopWhen {
 			if stop, reason := sc(a.steps); stop {
+				// First loop detection in this Run: give the model exactly one
+				// corrective nudge to change approach before hard-stopping. The
+				// offending assistant tool_calls are already in a.Messages but
+				// have no results yet (this check runs before runToolCalls), so
+				// the nudge synthesizes a result per dangling call (keeping the
+				// tool_call/tool_result pairing valid) and then appends a single
+				// user message. loopFloor is raised so the repeats that tripped
+				// the detector are forgiven for the recovery turn. The nudge text
+				// rides the message tail only — it never enters the system prompt
+				// or any tool schema, so the cache-stable prefix is untouched.
+				if reason == StopLoopDetected && !a.loopNudged {
+					a.loopNudged = true
+					a.loopFloor = len(a.steps)
+					a.injectLoopBreakNudge(step.ToolCalls)
+					a.bus.Publish(EventInfo{Text: "loop detected; nudging the model to change approach (one chance before hard stop)"})
+					a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
+					stepCancel()
+					continue agentLoop
+				}
 				stepCancel()
-				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage})
+				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage, Model: step.Model})
 				return reason, nil
 			}
 		}
 
 		if !hasTools {
 			stepCancel()
-			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage})
+			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage, Model: step.Model})
 			return StopModelDone, nil
 		}
 
 		// Tool execution shares the per-step deadline so a stuck tool
-		// can't run forever.
-		toolErr := a.runToolCalls(stepCtx, step.ToolCalls)
+		// can't run forever. runToolCalls never fails the loop: a tool
+		// error (infra or model-facing) is serialized into a tool-result
+		// block for the model to react to, so there is no abort branch here.
+		a.runToolCalls(stepCtx, step.ToolCalls)
 		stepCancel()
-		if toolErr != nil {
-			return StopUnknown, toolErr
-		}
-		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage})
+		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
 		// Compaction check runs between turns (the next iteration's
 		// runStep will rebuild the wire request). A failure here is
@@ -400,6 +524,55 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 	a.maybeCompact(ctx)
 }
 
+// compactForOverflow runs a forced compaction for context-overflow recovery.
+// It pins the deterministic path for the duration of the call: a semantic
+// (LLM) summary would itself send much of the already-too-large conversation
+// and could overflow again, so overflow recovery must never depend on a model
+// call. The original semantic setting is restored on return.
+func (a *Agent) compactForOverflow(ctx context.Context) {
+	savedSemantic := a.DisableSemanticCompaction
+	a.DisableSemanticCompaction = true
+	defer func() { a.DisableSemanticCompaction = savedSemantic }()
+	a.ForceCompact(ctx)
+}
+
+// emaAlpha weights the latest observed ratio when updating the running
+// chars-per-token EMA. 0.3 lets the estimate track a shift between CJK-heavy
+// and code-heavy phases of a session without a single huge paste dominating it.
+const emaAlpha = 0.3
+
+// calibrateCharsPerToken folds one turn's authoritative usage.PromptTokens into
+// the per-session chars-per-token ratio (T4.1), correlating it against the
+// character count of the exact request that produced it. A non-positive
+// PromptTokens (no usage frame — a partial/failed turn) or a zero char count
+// leaves the prior ratio intact, so a corrupt frame never poisons the estimate.
+// The observed ratio is clamped to a sane band before being folded in via an
+// EMA; the first frame seeds the EMA directly, and until then char/4
+// (charsPerToken==0) remains the cold-start prior.
+func (a *Agent) calibrateCharsPerToken(promptMessages []llm.Message, usage llm.Usage) {
+	if usage.PromptTokens <= 0 {
+		return
+	}
+	chars, _ := estimateChars(promptMessages)
+	if chars <= 0 {
+		return
+	}
+	observed := float64(chars) / float64(usage.PromptTokens)
+	// Clamp to reject corrupt frames. DeepSeek V4 sits ~1.0-1.7 on pure CJK,
+	// ~3-3.5 on code/JSON, ~4 on ASCII prose; whitespace-heavy pastes can run
+	// higher. [1.0, 12.0] admits every legitimate mix and rejects garbage.
+	if observed < 1.0 {
+		observed = 1.0
+	} else if observed > 12.0 {
+		observed = 12.0
+	}
+	if a.charsPerToken <= 0 {
+		a.charsPerToken = observed // seed the EMA with the first usable frame
+		return
+	}
+	a.charsPerToken = emaAlpha*observed + (1-emaAlpha)*a.charsPerToken
+}
+
 // maybeCompact runs the compaction pipeline and, if it produced a
 // summary, swaps the in-memory message list and persists the
 // collapse. Errors surface via EventInfo so the user sees them
@@ -412,7 +585,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 
 	if !a.DisableSemanticCompaction {
 		// Check context pressure for semantic compaction thresholds.
-		pressure := ContextPressure(a.Messages, maxCtx)
+		pressure := ContextPressure(a.Messages, maxCtx, a.charsPerToken)
 		action := ShouldSemanticCompact(pressure, a.SemanticCfg)
 
 		if action == "warn" {
@@ -443,6 +616,11 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
+				// Folded read_file results are gone from the live transcript, so
+				// the model no longer holds those files' contents — force a
+				// re-read before any edit (T3.2). nil-safe on both calls.
+				a.Tools.FileTracker().Clear()
 				a.bus.Publish(EventCompaction{
 					FromIdx:      res.FromIdx,
 					ToIdx:        res.ToIdx,
@@ -468,8 +646,15 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 
-	// Deterministic fallback path.
-	res := CompactSession(a.Messages, a.CompactionCfg)
+	// Deterministic fallback path. When semantic compaction is live, reconcile
+	// the absolute trigger with the ratio-of-max trigger so the two cannot
+	// disagree on the firing point (T4.4); when it is disabled, the absolute
+	// trigger stands alone (no ratio trigger to reconcile against).
+	detCfg := a.CompactionCfg
+	if !a.DisableSemanticCompaction {
+		detCfg.AutoCompactInputTokens = reconcileCompactThreshold(detCfg.AutoCompactInputTokens, a.SemanticCfg.CompactThreshold, maxCtx)
+	}
+	res := CompactSession(a.Messages, detCfg, a.charsPerToken)
 	if res.Summary == "" {
 		return
 	}
@@ -480,6 +665,9 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
+	// See the semantic path above: invalidate read stamps on fold (T3.2).
+	a.Tools.FileTracker().Clear()
 	a.bus.Publish(EventCompaction{
 		FromIdx:      res.FromIdx,
 		ToIdx:        res.ToIdx,
@@ -645,10 +833,12 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	}
 
 	req := llm.Request{
-		Model:    a.Model,
-		Messages: a.fullMessages(),
-		Tools:    a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
-		Thinking: llm.ThinkingEnabled(thinking),
+		Model:       a.Model,
+		Messages:    a.fullMessages(),
+		Tools:       a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
+		Thinking:    llm.ThinkingEnabled(thinking),
+		Temperature: a.Temperature,
+		TopP:        a.TopP,
 	}
 
 	staticSys := a.staticSystem()
@@ -713,71 +903,97 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Session budget gate: check before model streaming starts. The projection is
-	// conservative: input is priced as cache miss because authoritative cache usage
-	// only arrives after the provider returns a usage record.
-	projectedCNY := ProjectedTurnCostCNY(a.Model, req)
+	// Session budget gate: check before model streaming starts. The projection
+	// discounts input by the rolling session cache-hit rate (T4.2); at cold
+	// start that rate is 0, so the first turn is priced all-miss like before.
+	// A model with no pricing table can't be cost-gated — surface that once
+	// rather than letting it slip the gate silently.
+	if !llm.CostKnown(a.Model) && !a.BudgetState.UnknownModelWarned {
+		a.BudgetState.UnknownModelWarned = true
+		a.bus.Publish(EventBudget{Kind: BudgetKindUnpriced, Model: a.Model, SpentCNY: a.BudgetState.SpentCNY})
+	}
+	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken, a.BudgetState.SessionCacheHitRate())
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true
-		a.bus.Publish(EventInfo{Text: "budget warning: projected session cost reached warning threshold"})
+		a.bus.Publish(EventBudget{Kind: BudgetKindWarning, ProjectedCNY: projectedCNY, SpentCNY: a.BudgetState.SpentCNY, Model: a.Model})
 	}
 	if !allow {
-		a.bus.Publish(EventInfo{Text: "budget blocked: projected session cost reached hard threshold"})
+		a.bus.Publish(EventBudget{Kind: BudgetKindBlocked, ProjectedCNY: projectedCNY, SpentCNY: a.BudgetState.SpentCNY, Model: a.Model})
 		return StepRecord{FinishReason: "budget_blocked"}, nil
 	}
 
-	events, err := a.Client.Stream(ctx, req)
+	// Stream the model turn (with the bounded mid-stream re-issue, T1.4).
+	sr, err := a.streamWithReissue(ctx, req)
 	if err != nil {
 		return StepRecord{}, err
 	}
 
-	var (
-		text          string
-		reasoning     string
-		inReasoning   bool
-		assembledCall []llm.ToolCall
-		blocks        []llm.ContentBlock
-		finish        string
-		usage         llm.Usage
-	)
-
-	for ev := range events {
-		switch ev.Type {
-		case llm.EventTextDelta:
-			text += ev.Text
-			if inReasoning {
-				a.bus.Publish(EventReasoningEnd{})
-				inReasoning = false
-			}
-			a.bus.Publish(EventTextDelta{Text: ev.Text})
-		case llm.EventReasoningDelta:
-			if !inReasoning {
-				a.bus.Publish(EventReasoningStart{})
-				inReasoning = true
-			}
-			reasoning += ev.Text
-			a.bus.Publish(EventReasoningDelta{Text: ev.Text})
-		case llm.EventToolUseDelta:
-			// tool-call deltas are aggregated by the client; we don't need
-			// per-delta tracking here. The EventFinish carries the
-			// assembled calls.
-		case llm.EventFinish:
-			if inReasoning {
-				a.bus.Publish(EventReasoningEnd{})
-				inReasoning = false
-			}
-			finish = ev.FinishReason
-			usage = ev.Usage
-			assembledCall = ev.ToolCalls
-			blocks = ev.Blocks
-		case llm.EventError:
-			return StepRecord{}, fmt.Errorf("stream error: %w", ev.Err)
-		}
+	// Snapshot storm-breaker history before the repair so an escalated-away
+	// (discarded) flash turn cannot pollute the suppression state the committed
+	// turn is judged against. Only needed when escalation is possible.
+	escalating := a.escalationEnabled()
+	var stormSnap repair.StormSnapshot
+	if escalating {
+		stormSnap = a.stormBreaker.Snapshot()
 	}
 
 	// Repair pipeline: scavenge, repair args, storm-breaker filter.
-	assembledCall = a.repairToolCalls(ctx, reasoning, text, assembledCall, &blocks)
+	assembledCall, repairErrors := a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+
+	// respModel is the model that actually produced the turn being committed.
+	// Escalation may swap it to the stronger model below; it then drives
+	// persistence, cost, and trace attribution so none is mis-recorded.
+	respModel := a.Model
+
+	// Model-driven escalation (T2.3): re-issue the SAME turn once on the
+	// stronger model when the assistant self-declares out of depth
+	// (<<<NEEDS_PRO>>>) or the per-turn repair-error count crosses the
+	// threshold. The flash turn is discarded — only the escalated turn is
+	// appended / persisted / committed to suppression history — so escalation
+	// never duplicates a persisted turn. It composes with the mid-stream
+	// re-issue (the escalated turn gets the same stall-resilience) and runs at
+	// most once per step. Changing only req.Model keeps the system+tools prefix
+	// bytes identical, so the Prefix Fingerprint does not move for the re-issue.
+	if escalating {
+		if trigger, reason := a.escalationTrigger(sr.text, repairErrors); trigger != "" {
+			proReq := req
+			proReq.Model = a.EscalationModel
+
+			// Re-gate the budget: the pro re-issue is genuine extra spend on top
+			// of the flash turn (which streamed and was billed). Price both the
+			// flash turn (now realized) and the pro re-issue (projected all-miss,
+			// like the main gate) against the session cap. When it would not fit,
+			// skip escalation and commit the flash turn rather than overshoot.
+			flashCost := llm.Cost(a.Model, sr.usage)
+			gateState := a.BudgetState
+			gateState.SpentCNY += flashCost
+			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken, a.BudgetState.SessionCacheHitRate()))
+			if !allow {
+				a.bus.Publish(EventInfo{Text: "escalation skipped: projected cost would exceed the session budget"})
+			} else {
+				// Charge the realized flash turn (it is about to be discarded) and
+				// rewind its storm-history pollution before the committed pro turn.
+				if flashCost > 0 {
+					a.BudgetState.SpentCNY += flashCost
+				}
+				a.stormBreaker.Restore(stormSnap)
+				a.bus.Publish(EventEscalated{
+					Trigger:   trigger,
+					FromModel: a.Model,
+					ToModel:   a.EscalationModel,
+					Reason:    reason,
+				})
+				proSR, proErr := a.streamWithReissue(ctx, proReq)
+				if proErr != nil {
+					return StepRecord{}, proErr
+				}
+				sr = proSR
+				respModel = a.EscalationModel
+				assembledCall, _ = a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+			}
+		}
+	}
 
 	// The wire flatten layer turns Blocks back into DeepSeek's
 	// {content, reasoning_content, tool_calls} shape on the next
@@ -785,16 +1001,16 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// thinking-mode 400 stays away.
 	a.Messages = append(a.Messages, llm.Message{
 		Role:   "assistant",
-		Blocks: blocks,
+		Blocks: sr.blocks,
 	})
 	if a.Persister != nil {
-		_, _ = a.Persister.AppendAssistant(context.Background(), blocks, a.Model, usage)
+		_, _ = a.Persister.AppendAssistant(context.Background(), sr.blocks, respModel, sr.usage)
 
 		if rp, ok := a.Persister.(ReceiptAppender); ok {
 			fp := llm.StaticPrefix{System: staticSys, Tools: req.Tools}.Fingerprint()
 			payload, _ := json.Marshal(map[string]any{
-				"model":                a.Model,
-				"usage":                usage,
+				"model":                respModel,
+				"usage":                sr.usage,
 				"prefix_hash":          fp.CombinedSHA256,
 				"prefix_system_hash":   fp.SystemSHA256,
 				"prefix_tools_hash":    fp.ToolsSHA256,
@@ -820,19 +1036,296 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		}
 	}
 
-	// Accumulate observed model cost into session budget state.
-	if cost := llm.Cost(a.Model, usage); cost > 0 {
+	// Accumulate observed model cost into session budget state. respModel
+	// reflects an escalation so the stronger model's pricing is charged.
+	if cost := llm.Cost(respModel, sr.usage); cost > 0 {
 		a.BudgetState.SpentCNY += cost
 	}
 
+	// Fold this committed turn's realized cache hit/miss into the rolling
+	// session rate so the next turn's projection discounts by actual cache
+	// performance (T4.2). The discarded flash turn of an escalation is not
+	// folded — only what was committed, matching how cost is charged.
+	a.BudgetState.FoldCacheUsage(sr.usage.PromptCacheHitTokens, sr.usage.PromptCacheMissTokens)
+
+	// Calibrate the chars-per-token ratio from this turn's authoritative
+	// prompt-token count (T4.1). req.Messages is the exact model-visible payload
+	// (including the frozen system prompt when an epoch is frozen), so its char
+	// count correlates with usage.PromptTokens. A zero/absent usage frame leaves
+	// the prior ratio untouched.
+	a.calibrateCharsPerToken(req.Messages, sr.usage)
+
 	return StepRecord{
-		FinishReason:      finish,
-		Usage:             usage,
+		FinishReason:      sr.finish,
+		Usage:             sr.usage,
 		ToolCalls:         assembledCall,
 		EpochID:           epoch.EpochID,
 		StaticPrefixHash:  epoch.StaticPrefixHash,
 		ExpectedCacheMiss: expectedCacheMiss,
+		Model:             respModel,
 	}, nil
+}
+
+// partialBlocks assembles the content blocks captured before a stream broke
+// mid-turn: the reasoning channel (if any) followed by the visible text (if
+// any), in DeepSeek's logical emission order. Tool calls are deliberately
+// excluded — a mid-stream failure means the client never assembled them, and
+// emitting a half-formed ToolUseBlock would risk a dangling tool_call on the
+// next request. Returns nil when nothing was streamed.
+func partialBlocks(reasoning, text string) []llm.ContentBlock {
+	var blocks []llm.ContentBlock
+	if reasoning != "" {
+		blocks = append(blocks, llm.ThinkingBlock{Text: reasoning})
+	}
+	if text != "" {
+		blocks = append(blocks, llm.TextBlock{Text: text})
+	}
+	return blocks
+}
+
+// streamWithReissue streams one model turn and, on a transient mid-stream stall
+// (first-token / chunk-stall timeout), re-issues the identical request once
+// before giving up (T1.4). The request is sent verbatim, so a re-issue is
+// cache-cheap. A parse error or a context cancellation / step deadline is NOT
+// re-issued and propagates. On give-up it salvages and persists the partial
+// assistant turn (T1.1) — keyed to req.Model so an escalated re-issue's partial
+// is attributed correctly — then returns the error. On success it returns the
+// assembled streamResult with a nil error; the caller does the repair, append,
+// and persistence so only the FINAL (possibly escalated) turn is committed.
+func (a *Agent) streamWithReissue(ctx context.Context, req llm.Request) (streamResult, error) {
+	const maxStreamReissues = 1
+	for attempt := 0; ; attempt++ {
+		events, err := a.Client.Stream(ctx, req)
+		if err != nil {
+			// Connect-phase failure (the client already retried transient
+			// 429/5xx). A context-overflow 400 is handled by Run, which
+			// compacts and re-attempts; everything else propagates as-is.
+			return streamResult{}, err
+		}
+		sr := a.consumeStream(events)
+		if sr.err == nil {
+			return sr, nil // clean turn
+		}
+		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
+			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
+			continue
+		}
+		// Give up. Persist the partial assistant turn (reasoning + visible text
+		// accumulated before the final break). EventFinish never fired, so no
+		// tool calls were assembled — the partial carries only thinking/text and
+		// cannot leave a dangling tool_call; SanitizeForDeepSeek still guards the
+		// next request. Nothing is appended when no content arrived (e.g. a
+		// first-token timeout on attempt one).
+		if partial := partialBlocks(sr.reasoning, sr.text); len(partial) > 0 {
+			a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: partial})
+			if a.Persister != nil {
+				_, _ = a.Persister.AppendAssistant(context.Background(), partial, req.Model, sr.usage)
+			}
+		}
+		return streamResult{}, fmt.Errorf("stream error: %w", sr.err)
+	}
+}
+
+// streamResult holds everything consumeStream accumulates from one model
+// stream attempt: the visible text, the reasoning channel, the assembled
+// content blocks and tool calls, the finish reason, and the usage frame. A
+// non-nil err means the stream broke before EventFinish (timeout, parse error,
+// or context cancellation); the caller decides whether to re-issue, salvage,
+// or proceed.
+type streamResult struct {
+	text      string
+	reasoning string
+	blocks    []llm.ContentBlock
+	toolCalls []llm.ToolCall
+	finish    string
+	usage     llm.Usage
+	err       error
+}
+
+// consumeStream drains one model stream, republishing reasoning/text deltas on
+// the bus and accumulating the assistant turn into a streamResult. It returns
+// when the stream closes (EventFinish) or breaks (EventError). The client
+// closes the channel right after EventError, so the range exits on the next
+// receive; the error is captured rather than returned early so the caller can
+// salvage the partial turn. A reasoning block left open by a mid-stream break
+// is closed before returning so the UI never stalls on an unterminated fold.
+func (a *Agent) consumeStream(events <-chan llm.Event) streamResult {
+	var (
+		sr          streamResult
+		inReasoning bool
+	)
+	for ev := range events {
+		switch ev.Type {
+		case llm.EventTextDelta:
+			sr.text += ev.Text
+			if inReasoning {
+				a.bus.Publish(EventReasoningEnd{})
+				inReasoning = false
+			}
+			a.bus.Publish(EventTextDelta{Text: ev.Text})
+		case llm.EventReasoningDelta:
+			if !inReasoning {
+				a.bus.Publish(EventReasoningStart{})
+				inReasoning = true
+			}
+			sr.reasoning += ev.Text
+			a.bus.Publish(EventReasoningDelta{Text: ev.Text})
+		case llm.EventToolUseDelta:
+			// tool-call deltas are aggregated by the client; we don't need
+			// per-delta tracking here. The EventFinish carries the assembled
+			// calls.
+		case llm.EventFinish:
+			if inReasoning {
+				a.bus.Publish(EventReasoningEnd{})
+				inReasoning = false
+			}
+			sr.finish = ev.FinishReason
+			sr.usage = ev.Usage
+			sr.toolCalls = ev.ToolCalls
+			sr.blocks = ev.Blocks
+		case llm.EventError:
+			sr.err = ev.Err
+		}
+	}
+	if inReasoning {
+		a.bus.Publish(EventReasoningEnd{})
+	}
+	return sr
+}
+
+// isReissuableStreamErr reports whether a mid-stream error is a transient stall
+// that re-sending the identical request may clear. Only the two stream-timeout
+// tiers qualify. A malformed-chunk parse error would likely repeat, and a
+// context cancellation or step deadline (context.Canceled /
+// context.DeadlineExceeded) must propagate — re-issuing would either ignore the
+// user's stop or busy-loop against an already-expired deadline.
+func isReissuableStreamErr(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, llm.ErrFirstTokenTimeout) || errors.Is(err, llm.ErrChunkStall)
+}
+
+// escalationRepairThreshold is the per-turn count of unrecoverable repair
+// reports (invalid args, storm-suppressed calls) that auto-escalates the turn
+// to the stronger model, even without an explicit <<<NEEDS_PRO>>> marker.
+const escalationRepairThreshold = 3
+
+// Escalation marker delimiters. The model self-declares it is out of depth by
+// opening its reply with <<<NEEDS_PRO>>> or <<<NEEDS_PRO: brief reason>>>.
+const (
+	needsProOpen  = "<<<NEEDS_PRO"
+	needsProClose = ">>>"
+)
+
+// escalationEnabled reports whether model-driven escalation is active: a target
+// model is configured and the loop is not already running on it. The
+// already-on-target guard mirrors the Duet's modelFn()=="deepseek-v4-pro"
+// self-skip, so a pro main loop never escalates to itself.
+func (a *Agent) escalationEnabled() bool {
+	return a.EscalationModel != "" && a.Model != a.EscalationModel
+}
+
+// escalationTrigger decides whether the just-completed turn should be re-issued
+// on the stronger model and why. Marker wins over the repair-count threshold so
+// an explicit self-declaration is attributed as such. Returns ("","") when no
+// escalation is warranted.
+func (a *Agent) escalationTrigger(text string, repairErrors int) (trigger, reason string) {
+	if reason, ok := needsProMarker(text); ok {
+		if reason == "" {
+			reason = "model requested a stronger model"
+		}
+		return "marker", reason
+	}
+	if repairErrors >= escalationRepairThreshold {
+		return "repair_errors", fmt.Sprintf("%d unrecoverable repair errors this turn", repairErrors)
+	}
+	return "", ""
+}
+
+// needsProMarker reports whether the assistant's visible text opens with the
+// escalation marker, returning the optional reason. Only the first non-empty
+// line is inspected; the marker must be a complete <<<NEEDS_PRO ... >>> token.
+func needsProMarker(text string) (reason string, ok bool) {
+	line := firstNonEmptyLine(text)
+	if !strings.HasPrefix(line, needsProOpen) {
+		return "", false
+	}
+	rest := line[len(needsProOpen):]
+	end := strings.Index(rest, needsProClose)
+	if end < 0 {
+		return "", false
+	}
+	// The marker must be the WHOLE first line — nothing after the closing
+	// >>> — so a line that merely quotes the token mid-sentence (e.g. echoing
+	// a log) does not spuriously escalate. The contract asks for the marker as
+	// the entire first line.
+	if strings.TrimSpace(rest[end+len(needsProClose):]) != "" {
+		return "", false
+	}
+	mid := strings.TrimSpace(rest[:end])
+	mid = strings.TrimSpace(strings.TrimPrefix(mid, ":"))
+	return mid, true
+}
+
+// firstNonEmptyLine returns the first line of s that is not blank after
+// trimming surrounding whitespace, or "" when there is none.
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// escalationContract is the system-prompt instruction that teaches the model
+// the <<<NEEDS_PRO>>> marker. It is OPT-IN: callers add it to the static system
+// prompt only when escalation is configured, so the default DefaultSystemPrompt
+// (and thus the committed cache-stable golden) is untouched. When added, the
+// MODEL NAME is the only interpolant, so the Prefix Fingerprint stays
+// byte-stable across turns for a given escalation target. It must be inserted
+// before prompt.DynamicContextBoundary so it lands in the fingerprinted prefix.
+func escalationContract(model string) string {
+	return "\n\nEscalation: if a task is genuinely beyond your depth — it needs deeper " +
+		"reasoning or you are stuck after repeated failed attempts — make the FIRST line of " +
+		"your reply exactly `<<<NEEDS_PRO: brief reason>>>` (or `<<<NEEDS_PRO>>>`). The turn " +
+		"will be re-issued on " + model + ". Use this sparingly, only when truly warranted."
+}
+
+// EnableEscalation turns on model-driven escalation to the given model and adds
+// the marker contract to the static system prompt so the model knows to emit
+// <<<NEEDS_PRO>>>. Call it BEFORE Run (before epoch #1 freezes) so the contract
+// is part of the frozen, fingerprinted prefix; it is inserted just before
+// prompt.DynamicContextBoundary (when present) so per-turn dynamic context still
+// follows it. Adding the contract deliberately moves the Prefix Fingerprint for
+// this session — the model name is the only interpolant, so it stays byte-stable
+// across turns — while the default (escalation off) leaves DefaultSystemPrompt
+// and the committed cache-stable golden untouched. No-op when model is empty or
+// already the active model. NOTE: when a PromptBuilder is set it rebuilds
+// a.System each turn, overwriting this injection; such assemblies must add the
+// contract through the builder's static section instead.
+func (a *Agent) EnableEscalation(model string) {
+	if model == "" || model == a.Model {
+		return
+	}
+	a.EscalationModel = model
+	// When a PromptBuilder owns the system prompt it rebuilds a.System every
+	// turn (Run / refreshGitContext), so injecting the contract here would be
+	// silently wiped on the first turn — leaving a live-vs-frozen system byte
+	// divergence that llm.PrefixMonitor would flag as drift (EventDriftBlocked).
+	// (DetectDrift would not catch it; it compares only the Capability Set, not
+	// system bytes.) Such assemblies must add the contract through the builder's
+	// static section; we only inject for the direct-System case.
+	if a.PromptBuilder != nil {
+		return
+	}
+	contract := escalationContract(model)
+	if i := strings.Index(a.System, prompt.DynamicContextBoundary); i >= 0 {
+		a.System = a.System[:i] + contract + a.System[i:]
+	} else {
+		a.System += contract
+	}
 }
 
 // refreshGitContext repopulates the builder's GitStatus / GitDiff /
@@ -894,6 +1387,41 @@ func (a *Agent) fullMessagesWithFrozenSystem(frozenSystem string) []llm.Message 
 	return out
 }
 
+// loopBreakToolResultText and loopBreakNudgeText are the message-tail strings
+// the one-shot loop-break nudge injects. They live ONLY in tool-result and
+// user messages on the conversation tail — never in DefaultSystemPrompt or any
+// tool schema — so they cannot move the Prefix Fingerprint or invalidate the
+// prompt cache.
+const (
+	loopBreakToolResultText = "Stopped: this tool call has repeated several times without making progress (possible loop)."
+	loopBreakNudgeText      = "You appear to be repeating the same action without making progress. Briefly summarize what you were trying to accomplish and why it isn't working, then try a different approach — do not repeat the previous tool call."
+)
+
+// injectLoopBreakNudge appends, to the conversation tail, one synthetic error
+// tool-result for each still-dangling tool call from the offending step,
+// followed by a single user-role nudge asking the model to change approach.
+// Loop detection fires before runToolCalls has produced any results, so the
+// offending assistant tool_calls sit in a.Messages unpaired; synthesizing a
+// result per call.ID is what keeps the next request's tool_call/tool_result
+// pairing valid for DeepSeek. Both the results and the nudge are persisted so
+// a Replay reconstructs the same paired transcript.
+func (a *Agent) injectLoopBreakNudge(calls []llm.ToolCall) {
+	for _, call := range calls {
+		a.Messages = append(a.Messages, llm.Message{
+			Role:   "tool",
+			Blocks: []llm.ContentBlock{llm.ToolResultBlock{ToolUseID: call.ID, Content: loopBreakToolResultText, IsError: true}},
+		})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendToolResult(context.Background(), call.ID, loopBreakToolResultText, true)
+		}
+	}
+	nudge := []llm.ContentBlock{llm.TextBlock{Text: loopBreakNudgeText}}
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: nudge})
+	if a.Persister != nil {
+		_, _ = a.Persister.AppendUserMessage(context.Background(), nudge)
+	}
+}
+
 // runToolCalls dispatches all tool calls from one step, respecting
 // permissions and the Duet validator. Calls without dependencies (i.e.
 // all of them — we don't model deps) run in parallel.
@@ -901,7 +1429,7 @@ func (a *Agent) fullMessagesWithFrozenSystem(frozenSystem string) []llm.Message 
 // Snapshots are taken serially before the parallel execution kicks off
 // so a /undo can revert all files touched by one step in a single
 // operation.
-func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
+func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) {
 	// Pre-tool snapshot: union of all statically-affected paths.
 	if a.Persister != nil {
 		var paths []string
@@ -910,6 +1438,11 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 		}
 		if len(paths) > 0 {
 			_, _ = a.Persister.TakeSnapshot(len(a.steps), paths)
+			// Mark the current step (already appended) as snapshotted so /undo
+			// reconcile can count snapshots, not steps (T3.5).
+			if len(a.steps) > 0 {
+				a.steps[len(a.steps)-1].Snapshotted = true
+			}
 		}
 	}
 
@@ -954,7 +1487,6 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) error {
 			_, _ = a.Persister.AppendToolResult(ctx, r.callID, block.Content, block.IsError)
 		}
 	}
-	return nil
 }
 
 // executeOne dispatches a single tool call: permission check → Duet
@@ -1009,10 +1541,10 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 			}
 		}
 		if strings.HasPrefix(reason, "matched deny rule:") {
-			a.bus.Publish(EventInfo{Text: "denied by rule: " + reason})
+			a.bus.Publish(EventPermissionDenied{Tool: tool.Name(), Reason: reason, ByRule: true})
 			return tools.Errf("denied by rule: %s", reason), nil
 		}
-		a.bus.Publish(EventInfo{Text: "denied by permissions policy: " + reason})
+		a.bus.Publish(EventPermissionDenied{Tool: tool.Name(), Reason: reason, ByRule: false})
 		return tools.Errf("denied by permissions policy: %s", reason), nil
 	case permissions.Ask:
 		// Emit a permission ask carrying its own reply channel, and
@@ -1225,8 +1757,13 @@ func (a *Agent) publishRepairEvent(ev EventRepair) {
 
 // repairToolCalls runs the repair pipeline on tool calls after streaming.
 // It scavenges hidden calls, repairs args, and applies storm-breaker filtering.
-// Returns the kept calls and updates blocks in-place to reflect repaired/kept calls.
-func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) []llm.ToolCall {
+// Returns the kept calls, updates blocks in-place to reflect repaired/kept
+// calls, and reports the per-turn count of UNRECOVERABLE repair signals
+// (arguments that stayed invalid after repair + storm-suppressed calls). That
+// count drives the T2.3 auto-escalation threshold; KindArgsCompleted (a
+// successful repair) is deliberately not counted — only failures escalate.
+func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, declared []llm.ToolCall, blocks *[]llm.ContentBlock) ([]llm.ToolCall, int) {
+	repairErrors := 0
 	// Build allowed tool-name map from the registry
 	allowed := make(map[string]struct{})
 	for _, t := range a.Tools.AsLLMToolsFiltered(a.ActiveTiers...) {
@@ -1267,6 +1804,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 			})
 		}
 		if !repairResult.Valid {
+			repairErrors++
 			a.publishRepairEvent(EventRepair{
 				Kind:    string(repair.KindArgsInvalid),
 				Tool:    call.Function.Name,
@@ -1290,6 +1828,9 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	// Step 5: Apply storm-breaker filter
 	filtered := a.stormBreaker.Filter(repairedCalls, kinds)
 	for _, r := range filtered.Reports {
+		if r.Kind == repair.KindSuppressed {
+			repairErrors++
+		}
 		a.publishRepairEvent(EventRepair{
 			Kind:       string(r.Kind),
 			Tool:       r.Tool,
@@ -1321,7 +1862,7 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	}
 	*blocks = newBlocks
 
-	return filtered.Calls
+	return filtered.Calls, repairErrors
 }
 
 // AskQuestion implements tools.Questioner. It emits an EventQuestionAsk

@@ -66,8 +66,9 @@ func TestRenderHUD_ReasoningTokens(t *testing.T) {
 func TestRenderHUD_ContextUsage(t *testing.T) {
 	data := HUDData{ContextTokens: 50000, ContextLimit: 100000}
 	result := RenderHUD(data, 80)
-	if !strings.Contains(result, "ctx 50000/100000") {
-		t.Errorf("expected context usage in output, got %q", result)
+	// T5.3: context usage now renders a fill bar + human-readable counts.
+	if !strings.Contains(result, "ctx [") || !strings.Contains(result, "50k/100k") {
+		t.Errorf("expected context fill bar with 50k/100k in output, got %q", result)
 	}
 }
 
@@ -175,9 +176,10 @@ func TestRenderToolSummary_ReadFile(t *testing.T) {
 	if !strings.Contains(result, "read test.go") {
 		t.Errorf("expected read_file summary, got %q", result)
 	}
-	// strings.Count counts newlines, so "line1\nline2\nline3" has 2 newlines
-	if !strings.Contains(result, "2 lines") {
-		t.Errorf("expected line count, got %q", result)
+	// "line1\nline2\nline3" is 3 lines (the last has no trailing newline);
+	// lineCount counts it correctly where strings.Count undercounted to 2.
+	if !strings.Contains(result, "3 lines") {
+		t.Errorf("expected 3-line count, got %q", result)
 	}
 }
 
@@ -193,9 +195,9 @@ func TestRenderToolSummary_Bash(t *testing.T) {
 	if !strings.Contains(result, "bash: ls -la") {
 		t.Errorf("expected bash summary, got %q", result)
 	}
-	// strings.Count counts newlines, so "file1\nfile2" has 1 newline
-	if !strings.Contains(result, "1 lines") {
-		t.Errorf("expected line count, got %q", result)
+	// "file1\nfile2" is 2 lines (lineCount; strings.Count undercounted to 1).
+	if !strings.Contains(result, "2 lines") {
+		t.Errorf("expected 2-line count, got %q", result)
 	}
 }
 
@@ -219,9 +221,9 @@ func TestRenderToolSummary_Grep(t *testing.T) {
 	if !strings.Contains(result, "grep: func main") {
 		t.Errorf("expected grep summary, got %q", result)
 	}
-	// strings.Count counts newlines, so "match1\nmatch2" has 1 newline
-	if !strings.Contains(result, "1 matches") {
-		t.Errorf("expected match count, got %q", result)
+	// "match1\nmatch2" is 2 match lines (lineCount; strings.Count undercounted to 1).
+	if !strings.Contains(result, "2 matches") {
+		t.Errorf("expected 2-match count, got %q", result)
 	}
 }
 
@@ -241,9 +243,9 @@ func TestRenderToolSummary_Default(t *testing.T) {
 
 func TestRenderToolSummary_DefaultWithLines(t *testing.T) {
 	result := RenderToolSummary("custom_tool", `{}`, "line1\nline2", false, 80)
-	// strings.Count counts newlines, so "line1\nline2" has 1 newline
-	if !strings.Contains(result, "1 lines") {
-		t.Errorf("expected line count, got %q", result)
+	// "line1\nline2" is 2 lines (lineCount; strings.Count undercounted to 1).
+	if !strings.Contains(result, "2 lines") {
+		t.Errorf("expected 2-line count, got %q", result)
 	}
 }
 
@@ -260,6 +262,112 @@ func TestRenderToolSummary_SmallWidth(t *testing.T) {
 	// Width < 20 should be adjusted to 20
 	if len(result) > 20 {
 		t.Errorf("result too long for small width: %q", result)
+	}
+}
+
+// TestRenderToolSummaryLineCountSemantics pins the T5.2 line-count fix: the last
+// line counts even without a trailing newline; a trailing newline doesn't
+// inflate the count; and single-line output shows no "(N lines)" suffix.
+func TestRenderToolSummaryLineCountSemantics(t *testing.T) {
+	cases := []struct {
+		name, result, wantContains string
+		wantNoCount                bool
+	}{
+		{name: "three lines no trailing newline", result: "a\nb\nc", wantContains: "(3 lines)"},
+		{name: "trailing newline counts effective lines", result: "a\nb\n", wantContains: "(2 lines)"},
+		{name: "single line no suffix", result: "just one line", wantNoCount: true},
+		{name: "single line trailing newline no suffix", result: "one\n", wantNoCount: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := RenderToolSummary("read_file", `{"path":"f.go"}`, c.result, false, 80)
+			if c.wantNoCount {
+				if strings.Contains(got, "lines)") {
+					t.Errorf("single-line result should have no line-count suffix, got %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, c.wantContains) {
+				t.Errorf("got %q, want it to contain %q", got, c.wantContains)
+			}
+		})
+	}
+}
+
+// TestExtractJSONStringHandlesEscapes proves the json.Unmarshal-based field
+// extraction (T5.2) handles escaped quotes and ignores non-string values —
+// cases the old substring scanner got wrong.
+func TestExtractJSONStringHandlesEscapes(t *testing.T) {
+	if got := extractJSONString(`{"command":"echo \"hi\" there"}`, "command"); got != `echo "hi" there` {
+		t.Errorf("escaped-quote value = %q, want %q", got, `echo "hi" there`)
+	}
+	if got := extractJSONString(`{"path":"a.go","n":3}`, "path"); got != "a.go" {
+		t.Errorf("path = %q, want a.go", got)
+	}
+	if got := extractJSONString(`{"n":3}`, "n"); got != "" {
+		t.Errorf("non-string value should yield \"\", got %q", got)
+	}
+	if got := extractJSONString(`not json`, "path"); got != "" {
+		t.Errorf("malformed JSON should yield \"\", got %q", got)
+	}
+}
+
+// TestRenderHUD_CacheSavingsChip pins the T5.3 "cache % · saved ¥X" chip:
+// the saved suffix appears only when SavedCNY > 0, and the cache % is
+// always present once input tokens exist.
+func TestRenderHUD_CacheSavingsChip(t *testing.T) {
+	withSavings := RenderHUD(HUDData{InputHitTokens: 950, InputMissTokens: 50, SavedCNY: 0.123}, 200)
+	if !strings.Contains(withSavings, "cache 95.0%") {
+		t.Errorf("expected cache ratio, got %q", withSavings)
+	}
+	if !strings.Contains(withSavings, "saved ¥0.123") {
+		t.Errorf("expected saved suffix, got %q", withSavings)
+	}
+	noSavings := RenderHUD(HUDData{InputHitTokens: 950, InputMissTokens: 50}, 200)
+	if strings.Contains(noSavings, "saved") {
+		t.Errorf("saved suffix must not appear when SavedCNY == 0, got %q", noSavings)
+	}
+}
+
+// TestContextBar checks the fill bar is proportional, clamped, and pure.
+func TestContextBar(t *testing.T) {
+	cases := []struct {
+		tokens, limit        int
+		wantFill, wantCounts string
+	}{
+		{0, 1_000_000, "[░░░░░░░░░░]", "0/1M"},
+		{500_000, 1_000_000, "[█████░░░░░]", "500k/1M"},
+		{1_000_000, 1_000_000, "[██████████]", "1M/1M"},
+		{2_000_000, 1_000_000, "[██████████]", "2M/1M"}, // clamp at full
+		{64_000, 128_000, "[█████░░░░░]", "64k/128k"},
+	}
+	for _, c := range cases {
+		got := contextBar(c.tokens, c.limit)
+		if !strings.Contains(got, c.wantFill) {
+			t.Errorf("contextBar(%d,%d) = %q, want fill %q", c.tokens, c.limit, got, c.wantFill)
+		}
+		if !strings.Contains(got, c.wantCounts) {
+			t.Errorf("contextBar(%d,%d) = %q, want counts %q", c.tokens, c.limit, got, c.wantCounts)
+		}
+	}
+	// Deterministic: same inputs → same output (no time/locale dependence).
+	if contextBar(123_456, 1_000_000) != contextBar(123_456, 1_000_000) {
+		t.Error("contextBar must be deterministic")
+	}
+}
+
+func TestHumanTokens(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"}, {950, "950"}, {64_000, "64k"}, {128_000, "128k"},
+		{1_000_000, "1M"}, {1_500_000, "1.5M"},
+	}
+	for _, c := range cases {
+		if got := humanTokens(c.n); got != c.want {
+			t.Errorf("humanTokens(%d) = %q, want %q", c.n, got, c.want)
+		}
 	}
 }
 
@@ -283,7 +391,8 @@ func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
 
 	for _, want := range []string{
 		"cache 95.0%",
-		"ctx 64000/128000",
+		"ctx [",
+		"64k/128k",
 		"epoch abcdef12",
 		"pfx 12345678",
 		"pending 2",

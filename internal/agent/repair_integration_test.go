@@ -25,7 +25,7 @@ func TestRepairIntegration_ScavengeRecovered(t *testing.T) {
 	blocks := []llm.ContentBlock{llm.TextBlock{Text: content}}
 
 	// Call repairToolCalls with empty declared calls, content containing hidden call
-	kept := agent.repairToolCalls(context.Background(), "", content, nil, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", content, nil, &blocks)
 
 	// Should have recovered one call
 	if len(kept) != 1 {
@@ -63,7 +63,7 @@ func TestFinishReasonOverride(t *testing.T) {
 	blocks := []llm.ContentBlock{llm.TextBlock{Text: content}}
 
 	// Call repairToolCalls with empty declared (simulating finish_reason=stop but recoverable content)
-	kept := agent.repairToolCalls(context.Background(), "", content, nil, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", content, nil, &blocks)
 
 	// Merged calls should be non-empty (triggering tool execution)
 	if len(kept) == 0 {
@@ -94,7 +94,7 @@ func TestRepairIntegration_StormBreakerSuppresses(t *testing.T) {
 		llm.ToolUseBlock{ID: "3", Name: "read_file"},
 	}
 
-	kept := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
 
 	// Third call should be suppressed
 	if len(kept) != 2 {
@@ -138,7 +138,7 @@ func TestRepairIntegration_MutatingNeverSuppressed(t *testing.T) {
 		llm.ToolUseBlock{ID: "4", Name: "write_file"},
 	}
 
-	kept := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
 
 	// All calls should be kept
 	if len(kept) != 4 {
@@ -181,7 +181,7 @@ func TestRepairIntegration_BlocksUpdatedAfterRepair(t *testing.T) {
 		{ID: "3", Function: llm.ToolCallFunc{Name: "read_file", Arguments: `{"path":"a"}`}},
 	}
 
-	kept := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
 
 	// Should have 2 kept calls (third suppressed)
 	if len(kept) != 2 {
@@ -223,7 +223,7 @@ func TestRepairIntegration_ArgsRepaired(t *testing.T) {
 
 	blocks := []llm.ContentBlock{llm.ToolUseBlock{ID: "1", Name: "read_file"}}
 
-	kept := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", "", declared, &blocks)
 
 	// Should have repaired the arguments
 	if len(kept) != 1 {
@@ -249,7 +249,7 @@ func TestRepairIntegration_NoOpWhenNoCalls(t *testing.T) {
 
 	blocks := []llm.ContentBlock{llm.TextBlock{Text: "Hello"}}
 
-	kept := agent.repairToolCalls(context.Background(), "", "", nil, &blocks)
+	kept, _ := agent.repairToolCalls(context.Background(), "", "", nil, &blocks)
 
 	// Should return empty
 	if len(kept) != 0 {
@@ -264,14 +264,14 @@ func TestRepairIntegration_NoOpWhenNoCalls(t *testing.T) {
 
 // mockTool is a minimal Tool implementation for testing
 type mockTool struct {
-	name    string
+	name     string
 	readOnly bool
 }
 
-func (m *mockTool) Name() string                          { return m.name }
-func (m *mockTool) Description() string                   { return "mock tool" }
-func (m *mockTool) Parameters() json.RawMessage           { return json.RawMessage(`{"type":"object"}`) }
+func (m *mockTool) Name() string                { return m.name }
+func (m *mockTool) Description() string         { return "mock tool" }
+func (m *mockTool) Parameters() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (m *mockTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
 	return tools.Result{Content: "ok"}, nil
 }
-func (m *mockTool) IsReadOnly() bool                      { return m.readOnly }
+func (m *mockTool) IsReadOnly() bool { return m.readOnly }

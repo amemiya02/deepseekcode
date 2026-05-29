@@ -17,6 +17,9 @@ import (
 // facto standard for agent edits.
 type EditFile struct {
 	CWD string // project root for path safety; empty means os.Getwd
+	// Tracker, when set, rejects an edit to a file that was never read or that
+	// changed on disk since the last read (T3.2). nil disables the guard.
+	Tracker *FileTracker
 }
 
 func (EditFile) Name() string { return "edit_file" }
@@ -96,6 +99,12 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	p.Path = checkedPath
 
+	// Read-before-write freshness guard (T3.2): refuse to edit a file that was
+	// never read or that changed on disk since the read.
+	if err := e.Tracker.CheckFresh(p.Path); err != nil {
+		return Errf("%v", err), nil
+	}
+
 	b, err := os.ReadFile(p.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -105,34 +114,67 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	content := string(b)
 
-	count := strings.Count(content, p.OldString)
-	if count == 0 {
-		return fuzzyHint(content, p.OldString, p.Path)
-	}
-	if count > 1 && !p.ReplaceAll {
-		return Errf("old_string appears %d times in %s. Provide a longer, unique snippet or set replace_all=true.",
-			count, p.Path), nil
+	// Mirror opencode: normalize CRLF -> LF for matching, then convert the
+	// replacement back to the file's detected line ending. This lets the fuzzy
+	// strategies match against a uniform "\n" form while the bytes we write
+	// preserve the file's original ending. detectLineEnding inspects the
+	// ORIGINAL content (pre-normalization); a file with no CRLF stays LF and
+	// the conversions are no-ops, so existing LF behavior is byte-identical.
+	ending := detectLineEnding(content)
+	normContent := normalizeLineEndings(content)
+	normOld := normalizeLineEndings(p.OldString)
+	normNew := normalizeLineEndings(p.NewString)
+
+	updated, matched, ambiguous := applyReplace(normContent, normOld, normNew, p.ReplaceAll)
+	if !matched {
+		if ambiguous {
+			return Errf("old_string matched multiple locations in %s. Provide a longer, unique snippet "+
+				"(include more surrounding lines) or set replace_all=true.", p.Path), nil
+		}
+		// Genuine not-found: fall back to the fuzzy hint, which suggests the
+		// closest region. Match on the normalized content so line numbers and
+		// previews are consistent with what the cascade saw.
+		return fuzzyHint(normContent, normOld, p.Path)
 	}
 
-	var updated string
-	if p.ReplaceAll {
-		updated = strings.ReplaceAll(content, p.OldString, p.NewString)
-	} else {
-		updated = strings.Replace(content, p.OldString, p.NewString, 1)
-	}
-
-	if err := atomicWriteFile(p.Path, []byte(updated)); err != nil {
+	out := convertToLineEnding(updated, ending)
+	if err := atomicWriteFile(p.Path, []byte(out)); err != nil {
 		return Result{}, err
 	}
-	return Result{Content: fmt.Sprintf("edited %s (%d replacement%s)",
-		p.Path, count, plural(count))}, nil
+	// Re-stamp so a follow-up edit in the same session isn't tripped by the
+	// agent's own write (T3.2).
+	e.Tracker.RecordWrite(p.Path)
+	return Result{Content: fmt.Sprintf("edited %s", p.Path)}, nil
 }
 
+// plural returns "s" for counts other than 1 (used by todo_write).
 func plural(n int) string {
 	if n == 1 {
 		return ""
 	}
 	return "s"
+}
+
+// detectLineEnding reports the dominant line ending of text. A single CRLF is
+// enough to treat the whole file as CRLF, matching opencode.
+func detectLineEnding(text string) string {
+	if strings.Contains(text, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+// normalizeLineEndings converts CRLF to LF so matching operates on one form.
+func normalizeLineEndings(text string) string {
+	return strings.ReplaceAll(text, "\r\n", "\n")
+}
+
+// convertToLineEnding converts LF back to the file's detected ending.
+func convertToLineEnding(text, ending string) string {
+	if ending == "\n" {
+		return text
+	}
+	return strings.ReplaceAll(text, "\n", "\r\n")
 }
 
 const fuzzyMaxDist = 3

@@ -177,6 +177,12 @@ func (i chatItem) render(t Theme, width int) string {
 		// Body lines with card bar prefix.
 		const maxBodyLines = 10
 		lang := highlightLang(i.tool, i.args)
+		// Auto-detect raw diffs in tool output (e.g. `git diff` run via bash,
+		// which would otherwise be lexed as shell) and route them through the
+		// diff lexer regardless of which tool produced the content.
+		if lang != "diff" && looksLikeDiff(body) {
+			lang = "diff"
+		}
 		bodyLines := strings.Split(body, "\n")
 		if lang != "" {
 			highlighted := Highlight(t, body, lang)
@@ -310,6 +316,30 @@ func highlightLang(tool, args string) string {
 	default:
 		return ""
 	}
+}
+
+// looksLikeDiff reports whether content is a unified/git diff, so it can be
+// routed through the diff lexer regardless of which tool produced it (a
+// `git diff` run via bash defaults to the shell lexer otherwise). It is
+// deliberately conservative: it requires a structural marker — a
+// "diff --git " line or a unified hunk header ("@@ … @@") — rather than mere
+// leading +/- lines, so ordinary shell output or source code containing
+// +/- operators is not misclassified.
+func looksLikeDiff(content string) bool {
+	if content == "" {
+		return false
+	}
+	for _, ln := range strings.Split(content, "\n") {
+		if strings.HasPrefix(ln, "diff --git ") {
+			return true
+		}
+		// Unified hunk header: "@@ -a,b +c,d @@" (the trailing " @@" guards
+		// against incidental lines that merely begin with "@@ ").
+		if strings.HasPrefix(ln, "@@ ") && strings.Contains(ln[3:], " @@") {
+			return true
+		}
+	}
+	return false
 }
 
 // lineCount counts effective lines (ignores trailing blank line).

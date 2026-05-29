@@ -5,93 +5,10 @@ import (
 	"testing"
 )
 
-func TestSchemaHashEmpty(t *testing.T) {
-	reg := NewRegistry()
-	h := reg.SchemaHash()
-	if h == "" {
-		t.Error("SchemaHash should not be empty even for empty registry")
-	}
-}
-
-func TestSchemaHashDeterministic(t *testing.T) {
-	reg := NewRegistry()
-	reg.mu.Lock()
-	reg.servers["s1"] = &ServerProxy{
-		Name:  "s1",
-		State: StateConnected,
-		Tools: []McpToolMeta{
-			{Name: "echo", Description: "echoes", InputSchema: json.RawMessage(`{"type":"object"}`)},
-			{Name: "add", Description: "adds", InputSchema: json.RawMessage(`{"type":"object","properties":{"a":{"type":"number"}}}`)},
-		},
-	}
-	reg.mu.Unlock()
-
-	h1 := reg.SchemaHash()
-	h2 := reg.SchemaHash()
-	if h1 != h2 {
-		t.Errorf("SchemaHash not deterministic: %s vs %s", h1, h2)
-	}
-}
-
-func TestSchemaHashIgnoresConnectionOrder(t *testing.T) {
-	makeReg := func() *Registry {
-		reg := NewRegistry()
-		reg.mu.Lock()
-		reg.servers["s1"] = &ServerProxy{
-			Name:  "s1",
-			State: StateConnected,
-			Tools: []McpToolMeta{
-				{Name: "echo", Description: "echoes", InputSchema: json.RawMessage(`{"type":"object"}`)},
-			},
-		}
-		reg.servers["s2"] = &ServerProxy{
-			Name:  "s2",
-			State: StateConnected,
-			Tools: []McpToolMeta{
-				{Name: "add", Description: "adds", InputSchema: json.RawMessage(`{"type":"object"}`)},
-			},
-		}
-		reg.mu.Unlock()
-		return reg
-	}
-
-	r1 := makeReg()
-	r2 := makeReg()
-	if r1.SchemaHash() != r2.SchemaHash() {
-		t.Error("same tools in different registries should produce same hash")
-	}
-}
-
-func TestSchemaHashChangesOnNewTool(t *testing.T) {
-	reg := NewRegistry()
-	reg.mu.Lock()
-	reg.servers["s1"] = &ServerProxy{
-		Name:  "s1",
-		State: StateConnected,
-		Tools: []McpToolMeta{
-			{Name: "echo", Description: "echoes", InputSchema: json.RawMessage(`{}`)},
-		},
-	}
-	reg.mu.Unlock()
-
-	h1 := reg.SchemaHash()
-
-	reg.mu.Lock()
-	reg.servers["s1"] = &ServerProxy{
-		Name:  "s1",
-		State: StateConnected,
-		Tools: []McpToolMeta{
-			{Name: "echo", Description: "echoes", InputSchema: json.RawMessage(`{}`)},
-			{Name: "new", Description: "new tool", InputSchema: json.RawMessage(`{}`)},
-		},
-	}
-	reg.mu.Unlock()
-
-	h2 := reg.SchemaHash()
-	if h1 == h2 {
-		t.Error("adding a tool should change SchemaHash")
-	}
-}
+// The SchemaHash unit tests were removed in M3 — SchemaHash is gone
+// (docs/adr/0001). MCP schema-change detection is covered by the
+// PendingSchemaChanges tests below and the key-reorder regression in
+// schema_hash_characterization_test.go.
 
 func TestPendingSchemaChangesNoDrift(t *testing.T) {
 	reg := NewRegistry()

@@ -2,10 +2,8 @@ package mcp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -189,28 +187,11 @@ type MCPChange struct {
 	ToolName string
 }
 
-// SchemaHash returns a deterministic SHA-256 hex digest of all current
-// MCP tool schemas (sorted by fully-qualified name). Same tools with
-// same schemas produce the same hash regardless of connection order.
-func (r *Registry) SchemaHash() string {
-	tools := r.Tools()
-	if len(tools) == 0 {
-		return sha256hex("")
-	}
-	sort.Slice(tools, func(i, j int) bool {
-		return tools[i].Name < tools[j].Name
-	})
-	var sb strings.Builder
-	for _, t := range tools {
-		sb.WriteString(t.Name)
-		sb.WriteByte(':')
-		sb.WriteString(t.Description)
-		sb.WriteByte(':')
-		sb.Write(t.InputSchema)
-		sb.WriteByte('\n')
-	}
-	return sha256hex(sb.String())
-}
+// NOTE: SchemaHash was removed in M3 (docs/adr/0001). It hashed InputSchema raw
+// (no key-sort), so a reordered-keys reconnect produced phantom drift in the
+// epoch hash. MCP schema identity is now compared canonically via
+// CompareToolLists / PendingSchemaChanges, and MCP tools that are actually sent
+// to the model are already part of the canonical Prefix Fingerprint.
 
 // PendingSchemaChanges compares the current tool set against a previous
 // tool list snapshot and returns the list of MCP-level changes.
@@ -249,8 +230,4 @@ func (r *Registry) PendingSchemaChanges(oldTools []McpToolMeta) []MCPChange {
 
 func schemasEqualBytes(a, b json.RawMessage) bool {
 	return schemasEqual(a, b)
-}
-
-func sha256hex(s string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
 }

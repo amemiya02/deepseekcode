@@ -586,19 +586,13 @@ func (a *Agent) currentProfileID() string {
 // and SwitchProfile (explicit epoch switch) so both compute the same hash
 // from the same inputs.
 func (a *Agent) buildEpochComponents() EpochComponents {
-	comps := EpochComponents{
+	return EpochComponents{
 		StaticSystem:   a.staticSystem(),
 		ToolSpecs:      a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
 		Model:          a.Model,
 		AgentProfileID: a.currentProfileID(),
+		Capability:     a.buildCapabilitySet(),
 	}
-	if a.Skills != nil {
-		comps.StableSkillDir = a.Skills.VersionHash()
-	}
-	if a.MCPRegistry != nil {
-		comps.MCPSchemaSnapshot = a.MCPRegistry.SchemaHash()
-	}
-	return comps
 }
 
 // toolTiersFromStrings maps profile tier names to tools.ToolTier values.

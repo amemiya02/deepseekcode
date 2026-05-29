@@ -159,35 +159,49 @@ redundant with the existing 28+3 epoch tests and was **not** created.
       tests updated to the new signature and green; full `go test ./...` + `go
       vet ./...` clean.
 
-## M3 — Split epoch identity: Prefix Fingerprint (visible) vs Capability Set (latent)
+## M3 — Split epoch identity: Prefix Fingerprint (visible) vs Capability Set (latent) — DONE
 
-**Files:** modify `internal/agent/prefix_epoch.go`, `internal/agent/agent.go`;
-create `internal/agent/capability_set.go` (+ test); **delete**
-`mcp.Registry.SchemaHash` in `internal/mcp/registry.go`.
+**Files:** created `internal/agent/capability_set.go` (+ `_test.go`); modified
+`internal/agent/prefix_epoch.go`, `internal/agent/agent.go`,
+`internal/llm/prefix_drift.go`, `internal/mcp/registry.go`; rewrote
+`internal/agent/prefix_epoch_test.go`, repurposed
+`internal/mcp/schema_hash_characterization_test.go`, trimmed
+`internal/mcp/registry_epoch_test.go`, fixed `internal/agent/profile_epoch_test.go`.
 
-- [ ] `PrefixEpoch.StaticPrefixHash` ← `StaticPrefix.Fingerprint().Combined`
-      (model-visible only). Remove `EpochComponentHashes`, `ComputeEpochHash`,
-      `computeComponentHashes`, `hashFewShots` (the 6-component latent hash).
-- [ ] New `CapabilitySet{ProfileID, MCPTools []mcp.McpToolMeta,
-      SkillCatalogVersion string}` + `CapabilityDiff(old,new) []PendingChange`
-      using `mcp.CompareToolLists` + `skills.Store.Diff` + profile-name compare.
-- [ ] Split `DetectDrift`: visible drift via `llm.Diff` against the frozen
-      `StaticPrefix` (a *bug* if it fires within a frozen epoch); capability
-      changes → `RecordPendingChange` (receipts preserved).
-- [ ] Epoch-mint trigger = Prefix Fingerprint differs **or** explicit policy
-      (profile switch / `/models` / `SwitchProfile`). A capability change that
-      does **not** move visible bytes records a Pending Change but does **not**
-      force a cache miss (fixes the wasteful-miss-on-profile-rename behavior).
-- [ ] `buildEpochComponents` (`agent.go:588`) builds a `StaticPrefix` + a
-      `CapabilitySet` instead of `EpochComponents`.
-- [ ] Remove `mcp.Registry.SchemaHash` (sole caller is `agent.go:599`); confirm
-      via grep that no raw `sb.Write(t.InputSchema)`-style hash remains anywhere.
-- [ ] **Regression test:** an MCP reconnect that re-emits the same tool with
-      reordered JSON-Schema keys produces **zero** drift and **zero** pending
-      change (the phantom-drift bug).
-- [ ] **Regression test:** a single skill-body edit moves the fingerprint
-      exactly once (via `system`) and reports exactly one fine-grained
-      `skill_body_changed` pending change — never also `system_changed`.
+- [x] `PrefixEpoch.StaticPrefixHash` ← `StaticPrefix.Fingerprint().CombinedSHA256`
+      (model-visible only). `ComponentHashes` keeps just `{system, tools}` for the
+      epoch events. Removed `EpochComponentHashes`, `ComputeEpochHash`
+      (`llm`), `computeComponentHashes`, `hashFewShots` (`agent`).
+- [x] New `CapabilitySet{ProfileID, Skills *skills.Store, MCPTools
+      []mcp.McpToolMeta}` + `CapabilityDiff` using `skills.Store.Diff` +
+      `mcp.CompareToolLists` + profile-name compare.
+- [x] `DetectDrift` is now **purely capability-based** (`CapabilityDiff`).
+      Model-visible byte drift stays the job of the per-turn `llm.PrefixMonitor`
+      (`EventDriftBlocked`) — keeping it out of `DetectDrift` is what makes the
+      double-report impossible by construction (a skill edit can only surface as
+      `skill_body_changed`, never also `system_changed`). *(This is a cleaner
+      split than the plan's original "visible drift via `llm.Diff` inside
+      DetectDrift" wording.)*
+- [x] Epoch-mint trigger unchanged structurally; a profile switch with no
+      visible-byte change no longer moves the fingerprint (the explicit
+      `SwitchEpoch` still mints an epoch + one expected miss). Verified by
+      `TestEpochProfileChangeDoesNotChangeFingerprint`.
+- [x] `buildEpochComponents` builds `StaticPrefix` inputs + a `CapabilitySet`;
+      no `SchemaHash`/`VersionHash` string components.
+- [x] Removed `mcp.Registry.SchemaHash` (+ dead `sha256hex`, `sort`/`crypto/sha256`
+      imports). No raw `sb.Write(t.InputSchema)` hash remains.
+- [x] **Regression:** reordered MCP JSON-Schema keys → zero drift/pending —
+      `mcp.TestMCPSchemaKeyReorder_NoPhantomDrift` and
+      `agent.TestCapabilityDiff_MCPKeyReorderNoDrift`.
+- [x] **Regression:** skill-body edit moves the fingerprint via `system` yet
+      reports exactly one `skill_body_changed` — `agent.TestSkillEditReportedOnceNotAlsoSystem`.
+- [x] `go build`, `go vet`, full `go test ./...`, and `go test -race` (agent/llm/mcp)
+      all green; cache-key golden still byte-identical.
+
+**Deferred:** folding `FewShots` into the fingerprint (still always empty;
+`StaticPrefix.Fingerprint()` covers system+tools). `ComputeFingerprint`/
+`PrefixInput` kept as a thin tested shim (removing them was churn for no gain).
+**M4** (trace/benchmark/docs + the optimization-plan breadcrumb) remains.
 
 ## M4 — Trace, benchmark, and docs
 

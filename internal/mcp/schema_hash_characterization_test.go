@@ -5,27 +5,16 @@ import (
 	"testing"
 )
 
-// TestSchemaHash_KeyOrderSensitivity_Characterization pins the phantom-drift
-// defect that motivates the prefix-fingerprint refactor (see
-// docs/refactor-prefix-fingerprint.md and docs/adr/0001-*). The MCP registry
-// has TWO ways to answer "did a tool's schema change":
+// TestMCPSchemaKeyReorder_NoPhantomDrift is the regression for the phantom-drift
+// defect fixed in M3 (docs/refactor-prefix-fingerprint.md, docs/adr/0001). The
+// raw, key-order-sensitive SchemaHash was removed; MCP schema identity is now
+// judged only by the canonical paths (CompareToolLists / PendingSchemaChanges).
+// A reconnect that re-emits the same tool with reordered JSON-Schema keys must
+// therefore produce zero drift and zero pending change.
 //
-//   - SchemaHash() writes InputSchema RAW (registry.go), so reordering
-//     JSON-Schema keys flips the hash even though the schema is semantically
-//     identical — and that hash feeds the epoch's static-prefix hash, causing a
-//     phantom cache miss on an idempotent MCP reconnect.
-//   - CompareToolLists() / PendingSchemaChanges() canonicalize (key-sort) via
-//     canonicalEqual, so they correctly see NO change.
-//
-// The two paths therefore DISAGREE on the same input. This test documents that
-// disagreement so the M3 consolidation (which removes SchemaHash) is provably a
-// behavior fix, not a behavior change.
-//
-// WHEN M3 REMOVES SchemaHash: delete the SchemaHash assertion below. The
-// CompareToolLists / PendingSchemaChanges assertions stay — they are the
-// behavior the unified module must preserve.
-func TestSchemaHash_KeyOrderSensitivity_Characterization(t *testing.T) {
-	// Same schema, object keys in different order at the properties level.
+// (Before M3 this file characterized the opposite: SchemaHash flipping on a key
+// reorder while the canonical paths saw no change — the two-path disagreement.)
+func TestMCPSchemaKeyReorder_NoPhantomDrift(t *testing.T) {
 	schemaAB := json.RawMessage(`{"type":"object","properties":{"alpha":{"type":"string"},"beta":{"type":"number"}}}`)
 	schemaBA := json.RawMessage(`{"properties":{"beta":{"type":"number"},"alpha":{"type":"string"}},"type":"object"}`)
 
@@ -43,19 +32,10 @@ func TestSchemaHash_KeyOrderSensitivity_Characterization(t *testing.T) {
 	before := mk(schemaAB)
 	after := mk(schemaBA)
 
-	// Canonical path: correctly sees no change (key order is irrelevant).
 	if rep := CompareToolLists(before.Tools(), after.Tools()); rep.Kind != DriftNone {
 		t.Errorf("CompareToolLists must see no drift on key reorder, got %q (%s)", rep.Kind, rep.Message)
 	}
 	if changes := after.PendingSchemaChanges(before.Tools()); len(changes) != 0 {
 		t.Errorf("PendingSchemaChanges must see no change on key reorder, got %d: %+v", len(changes), changes)
-	}
-
-	// Buggy path (DELETE this block in M3 when SchemaHash is removed):
-	// SchemaHash is key-order-sensitive, so it disagrees with the canonical path.
-	if before.SchemaHash() == after.SchemaHash() {
-		t.Error("CHARACTERIZATION CHANGED: SchemaHash is no longer key-order-sensitive — " +
-			"the phantom-drift bug appears fixed. If M3 did this, remove this assertion and " +
-			"mark ADR-0001 as implemented.")
 	}
 }

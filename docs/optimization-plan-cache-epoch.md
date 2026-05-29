@@ -229,6 +229,17 @@ time." It is a named immutable epoch.
 
 ## Core Concept: PrefixEpoch
 
+> **Superseded (2026-05-29, M3 / ADR-0001):** the 6-component combined hash
+> described below was replaced. `PrefixEpoch.StaticPrefixHash` is now the
+> **Prefix Fingerprint** — the canonical hash of the *model-visible bytes only*
+> (system + tools), equal to the DeepSeek cache key by construction. Latent
+> identity (agent profile, skills, MCP) is tracked separately as a
+> `CapabilitySet` and is **not** hashed into the prefix; pending changes come
+> from `CapabilityDiff`. See
+> `docs/adr/0001-prefix-fingerprint-is-model-visible-bytes-only.md`,
+> `docs/refactor-prefix-fingerprint.md`, and `/CONTEXT.md`. The component list
+> below is kept for historical context.
+
 `PrefixEpoch` is a frozen model-visible prefix snapshot.
 
 It owns:

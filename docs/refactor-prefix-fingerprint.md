@@ -203,20 +203,35 @@ redundant with the existing 28+3 epoch tests and was **not** created.
 `PrefixInput` kept as a thin tested shim (removing them was churn for no gain).
 **M4** (trace/benchmark/docs + the optimization-plan breadcrumb) remains.
 
-## M4 — Trace, benchmark, and docs
+## M4 — Trace, benchmark, and docs — DONE
 
-**Files:** verify `internal/agent/trace.go` + `bench/cmd/benchrunner`; modify
-`CLAUDE.md`, `docs/optimization-plan-cache-epoch.md`.
+**Files:** modified `CLAUDE.md`, `docs/optimization-plan-cache-epoch.md`
+(verified `internal/agent/trace.go` + `bench/cmd/benchrunner` need no change).
 
-- [ ] The trace's `static_prefix_hash` now equals the cache key. Run the
-      benchmark cache gate ("static prefix stable within epoch") and confirm it
-      still passes — it is now *tautologically* the cache key.
-- [ ] Update any test asserting the legacy 6-component epoch-hash composition.
-- [ ] Update CLAUDE.md "Prefix epoch system" + "Wire format" sections to
-      describe the single canonicalization and the visible/latent split.
-- [ ] Update `docs/optimization-plan-cache-epoch.md` "Core Concept: PrefixEpoch"
-      (currently lists 6 hash components) to note the combined hash is
-      model-visible-bytes-only with the Capability Set tracked separately.
+- [x] The trace's `static_prefix_hash` flows from the epoch's (now-visible)
+      fingerprint, and `bench/cmd/benchrunner` reads it opaquely (no legacy
+      6-component references anywhere). The cache gate ("static prefix stable
+      within epoch") now *tautologically* tracks the cache key. Full suite —
+      including `bench/cmd/benchrunner` — is green; no change required.
+- [x] No test asserted the legacy 6-component composition (the agent-side ones
+      were already rewritten in M3); nothing else to update.
+- [x] CLAUDE.md "Prefix epoch system" + "Wire format" sections describe the
+      shared `canonicalizeTools` and the visible/latent split.
+- [x] `docs/optimization-plan-cache-epoch.md` "Core Concept: PrefixEpoch" carries
+      a superseded breadcrumb pointing at ADR-0001 + this plan + CONTEXT.md.
+
+---
+
+## Outcome
+
+All milestones M0–M4 complete. The refactor is **behavior-preserving on the
+cache key** (the `MarshalCacheStable` golden is byte-identical throughout) while
+fixing three confirmed defects — phantom MCP drift, the skill/system
+double-report, and wasteful profile-rename cache misses — each guarded by a
+regression test. "What the model sees" now lives in one deep `internal/llm`
+module (`StaticPrefix`/`Fingerprint`/`Diff`), and latent capability identity is
+a separate `agent.CapabilitySet`. `go build`, `go vet`, `go test ./...`, and
+`go test -race` (agent/llm/mcp) are green.
 
 ---
 

@@ -22,14 +22,21 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T1.2 | ✅ done | `Replay` repairs dangling `tool_calls` from an interrupted session; the other two pieces were already handled (see the T1.2 entry below). |
 | T1.3 | ◧ partial | `StopStepTimeout` (non-success) + `StopUserRequested` wired + `IsSuccess()`. Deferred: budget/denied EventInfo → typed events; remove the unreachable tool-error abort branch. |
 | T1.4 | ✅ done | Mid-stream stall (first-token / chunk-stall) re-issues the identical request **once** before salvaging the partial (T1.1); a parse error or cancel/step-deadline never re-issues. A 400 context-overflow routes to a single deterministic compaction + re-attempt (`llm.IsContextOverflow`, typed `ErrFirstTokenTimeout`/`ErrChunkStall` sentinels). No duplicate persisted turn. |
+| T2.1 | ✅ done | First loop detection per Run injects a synthetic-result-per-dangling-call + one user nudge and continues once; a per-Run `loopFloor` forgives the pre-nudge repeats so the recovery turn isn't instantly re-tripped; a second detection hard-stops. Nudge is message-tail only (fingerprint untouched). |
+| T2.2 | ✅ done | Fuzzy multi-strategy edit replacer (exact → line-trimmed → whitespace-normalized → indentation-flexible → block-anchor), first **unique** match wins, ambiguous rejected; `apply_patch` `locateChunk` now rejects ambiguous context too. 22-case corpus: exact-only baseline 0.091 → cascade 1.000 (asserted). Byte-fidelity preserved (original substrings, full-file `want`); `Description`/`Parameters` byte-identical so the fingerprint is unmoved. |
+| T2.4 | ✅ done | MCP stdio liveness watcher: process exit → `StateDegraded` (tools drop via the existing `State!=StateConnected` filter), then exactly one bounded reconnect with negative-result backoff. `r.mu` sole authority, no IO under lock, watcher bound to its transport's `Done()` by value; `-race` clean. ADR-0001 invariant (degrade surfaces as `PendingMCPToolRemoved`, never mid-epoch fingerprint movement) covered compositionally by the new mcp-layer `DriftRemoved` test + existing `TestCapabilityDiff_MCPAddRemove`/`TestEpochMutationsAfterFreezeBecomePending`. |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-T1 is closed except the T1.3 leftovers. Next up: **T2** (loop nudge, fuzzy edit
-replacer, model-escalation, MCP liveness), then **T4** (token reconciliation,
-cache-aware budget, cache-preserving compaction), and the remaining
-T3/T5/T6/T7 stages.
+T1 is closed except the T1.3 leftovers. T2.1/T2.2/T2.4 are landed (T2.2/T2.4 via
+a worktree-isolated parallel workflow, integrated by cherry-pick). Next up:
+**T2.3** (model-driven escalation) — held by the design review pending three spec
+corrections (it referenced a phantom `duetSelfValidates`, the wrong
+`eventschema` file, and a missing `internal/config` import; the contract text
+touches the fingerprint so the model name is the only allowed interpolant). Then
+**T4** (token reconciliation, cache-aware budget, cache-preserving compaction)
+and the remaining T3/T5/T6/T7 stages.
 
 ---
 

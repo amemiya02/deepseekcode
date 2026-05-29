@@ -244,6 +244,81 @@ func TestLoopFirstTokenTimeoutAppendsNothing(t *testing.T) {
 	}
 }
 
+// TestLoopStepTimeoutIsNonSuccess pins T1.3: a per-step deadline produces a
+// typed StopStepTimeout with a non-nil error, not the old StopUnknown,nil
+// silent-success shape that rendered a timeout as a clean finish.
+func TestLoopStepTimeoutIsNonSuccess(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: 300 * time.Millisecond, Text: "too slow"})
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.StepTimeout = 50 * time.Millisecond // shorter than the model turn
+
+	reason, err := a.Run(context.Background(), "x")
+	if reason != StopStepTimeout {
+		t.Fatalf("reason = %v, want StopStepTimeout", reason)
+	}
+	if reason.IsSuccess() {
+		t.Error("StopStepTimeout must not report IsSuccess")
+	}
+	if err == nil {
+		t.Fatal("step timeout must surface a non-nil error, not a silent success")
+	}
+	if !strings.Contains(err.Error(), "step timed out") {
+		t.Errorf("error %q does not describe a step timeout", err)
+	}
+}
+
+// TestLoopUserRequestedStop pins that an explicit RequestStop before
+// cancellation is reported as StopUserRequested, distinct from an ambient
+// StopContextCancel.
+func TestLoopUserRequestedStop(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{DelayFirst: time.Second, Text: "never gets here"})
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.StepTimeout = 0 // no per-step deadline; only our cancel drives termination
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type res struct {
+		reason StopReason
+		err    error
+	}
+	done := make(chan res, 1)
+	go func() {
+		r, e := a.Run(ctx, "x")
+		done <- res{r, e}
+	}()
+
+	time.Sleep(40 * time.Millisecond) // let the run reach the in-flight stream
+	a.RequestStop()
+	cancel()
+
+	select {
+	case got := <-done:
+		if got.reason != StopUserRequested {
+			t.Fatalf("reason = %v, want StopUserRequested", got.reason)
+		}
+		if got.reason.IsSuccess() {
+			t.Error("StopUserRequested must not report IsSuccess")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+// TestStopReasonIsSuccess pins that only a model-completed run is a success.
+func TestStopReasonIsSuccess(t *testing.T) {
+	if !StopModelDone.IsSuccess() {
+		t.Error("StopModelDone should be a success")
+	}
+	for _, r := range []StopReason{StopUnknown, StopMaxSteps, StopLoopDetected, StopContextCancel, StopUserRequested, StopStepTimeout} {
+		if r.IsSuccess() {
+			t.Errorf("%v should not be a success", r)
+		}
+	}
+}
+
 // assertToolResultPaired checks that a replayed request body carries both the
 // assistant tool_call with the given id and its paired tool result.
 func assertToolResultPaired(t *testing.T, body []byte, callID string) {

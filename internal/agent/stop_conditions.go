@@ -28,6 +28,7 @@ const (
 	StopLoopDetected             // same tool call repeated too many times
 	StopContextCancel            // ctx.Err()
 	StopUserRequested            // explicit cancellation from TUI
+	StopStepTimeout              // per-step deadline exceeded (non-success)
 )
 
 func (r StopReason) String() string {
@@ -42,8 +43,18 @@ func (r StopReason) String() string {
 		return "context_cancel"
 	case StopUserRequested:
 		return "user_requested"
+	case StopStepTimeout:
+		return "step_timeout"
 	}
 	return "unknown"
+}
+
+// IsSuccess reports whether a stop reason represents a clean, complete run
+// (the model finished on its own). Every other reason — cancellation, a step
+// timeout, a loop or step-cap halt, or an unknown/error exit — is a
+// non-success termination and must not be rendered or recorded as "done".
+func (r StopReason) IsSuccess() bool {
+	return r == StopModelDone
 }
 
 // StopCondition examines recent history and returns (true, reason) when

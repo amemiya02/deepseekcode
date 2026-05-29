@@ -681,6 +681,9 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		cancel := a.runCancel
 		a.runMu.Unlock()
 		if running && cancel != nil {
+			// Mark the stop as user-requested before cancelling so the run
+			// reports StopUserRequested rather than ambient StopContextCancel.
+			a.agent.RequestStop()
 			cancel()
 			return nil, true
 		}

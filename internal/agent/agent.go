@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
@@ -67,6 +68,12 @@ type Agent struct {
 	// lost. Guarded by childTraceMu.
 	childTraceMu      sync.Mutex
 	childTraceHandles []*TraceSinkHandle
+
+	// stopRequested records an explicit user stop (e.g. the TUI's ctrl+c)
+	// so Run can report StopUserRequested instead of an ambient
+	// StopContextCancel. Reset at the start of each Run. Set from the UI
+	// goroutine, read from the agent goroutine, hence atomic.
+	stopRequested atomic.Bool
 
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
@@ -273,6 +280,15 @@ Behavioral rules:
 - When uncertain, ask the user. Don't guess at file paths or invent APIs.
 - Be concise. The user can see the diff; you don't need to narrate it.`
 
+// RequestStop marks the current run as explicitly stopped by the user, so a
+// subsequent context cancellation is reported as StopUserRequested rather than
+// the ambient StopContextCancel. Callers invoke it immediately before
+// cancelling the run's context (e.g. the TUI's ctrl+c handler). Safe to call
+// from a goroutine other than the one driving Run.
+func (a *Agent) RequestStop() {
+	a.stopRequested.Store(true)
+}
+
 // Run drives the loop until a stop condition fires or context cancels.
 // Returns the StopReason and any infrastructure error.
 //
@@ -285,6 +301,10 @@ Behavioral rules:
 // events channel for the "done" signal used to race trailing deltas
 // and leave the UI's chrome stuck on "writing…" — never do that.
 func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, err error) {
+	// Clear any stop request from a previous run so a stale ctrl+c can't
+	// mislabel this run's termination.
+	a.stopRequested.Store(false)
+
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
 	}()
@@ -333,6 +353,9 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	for {
 		select {
 		case <-ctx.Done():
+			if a.stopRequested.Load() {
+				return StopUserRequested, ctx.Err()
+			}
 			return StopContextCancel, ctx.Err()
 		default:
 		}
@@ -344,11 +367,23 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		step, err := a.runStep(stepCtx)
 		if err != nil {
 			stepCancel()
-			if a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded) {
-				a.bus.Publish(EventInfo{Text: fmt.Sprintf("step timed out after %s", a.StepTimeout)})
-				return StopUnknown, nil
+			switch {
+			case errors.Is(err, context.Canceled):
+				// Parent context cancelled mid-step. Distinguish an explicit
+				// user stop from an ambient cancellation for honest analytics.
+				if a.stopRequested.Load() {
+					return StopUserRequested, err
+				}
+				return StopContextCancel, err
+			case a.StepTimeout > 0 && errors.Is(err, context.DeadlineExceeded):
+				// The per-step deadline fired. This is a non-success exit, not
+				// a clean finish: surface it as StopStepTimeout with a non-nil
+				// error so callers and the TUI never render it as a done row
+				// (the old path returned StopUnknown,nil — a silent success).
+				return StopStepTimeout, fmt.Errorf("step timed out after %s", a.StepTimeout)
+			default:
+				return StopUnknown, err
 			}
-			return StopUnknown, err
 		}
 		a.steps = append(a.steps, step)
 

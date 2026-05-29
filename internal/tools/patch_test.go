@@ -284,3 +284,86 @@ func TestDeriveNewContents(t *testing.T) {
 		})
 	}
 }
+
+// TestDeriveNewContentsAmbiguous proves locateChunk rejects an ambiguous
+// context (a chunk whose OldLines match more than one location under the same
+// normalizer) with a "multiple" error, instead of silently editing the first.
+func TestDeriveNewContentsAmbiguous(t *testing.T) {
+	// Two regions, both after the cursor, that are identical after trimming.
+	// A single-line context chunk "value = 0" matches both → ambiguous.
+	original := "func a() {\n\tvalue = 0\n}\nfunc b() {\n\tvalue = 0\n}\n"
+	chunks := []UpdateChunk{
+		{OldLines: []string{"value = 0"}, NewLines: []string{"value = 1"}},
+	}
+	_, err := DeriveNewContents("test.go", chunks, original)
+	if err == nil {
+		t.Fatal("expected ambiguity error, got nil")
+	}
+	if !strings.Contains(err.Error(), "multiple") {
+		t.Fatalf("error should mention 'multiple', got: %v", err)
+	}
+}
+
+// TestDeriveNewContentsLooseUniqueApplies proves a unique LOOSE match (only
+// matching after whitespace normalization) still applies — ambiguity rejection
+// must not break legitimate fuzzy single matches.
+func TestDeriveNewContentsLooseUniqueApplies(t *testing.T) {
+	// File line has collapsed/extra internal whitespace vs the chunk context,
+	// matching only under the collapse-whitespace pass, and it is unique.
+	original := "a\n  foo    bar  \nc\n"
+	chunks := []UpdateChunk{
+		{OldLines: []string{"foo bar"}, NewLines: []string{"X"}},
+	}
+	got, err := DeriveNewContents("test.go", chunks, original)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "a\nX\nc\n" {
+		t.Fatalf("got %q want %q", got, "a\nX\nc\n")
+	}
+}
+
+// TestDeriveNewContentsExactUniqueBeatsLooseMulti proves cascade ordering: when
+// an exact-unique match exists, it wins even though a looser pass would match
+// multiple lines. The stricter pass is tried first.
+func TestDeriveNewContentsExactUniqueBeatsLooseMulti(t *testing.T) {
+	// Exact "  b" appears once. Trimmed "b" would match lines "  b" and "b   ",
+	// i.e. multiple under rstrip/trim. Exact pass must win and edit only "  b".
+	original := "a\n  b\nc\nb   \nd\n"
+	chunks := []UpdateChunk{
+		{OldLines: []string{"  b"}, NewLines: []string{"  B"}},
+	}
+	got, err := DeriveNewContents("test.go", chunks, original)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "a\n  B\nc\nb   \nd\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+// TestDeriveNewContentsSequentialIdenticalChunks is a positive regression: two
+// chunks that share an IDENTICAL edited body line ("return n") but are each
+// anchored by a unique preceding context line apply in order. The cursor
+// advance after chunk 1 means chunk 2's window is unique within lines[cursor:],
+// so neither is rejected as ambiguous. This is the realistic sequential case
+// the spec requires to keep working — each chunk carries enough context that it
+// is unique in the remaining slice even though their changed lines coincide.
+func TestDeriveNewContentsSequentialIdenticalChunks(t *testing.T) {
+	original := "func a() {\n\treturn n\n}\nfunc b() {\n\treturn n\n}\n"
+	chunks := []UpdateChunk{
+		// Anchored by "func a() {" — unique at the head of the remaining slice.
+		{OldLines: []string{"func a() {", "\treturn n"}, NewLines: []string{"func a() {", "\treturn 1"}},
+		// After cursor advance, "func b() {" is the only remaining match.
+		{OldLines: []string{"func b() {", "\treturn n"}, NewLines: []string{"func b() {", "\treturn 2"}},
+	}
+	got, err := DeriveNewContents("test.go", chunks, original)
+	if err != nil {
+		t.Fatalf("unexpected error (sequential context-anchored chunks must apply): %v", err)
+	}
+	want := "func a() {\n\treturn 1\n}\nfunc b() {\n\treturn 2\n}\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}

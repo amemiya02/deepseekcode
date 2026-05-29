@@ -28,19 +28,21 @@ cache bytes unmoved, `go vet` clean, `-race` where relevant).
 | T2.4 | ✅ done | MCP stdio liveness watcher: process exit → `StateDegraded` (tools drop via the existing `State!=StateConnected` filter), then exactly one bounded reconnect with negative-result backoff. `r.mu` sole authority, no IO under lock, watcher bound to its transport's `Done()` by value; `-race` clean. ADR-0001 invariant (degrade surfaces as `PendingMCPToolRemoved`, never mid-epoch fingerprint movement) covered compositionally by the new mcp-layer `DriftRemoved` test + existing `TestCapabilityDiff_MCPAddRemove`/`TestEpochMutationsAfterFreezeBecomePending`. |
 | T4.1 | ✅ done | Per-session calibrated chars-per-token ratio learned from `usage.PromptTokens` (EMA α=0.3, clamped [1.0,12.0], zero-usage no-op), fed into the compaction trigger (`ContextPressure`/`ShouldCompact`) and the budget projection (`ProjectedTurnCostCNY`). `EstimateTokensCalibrated` with `EstimateTokens` as the char/4 cold-start wrapper — turn-1 byte-identical to today. No tokenizer; touchesFingerprint=false (golden unmoved). |
 | T4.2 | ✅ done | Cache-aware budget projection: `ProjectedTurnCostCNY` discounts input by the rolling session cache-hit rate (`BudgetState.SessionCacheHitRate`, folded from each committed turn's authoritative usage via `FoldCacheUsage`; hit-token split floored → conservative; rate clamped [0,1]; cold-start rate 0 reproduces the all-miss floor exactly). Unknown-model free pass closed: a model with no pricing table warns once per session (`BudgetState.UnknownModelWarned`). touchesFingerprint=false (golden unmoved, `-race` green). |
+| T4.4 | ✅ done | Unified compaction triggers: `reconcileCompactThreshold` makes the deterministic fallback fire at `min(absolute AutoCompactInputTokens, CompactThreshold×maxCtx)` so the absolute and ratio-of-max triggers cannot disagree on the firing point (default-preserving — both are 800k at defaults; only applied when semantic compaction is live). Deleted the dead parallel `context_fold.go`+`context_fold_test.go` (`PlanContextFold`/`FoldPlan`/`hasToolCalls` — zero production callers, confirmed by deletion-impact grep + clean build; it duplicated `adjustBoundary`'s tool-pair-safe boundary logic, a drift risk). |
 | T4.3 | ✅ done | Compaction summary is now an **assistant-role body message** (not a 2nd `system` message wedged after the prompt) — `staticSystem()` only fingerprints `a.System`, so the wire shape changes with zero fingerprint/cache movement (the cache lens of the adversarial pass returned **zero** real defects). `mergeCompactSummaries` wired into production via `summarizeWithMerge` so multi-round compaction unions early facts forward (head-of-body placement is what keeps the prior summary inside the next compaction window — required for merge; "tail" in the original spec was inconsistent with its own merge requirement). **Hardened after a 3-lens adversarial workflow** which reproduced a real HIGH fact-corruption bug: a user message embedding a `- tools_used: […]` line masqueraded as a field header on the now-production `parseSummaryFields` round-trip → fixed by `singleLine()`-collapsing the two raw-text fields (`current_work`, `recent_requests`); also semantic-path carry-forward (prompt instruction + full prior-summary inclusion, since the LLM summary's field vocabulary differs and can't be structurally merged), `current_work`/`recent_requests` cross-round retention, prose false-positive guard, and a scoped store.go comment. touchesFingerprint=false (golden unmoved, full suite + `-race` green). |
 | T3.1 | ✅ done | Permission gate resolves symlinks to agree with the tool layer. |
 | T3.3 | ✅ done | Snapshot durable writes (temp+fsync+rename), mutex, tested `Prune`. Deferred: wiring `Prune` to a startup cadence. |
 | T5.1 | ✅ done | TUI key-flow regression harness pinning the `intercepted` contract. |
 
-**T1 and T2 are complete** (bar T1.3 leftovers). **T4 in progress: T4.1, T4.2,
-and T4.3 landed** (each via the vetted sequential order from the T4 design pass;
-T4.3 additionally hardened by a 3-lens adversarial workflow that caught a real
-HIGH fact-corruption bug). The avoided 6-caller `ReplaceWithCompaction` signature
+**T1, T2, and T4 are complete** (bar T1.3 leftovers). All of T4 (T4.1–T4.4)
+landed via the vetted sequential order from the T4 design pass; T4.3 was
+additionally hardened by a 3-lens adversarial workflow that caught a real HIGH
+fact-corruption bug. The avoided 6-caller `ReplaceWithCompaction` signature
 churn the critic flagged: a one-line hardcoded-role change in the store sufficed,
-since no caller needs a variable role. Next: **T4.4** (reconcile the absolute vs
-ratio compaction triggers so they can't disagree; delete dead `context_fold.go` —
-deletion-impact grep first). Then the remaining T1.3 leftovers and T3/T5/T6/T7.
+since no caller needs a variable role. Next: the remaining **T1.3 leftovers**
+(budget/denied EventInfo → typed events; drop the unreachable tool-error abort
+branch) and **T3** (T3.2 sandbox, T3.4/T3.5 undo/checkpoint), **T5** (T5.2–T5.4
+TUI), **T6** (T6.1/T6.2/T6.4 bench/eval), **T7** (docs/config/profiles).
 
 ---
 

@@ -284,6 +284,36 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 	return true, 0, len(messages) - preserve
 }
 
+// reconcileCompactThreshold returns the effective absolute token threshold for
+// the deterministic compaction fallback: the STRICTER (smaller) of the
+// configured absolute trigger and the ratio-derived semantic trigger
+// (compactRatio × maxContextTokens). Folding the two into one min() keeps the
+// absolute and ratio-of-max triggers from disagreeing on the firing point
+// (T4.4) — the deterministic fallback never waits longer than the semantic
+// path's compact tier, nor vice versa. With the defaults (800_000 absolute,
+// 0.80 ratio, 1_000_000 window) both equal 800_000, so this is a no-op until
+// one is overridden.
+//
+// A non-positive absolute is left as-is (deterministic intentionally disabled —
+// never enabled from the ratio); a non-positive ratio mirrors
+// ShouldSemanticCompact's 0.80 default; a non-positive maxContextTokens leaves
+// the absolute unchanged (no ratio to derive).
+func reconcileCompactThreshold(absolute int, compactRatio float64, maxContextTokens int) int {
+	if absolute <= 0 {
+		return absolute
+	}
+	if compactRatio <= 0 {
+		compactRatio = 0.80
+	}
+	if maxContextTokens <= 0 {
+		return absolute
+	}
+	if ratioThreshold := int(compactRatio * float64(maxContextTokens)); ratioThreshold > 0 && ratioThreshold < absolute {
+		return ratioThreshold
+	}
+	return absolute
+}
+
 // DefaultCompactionConfig returns the default config. The
 // AutoCompactInputTokens value can be overridden at process start
 // via DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS — malformed values

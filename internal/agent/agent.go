@@ -624,8 +624,15 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 
-	// Deterministic fallback path.
-	res := CompactSession(a.Messages, a.CompactionCfg, a.charsPerToken)
+	// Deterministic fallback path. When semantic compaction is live, reconcile
+	// the absolute trigger with the ratio-of-max trigger so the two cannot
+	// disagree on the firing point (T4.4); when it is disabled, the absolute
+	// trigger stands alone (no ratio trigger to reconcile against).
+	detCfg := a.CompactionCfg
+	if !a.DisableSemanticCompaction {
+		detCfg.AutoCompactInputTokens = reconcileCompactThreshold(detCfg.AutoCompactInputTokens, a.SemanticCfg.CompactThreshold, maxCtx)
+	}
+	res := CompactSession(a.Messages, detCfg, a.charsPerToken)
 	if res.Summary == "" {
 		return
 	}

@@ -505,6 +505,38 @@ func TestCompactionSummaryWireShapeProviderAcceptable(t *testing.T) {
 	}
 }
 
+// TestReconcileCompactThreshold pins the T4.4 trigger reconciliation: the
+// deterministic fallback threshold is the stricter (min) of the absolute
+// trigger and the ratio-derived semantic trigger, with the documented edge
+// cases (disabled absolute stays disabled; zero ratio mirrors the 0.80 default;
+// zero window leaves the absolute unchanged; defaults are a no-op).
+func TestReconcileCompactThreshold(t *testing.T) {
+	cases := []struct {
+		name     string
+		absolute int
+		ratio    float64
+		maxCtx   int
+		want     int
+	}{
+		{"defaults coincide (no-op)", 800_000, 0.80, 1_000_000, 800_000},
+		{"absolute higher than ratio → clamp to ratio", 900_000, 0.80, 1_000_000, 800_000},
+		{"absolute stricter than ratio → keep absolute", 500_000, 0.80, 1_000_000, 500_000},
+		{"zero ratio mirrors 0.80 default", 900_000, 0, 1_000_000, 800_000},
+		{"disabled absolute stays disabled", 0, 0.80, 1_000_000, 0},
+		{"negative absolute stays as-is", -1, 0.80, 1_000_000, -1},
+		{"zero window leaves absolute unchanged", 800_000, 0.80, 0, 800_000},
+		{"small window lowers threshold", 800_000, 0.80, 100_000, 80_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reconcileCompactThreshold(tc.absolute, tc.ratio, tc.maxCtx); got != tc.want {
+				t.Errorf("reconcileCompactThreshold(%d, %v, %d) = %d, want %d",
+					tc.absolute, tc.ratio, tc.maxCtx, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSummaryFieldInjectionSurvivesRoundTrip is the T4.3 HIGH regression
 // (found by the adversarial review): a user message that embeds an indent-0
 // "- tools_used: [INJECTED]" line must NOT masquerade as a real field header on

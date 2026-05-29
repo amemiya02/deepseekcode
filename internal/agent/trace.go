@@ -207,9 +207,7 @@ func (s *TraceSink) Handle(ev Event) {
 		})
 	case EventEscalated:
 		// The turn was re-issued on a stronger model. Kind carries the trigger
-		// (marker / repair_errors); Model is the model escalated TO. The literal
-		// "policy.escalated" equals eventschema.PolicyEscalated (T6.2 will
-		// converge the trace strings onto those constants wholesale).
+		// (marker / repair_errors); Model is the model escalated TO.
 		s.write(traceRecord{
 			Type:        "policy.escalated",
 			EpochID:     s.curEpochID,
@@ -220,8 +218,7 @@ func (s *TraceSink) Handle(ev Event) {
 	case EventBudget:
 		// Session-budget gate decision (T1.3). The Type encodes the kind
 		// (budget.warning / budget.blocked / budget.unpriced); Model is the
-		// model gated. Literal strings mirror eventschema.Budget* (T6.2 will
-		// converge the trace strings onto those constants wholesale).
+		// model gated.
 		t := "budget.warning"
 		switch e.Kind {
 		case BudgetKindBlocked:

@@ -95,8 +95,8 @@ const (
 // stringly-typed EventInfo so "warned" vs "blocked" vs "unpriced" are
 // distinguishable for analytics and programmatic gating). ProjectedCNY/SpentCNY
 // are the gate's inputs (ProjectedCNY is 0 for the unpriced kind, where it
-// cannot be computed); Model is the model being gated. Traced as
-// eventschema.Budget{Warning,Blocked,Unpriced}.
+// cannot be computed); Model is the model being gated. Traced with type
+// budget.warning / budget.blocked / budget.unpriced.
 type EventBudget struct {
 	Kind         string
 	ProjectedCNY float64
@@ -107,7 +107,7 @@ type EventBudget struct {
 // EventPermissionDenied reports a tool call refused by the permission layer
 // (T1.3 — promoted from EventInfo). ByRule distinguishes an explicit deny-rule
 // match from a policy-tier denial; Reason is the human-readable cause. Traced
-// as eventschema.PermissionDenied.
+// with type permission.denied.
 type EventPermissionDenied struct {
 	Tool   string
 	Reason string
@@ -118,7 +118,7 @@ type EventPermissionDenied struct {
 // model (the Two-Model escalation). Trigger is "marker" (the model emitted a
 // <<<NEEDS_PRO>>> self-declaration) or "repair_errors" (the per-turn repair
 // failure count crossed the threshold). FromModel/ToModel record the switch.
-// Traced as eventschema.PolicyEscalated.
+// Traced with type policy.escalated.
 type EventEscalated struct {
 	Trigger   string
 	FromModel string

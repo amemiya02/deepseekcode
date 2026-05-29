@@ -110,12 +110,6 @@ prints directly) so tests can assert on the output.
 
 Each tool implements `Tool` (Name/Description/Parameters/Execute). `Registry.AsLLMTools()` returns them sorted by name for cache-stable tool listings. Structured git tools (`git_diff/git_show/git_blame/git_log`) emit typed output rather than wrapping pager output.
 
-### Event schema (`internal/eventschema/`)
-
-Canonical event-name constants (`ModelTurnStarted`, `PrefixEpochCreated`, etc.)
-so downstream consumers (CLI, dashboards, benchmarks) reference the same string
-identifiers. `Known(name) bool` validates event names.
-
 ### TUI render cache (`internal/tui/render_cache.go`)
 
 LRU cache keyed by content-based hashes (toolCallID + tool + args + theme +

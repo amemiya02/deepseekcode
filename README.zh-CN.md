@@ -247,6 +247,7 @@ MCP server 提供的工具。
 - [docs/duet.md](docs/duet.md) — Pro validator 行为
 - [docs/tape.md](docs/tape.md) — reasoning tape 行为
 - [docs/upgrade.md](docs/upgrade.md) — upgrade 命令行为
+- [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md) — DeepSeek wire 形态事实与受支持模型
 
 ## 开发
 

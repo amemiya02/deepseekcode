@@ -264,6 +264,7 @@ See [docs/permissions.md](docs/permissions.md) and
 - [docs/duet.md](docs/duet.md) — Pro validator behavior
 - [docs/tape.md](docs/tape.md) — reasoning tape behavior
 - [docs/upgrade.md](docs/upgrade.md) — upgrade command behavior
+- [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md) — DeepSeek wire-format facts & supported models
 
 ## Development
 

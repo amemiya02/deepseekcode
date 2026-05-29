@@ -20,8 +20,7 @@ type PrefixFingerprint struct {
 
 // ComputeFingerprint hashes system prompt + canonical serialized tool specs.
 // It is a thin shim over StaticPrefix.Fingerprint() (static_prefix.go); callers
-// are being migrated to StaticPrefix directly (M2 of
-// docs/refactor-prefix-fingerprint.md).
+// are being migrated to StaticPrefix directly. See docs/adr/0001.
 func ComputeFingerprint(input PrefixInput) PrefixFingerprint {
 	return StaticPrefix{System: input.SystemPrompt, Tools: input.Tools}.Fingerprint()
 }
@@ -96,7 +95,6 @@ func (m *PrefixMonitor) StabilityRatio() float64 {
 }
 
 // NOTE: the former 6-component EpochComponentHashes / ComputeEpochHash were
-// removed in M3 (docs/refactor-prefix-fingerprint.md): the epoch's
-// StaticPrefixHash is now the model-visible Prefix Fingerprint
-// (StaticPrefix.Fingerprint), and latent capability state is tracked separately
-// via agent.CapabilitySet. See docs/adr/0001.
+// removed: the epoch's StaticPrefixHash is now the model-visible Prefix
+// Fingerprint (StaticPrefix.Fingerprint), and latent capability state is
+// tracked separately via agent.CapabilitySet. See docs/adr/0001.

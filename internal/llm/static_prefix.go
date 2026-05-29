@@ -49,10 +49,9 @@ func canonicalizeTools(tools []Tool) ([]Tool, error) {
 // source of truth for "what the model sees" — see /CONTEXT.md.
 //
 // FewShots is carried for forward-compatibility but is NOT yet folded into the
-// fingerprint: few-shots are currently always empty, and folding them in is the
-// deliberate fingerprint redefinition done in M3 of
-// docs/refactor-prefix-fingerprint.md (the visible/latent split). Keeping M1 a
-// pure refactor means StaticPrefix.Fingerprint() reproduces the existing
+// fingerprint: few-shots are currently always empty, and folding them in is a
+// deliberate fingerprint change (the visible/latent split; see docs/adr/0001
+// and /CONTEXT.md). StaticPrefix.Fingerprint() currently reproduces the legacy
 // ComputeFingerprint value exactly.
 type StaticPrefix struct {
 	System   string
@@ -89,7 +88,7 @@ func (d ToolDiff) Changed() bool {
 // answer the per-turn monitor (and, in M3, the epoch manager) build on.
 //
 // FewShots is intentionally absent: it is not yet part of the fingerprint
-// (see the StaticPrefix doc / M3 of docs/refactor-prefix-fingerprint.md).
+// (see the StaticPrefix doc above and docs/adr/0001).
 type PrefixDiff struct {
 	SystemChanged bool
 	Tools         ToolDiff

@@ -3,8 +3,7 @@
 The domain language for how `deepseekcode` keeps DeepSeek's prompt cache hot.
 The 50× cache-hit discount is the product's cost story, so the terms below —
 what the model sees, how we identify it, and what is allowed to change it —
-are load-bearing. (The old production-grade handoff/punch-list now lives at
-[docs/HANDOFF.md](docs/HANDOFF.md).)
+are load-bearing.
 
 ## Language
 

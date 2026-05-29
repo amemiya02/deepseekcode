@@ -6,7 +6,7 @@ import (
 )
 
 // TestMCPSchemaKeyReorder_NoPhantomDrift is the regression for the phantom-drift
-// defect fixed in M3 (docs/refactor-prefix-fingerprint.md, docs/adr/0001). The
+// defect fixed in M3 (docs/adr/0001). The
 // raw, key-order-sensitive SchemaHash was removed; MCP schema identity is now
 // judged only by the canonical paths (CompareToolLists / PendingSchemaChanges).
 // A reconnect that re-emits the same tool with reordered JSON-Schema keys must

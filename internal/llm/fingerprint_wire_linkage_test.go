@@ -6,7 +6,7 @@ import (
 )
 
 // TestFingerprintTracksWireStaticHead locks the P1 contract from
-// docs/refactor-prefix-fingerprint.md: the Prefix Fingerprint must move IFF the
+// docs/adr/0001: the Prefix Fingerprint must move IFF the
 // MarshalCacheStable static head moves. Today hashToolsCanonical only promises
 // to match MarshalCacheStable via a hand-maintained comment; this test pins the
 // linkage *behaviorally* on identical inputs, so the M1 consolidation (one

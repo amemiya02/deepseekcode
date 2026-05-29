@@ -236,9 +236,8 @@ time." It is a named immutable epoch.
 > identity (agent profile, skills, MCP) is tracked separately as a
 > `CapabilitySet` and is **not** hashed into the prefix; pending changes come
 > from `CapabilityDiff`. See
-> `docs/adr/0001-prefix-fingerprint-is-model-visible-bytes-only.md`,
-> `docs/refactor-prefix-fingerprint.md`, and `/CONTEXT.md`. The component list
-> below is kept for historical context.
+> `docs/adr/0001-prefix-fingerprint-is-model-visible-bytes-only.md` and
+> `/CONTEXT.md`. The component list below is kept for historical context.
 
 `PrefixEpoch` is a frozen model-visible prefix snapshot.
 

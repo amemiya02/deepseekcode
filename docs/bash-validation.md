@@ -6,6 +6,12 @@ regex-based destructive detection with a structured classifier.
 
 ## Intent Levels
 
+| Level | Name | Behavior |
+|---|---|---|
+| 0 | `read` | Auto-allow (no permission prompt) |
+| 1 | `safe` | Allow if pattern in `bashAllowlist`; otherwise ask |
+| 2 | `destructive` | Always ask (allowlist ignored) |
+| 3 | `unknown` | Ask (treated conservatively) |
 
 ## Classification Rules
 

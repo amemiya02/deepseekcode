@@ -20,6 +20,17 @@ type StepRecord struct {
 	// the loop model, but an escalated turn (T2.3) records the stronger model
 	// so cost/trace attribution follows the turn, not the static loop model.
 	Model string
+	// MessageCount is len(a.Messages) captured BEFORE this step's model turn —
+	// the transcript boundary this step started from. /undo (T3.5) truncates
+	// a.Messages back to the boundary of the first undone step so the model's
+	// view matches the reverted files. Boundaries recorded before a compaction
+	// are stale (compaction renumbers messages), so undo refuses to cross one.
+	MessageCount int
+	// Snapshotted is true when this step took a file snapshot (i.e. it ran a
+	// mutating tool). /undo counts SNAPSHOTS, not steps — snapshots are sparse
+	// (read-only steps take none) — so ReconcileUndo walks snapshotted steps to
+	// find the same boundary the snapshot manager reverts files to (T3.5).
+	Snapshotted bool
 }
 
 // StopReason describes why the loop terminated.

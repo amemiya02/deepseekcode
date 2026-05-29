@@ -212,6 +212,13 @@ type Agent struct {
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
 
+	// compactionFloor is the step index at/after which StepRecord.MessageCount
+	// boundaries are valid for /undo (T3.5). A compaction renumbers a.Messages,
+	// invalidating boundaries recorded by earlier steps, so it is raised to
+	// len(a.steps) whenever a compaction swaps the message slice; ReconcileUndo
+	// refuses to undo to a step below it. Session-scoped (NOT reset per Run).
+	compactionFloor int
+
 	// loopNudged records that the one-shot loop-break nudge has been spent in
 	// the current Run. loopFloor is the step index from which loop detection
 	// counts *after* a nudge: without it the pre-nudge repeats stay inside the
@@ -411,6 +418,9 @@ agentLoop:
 		// stepCancel is always non-nil so we can defer it unconditionally.
 		stepCtx, stepCancel := stepContext(ctx, a.StepTimeout)
 
+		// Transcript boundary this step starts from (before its model turn
+		// appends anything), recorded on the step for /undo reconcile (T3.5).
+		preStepMsgCount := len(a.Messages)
 		step, err := a.runStep(stepCtx)
 		if err != nil {
 			stepCancel()
@@ -445,6 +455,7 @@ agentLoop:
 		}
 		// The step completed; allow a future overflow its own recovery attempt.
 		overflowRetried = false
+		step.MessageCount = preStepMsgCount
 		a.steps = append(a.steps, step)
 
 		// finish-reason override: even if the model said finish_reason=stop,
@@ -605,6 +616,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
 				// the model no longer holds those files' contents — force a
 				// re-read before any edit (T3.2). nil-safe on both calls.
@@ -653,6 +665,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
 	a.Tools.FileTracker().Clear()
 	a.bus.Publish(EventCompaction{
@@ -1425,6 +1438,11 @@ func (a *Agent) runToolCalls(ctx context.Context, calls []llm.ToolCall) {
 		}
 		if len(paths) > 0 {
 			_, _ = a.Persister.TakeSnapshot(len(a.steps), paths)
+			// Mark the current step (already appended) as snapshotted so /undo
+			// reconcile can count snapshots, not steps (T3.5).
+			if len(a.steps) > 0 {
+				a.steps[len(a.steps)-1].Snapshotted = true
+			}
 		}
 	}
 

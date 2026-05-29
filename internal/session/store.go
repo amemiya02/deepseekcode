@@ -457,6 +457,36 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, m Message) 
 // Returns the idx of the inserted summary row (== fromIdx). A
 // no-op call (fromIdx == toIdx) returns fromIdx with nil error.
 // toIdx larger than the current message count is clamped to count+1.
+// CountMessages returns the number of persisted messages for the session.
+// /undo reconcile (T3.5) uses it to verify the in-memory transcript is
+// index-aligned with disk before truncating disk.
+func (s *Store) CountMessages(ctx context.Context, sessionID string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages WHERE session_id = ?`, sessionID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
+	return n, nil
+}
+
+// TruncateMessages deletes all messages with idx >= keepCount for the session.
+// The deleted tail is contiguous from keepCount, so no renumbering is needed.
+// Used by /undo reconcile (T3.5) to make disk match the rewound in-memory
+// transcript. keepCount <= 0 clears all messages; returns the rows removed.
+func (s *Store) TruncateMessages(ctx context.Context, sessionID string, keepCount int) (int, error) {
+	if keepCount < 0 {
+		keepCount = 0
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM messages WHERE session_id = ? AND idx >= ?`,
+		sessionID, keepCount)
+	if err != nil {
+		return 0, fmt.Errorf("truncate messages: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *Store) ReplaceWithCompaction(ctx context.Context, sessionID string, fromIdx, toIdx int, summary string) (int, error) {
 	if fromIdx < 0 || toIdx < fromIdx {
 		return 0, fmt.Errorf("ReplaceWithCompaction: invalid range [%d,%d)", fromIdx, toIdx)

@@ -30,6 +30,19 @@ func NewPersister(store *Store, snaps *snapshots.Manager, sessionID string) *Per
 // SessionID returns the session this persister is bound to.
 func (p *Persister) SessionID() string { return p.sessID }
 
+// TruncateMessages drops persisted messages with idx >= keepCount, satisfying
+// agent.MessageTruncator so /undo can make disk match the rewound in-memory
+// transcript (T3.5).
+func (p *Persister) TruncateMessages(ctx context.Context, keepCount int) (int, error) {
+	return p.store.TruncateMessages(ctx, p.sessID, keepCount)
+}
+
+// PersistedMessageCount returns the persisted body-message count, letting
+// /undo verify in-memory↔disk index alignment before truncating disk (T3.5).
+func (p *Persister) PersistedMessageCount(ctx context.Context) (int, error) {
+	return p.store.CountMessages(ctx, p.sessID)
+}
+
 // AppendUserMessage records a user turn from a typed block slice.
 func (p *Persister) AppendUserMessage(ctx context.Context, blocks []llm.ContentBlock) (int, error) {
 	return p.store.AppendMessage(ctx, p.sessID, Message{

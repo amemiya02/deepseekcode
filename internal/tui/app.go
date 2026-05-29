@@ -1279,13 +1279,41 @@ func (a *App) applyUndo(n int) {
 		a.refreshView()
 		return
 	}
+	// The transcript reconcile below mutates a.Messages, which the agent
+	// goroutine reads while running — refuse mid-turn (T3.5). Read the flag
+	// under the lock, matching the ctrl+c handler.
+	a.runMu.Lock()
+	running := a.running
+	a.runMu.Unlock()
+	if running {
+		a.scrollback.AppendInfo("/undo unavailable while the agent is running")
+		a.refreshView()
+		return
+	}
 	restored, err := a.session.undo(n)
 	if err != nil {
 		a.scrollback.AppendError("/undo: " + err.Error())
 		a.refreshView()
 		return
 	}
-	a.scrollback.AppendInfo(fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n))
+	msg := fmt.Sprintf("/undo restored %d file(s) across %d step(s)", restored, n)
+	// Reconcile the transcript so the model's view matches the reverted files
+	// (T3.5). The files are already reverted; surface a reconcile failure but
+	// do not try to roll them back.
+	if a.agent != nil {
+		switch removed, rerr := a.agent.ReconcileUndo(context.Background(), n); {
+		case rerr != nil:
+			msg += "; transcript NOT reconciled: " + rerr.Error()
+		case removed > 0:
+			msg += fmt.Sprintf("; rewound %d message(s)", removed)
+		case restored > 0:
+			// Files reverted but no step history to rewind (e.g. a resumed
+			// session, whose in-memory step records start empty). Warn so the
+			// file/model divergence is not silent.
+			msg += "; transcript NOT reconciled (no step history this session — resumed?); the model's view may now disagree with the reverted files"
+		}
+	}
+	a.scrollback.AppendInfo(msg)
 	a.refreshView()
 }
 

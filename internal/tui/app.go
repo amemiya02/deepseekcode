@@ -475,17 +475,6 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.scrollback.EndStreams()
 		a.chrome.Reset()
 		a.refreshView()
-	case agent.EventEpochCreated:
-		a.status.epochID = e.EpochID
-		a.status.prefixHash = e.StaticPrefixHash
-		a.status.driftReason = ""
-		a.refreshView()
-	case agent.EventPendingChange:
-		a.status.pendingChanges++
-		a.refreshView()
-	case agent.EventDriftBlocked:
-		a.status.driftReason = e.Which
-		a.refreshView()
 	case agent.EventBackgroundJobStart:
 		a.status.runningJobs++
 		a.refreshView()

@@ -371,7 +371,7 @@ func TestHumanTokens(t *testing.T) {
 	}
 }
 
-func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
+func TestRenderHUDShowsCoreFields(t *testing.T) {
 	got := RenderHUD(HUDData{
 		Model:           "deepseek-v4-flash",
 		Effort:          "medium",
@@ -381,10 +381,6 @@ func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
 		InputMissTokens: 50,
 		OutputTokens:    20,
 		SessionCNY:      0.0123,
-		EpochID:         "epoch_abcdef123456",
-		PrefixHash:      "1234567890abcdef",
-		PendingChanges:  2,
-		DriftReason:     "tools",
 		ActiveAgent:     "coding-default",
 		RunningJobs:     1,
 	}, 240)
@@ -393,15 +389,21 @@ func TestRenderHUDShowsEpochAndPendingDrift(t *testing.T) {
 		"cache 95.0%",
 		"ctx [",
 		"64k/128k",
-		"epoch abcdef12",
-		"pfx 12345678",
-		"pending 2",
-		"drift tools",
 		"agent coding-default",
 		"jobs 1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("RenderHUD missing %q:\n%s", want, got)
+		}
+	}
+
+	// The prefix-cache telemetry (epoch / pfx / pending / drift) was
+	// intentionally dropped from the status HUD — its economic signal is
+	// carried by "cache %%" + "saved ¥" + the ⚠ cache invalidation note, and
+	// the raw ids live in traces. Guard against it creeping back onto the line.
+	for _, banned := range []string{"epoch ", "pfx ", "pending ", "drift "} {
+		if strings.Contains(got, banned) {
+			t.Errorf("RenderHUD must not render %q (removed from the HUD):\n%s", banned, got)
 		}
 	}
 }

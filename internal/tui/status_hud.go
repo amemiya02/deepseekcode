@@ -19,10 +19,6 @@ type HUDData struct {
 	ReasoningTokens int
 	StepCNY         float64
 	SessionCNY      float64
-	EpochID         string
-	PrefixHash      string
-	PendingChanges  int
-	DriftReason     string
 	ActiveAgent     string
 	RunningJobs     int
 }
@@ -84,18 +80,6 @@ func RenderHUD(data HUDData, width int) string {
 	if data.ActiveAgent != "" {
 		parts = append(parts, "agent "+data.ActiveAgent)
 	}
-	if data.EpochID != "" {
-		parts = append(parts, "epoch "+shortHUD(data.EpochID))
-	}
-	if data.PrefixHash != "" {
-		parts = append(parts, "pfx "+shortHUD(data.PrefixHash))
-	}
-	if data.PendingChanges > 0 {
-		parts = append(parts, fmt.Sprintf("pending %d", data.PendingChanges))
-	}
-	if data.DriftReason != "" {
-		parts = append(parts, "drift "+data.DriftReason)
-	}
 	if data.RunningJobs > 0 {
 		parts = append(parts, fmt.Sprintf("jobs %d", data.RunningJobs))
 	}
@@ -150,15 +134,4 @@ func humanTokens(n int) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
-}
-
-func shortHUD(s string) string {
-	if strings.HasPrefix(s, "epoch_") {
-		s = strings.TrimPrefix(s, "epoch_")
-	}
-	r := []rune(s)
-	if len(r) <= 8 {
-		return s
-	}
-	return string(r[:8])
 }

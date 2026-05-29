@@ -23,10 +23,6 @@ type statusState struct {
 	hint            string
 	cacheNote       string
 	mode            appMode
-	epochID         string
-	prefixHash      string
-	pendingChanges  int
-	driftReason     string
 	activeAgent     string
 	runningJobs     int
 }
@@ -60,15 +56,11 @@ func (s statusState) render(t Theme) string {
 
 	// Build HUD data for additional metrics (without model to avoid duplication)
 	hudData := HUDData{
-		ContextTokens:  s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
-		ContextLimit:   s.contextLimit,
-		OutputTokens:   s.usage.CompletionTokens,
-		EpochID:        s.epochID,
-		PrefixHash:     s.prefixHash,
-		PendingChanges: s.pendingChanges,
-		DriftReason:    s.driftReason,
-		ActiveAgent:    s.activeAgent,
-		RunningJobs:    s.runningJobs,
+		ContextTokens: s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
+		ContextLimit:  s.contextLimit,
+		OutputTokens:  s.usage.CompletionTokens,
+		ActiveAgent:   s.activeAgent,
+		RunningJobs:   s.runningJobs,
 	}
 
 	hudLine := RenderHUD(hudData, 200) // Use wide width for status line

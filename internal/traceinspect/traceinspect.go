@@ -35,7 +35,20 @@ type Report struct {
 	CacheHitRate    float64
 	RootEpochs      int
 	SubagentEpochs  int
-	Epochs          []EpochSummary
+
+	// T6.4: lifecycle records the gate inspects. A clean summary that omits
+	// these would mask exactly the events the Cache Reliability gate fails on.
+	CompactionCount    int
+	DriftBlockedCount  int
+	PendingChangeCount int
+
+	// Realized (sum of usage cost_cny) vs the budget gate's projected cost
+	// (sum of projected_cny on budget.* records). BudgetEvents counts how many
+	// budget records contributed a projection.
+	ProjectedCNY float64
+	BudgetEvents int
+
+	Epochs []EpochSummary
 }
 
 func InspectFile(path string) (Report, error) {
@@ -99,6 +112,17 @@ func InspectFile(path string) (Report, error) {
 			if e := epochs[r.EpochID]; e != nil {
 				e.Done = true
 			}
+		case "compaction":
+			rep.CompactionCount++
+		case "drift.blocked":
+			rep.DriftBlockedCount++
+		case "pending_change":
+			rep.PendingChangeCount++
+		case "budget.warning", "budget.blocked", "budget.unpriced":
+			if r.ProjectedCNY != nil {
+				rep.ProjectedCNY += *r.ProjectedCNY
+				rep.BudgetEvents++
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -129,6 +153,14 @@ func RenderText(rep Report) string {
 	fmt.Fprintf(&b, "usage turns %d | cache %.1f%% | in hit/miss %d/%d | out %d | cost ¥%.6f\n",
 		rep.TotalUsageTurns, rep.CacheHitRate*100, rep.CacheHitTokens, rep.CacheMissTokens, rep.OutputTokens, rep.CostCNY)
 	fmt.Fprintf(&b, "epochs root %d | subagents %d\n", rep.RootEpochs, rep.SubagentEpochs)
+	fmt.Fprintf(&b, "lifecycle: compaction %d | drift.blocked %d | pending %d\n",
+		rep.CompactionCount, rep.DriftBlockedCount, rep.PendingChangeCount)
+	if rep.BudgetEvents > 0 {
+		// Δ = projected (conservative all-miss) − realized (cache-discounted);
+		// a positive Δ is the cache savings the gate's projection didn't assume.
+		fmt.Fprintf(&b, "cost realized ¥%.6f vs projected ¥%.6f (Δ ¥%.6f over %d budget event(s))\n",
+			rep.CostCNY, rep.ProjectedCNY, rep.ProjectedCNY-rep.CostCNY, rep.BudgetEvents)
+	}
 	for _, e := range rep.Epochs {
 		done := "open"
 		if e.Done {

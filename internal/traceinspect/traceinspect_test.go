@@ -36,6 +36,75 @@ func TestInspectTraceSummarizesEpochUsageAndSubagents(t *testing.T) {
 	}
 }
 
+// TestInspectSurfacesLifecycleAndProjectedCost pins the T6.4 additions: the
+// inspector now counts compaction/drift/pending records (previously ignored,
+// so the summary looked clean even when the gate would fail) and sums the
+// budget gate's projected cost for a realized-vs-projected view.
+func TestInspectSurfacesLifecycleAndProjectedCost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"h","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","cache_hit_tokens":900,"cache_miss_tokens":100,"output_tokens":20,"cost_cny":0.002,"agent_role":"root"}`,
+		`{"type":"budget.warning","model":"deepseek-v4-flash","projected_cny":0.05}`,
+		`{"type":"compaction","before_static_prefix_hash":"h","after_static_prefix_hash":"h"}`,
+		`{"type":"drift.blocked","epoch_id":"e1","which":"tools"}`,
+		`{"type":"pending_change","epoch_id":"e1","kind":"skill_body_changed"}`,
+		`{"type":"agent.done","epoch_id":"e1","agent_role":"root","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if rep.CompactionCount != 1 || rep.DriftBlockedCount != 1 || rep.PendingChangeCount != 1 {
+		t.Errorf("lifecycle counts = compaction %d / drift %d / pending %d, want 1/1/1",
+			rep.CompactionCount, rep.DriftBlockedCount, rep.PendingChangeCount)
+	}
+	if rep.BudgetEvents != 1 || rep.ProjectedCNY < 0.0499 || rep.ProjectedCNY > 0.0501 {
+		t.Errorf("projected = ¥%.4f over %d events, want ¥0.05 over 1", rep.ProjectedCNY, rep.BudgetEvents)
+	}
+	out := RenderText(rep)
+	for _, want := range []string{
+		"lifecycle: compaction 1 | drift.blocked 1 | pending 1",
+		"cost realized ¥0.002000 vs projected ¥0.050000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("RenderText missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestInspectRegradesGoldenFixtures is the offline re-grade: the inspector
+// reproduces a summary for every committed golden fixture without re-running
+// the loop or burning tokens (T6.4). A fixture that fails to parse is itself a
+// reproducible (fail) grade, not a test failure.
+func TestInspectRegradesGoldenFixtures(t *testing.T) {
+	dir := filepath.Join("..", "..", "bench", "golden-traces")
+	fixtures := []string{
+		"pass-complete-subagent.jsonl",
+		"fail-compaction-moved-prefix.jsonl",
+		"fail-malformed-usage.jsonl",
+		"fail-split-subagent.jsonl",
+	}
+	graded := 0
+	for _, f := range fixtures {
+		t.Run(f, func(t *testing.T) {
+			rep, err := InspectFile(filepath.Join(dir, f))
+			if err != nil {
+				t.Logf("%s: parse-fail grade reproduced offline: %v", f, err)
+				return
+			}
+			graded++
+			if got := RenderText(rep); !strings.Contains(got, "lifecycle:") {
+				t.Errorf("%s: RenderText missing lifecycle line:\n%s", f, got)
+			}
+		})
+	}
+	if graded == 0 {
+		t.Fatal("no golden fixture re-graded successfully; expected at least the pass fixture")
+	}
+}
+
 func writeFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

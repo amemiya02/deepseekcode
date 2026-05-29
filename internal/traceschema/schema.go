@@ -40,6 +40,10 @@ type Record struct {
 	OutputTokens    *int     `json:"output_tokens,omitempty"`
 	CostCNY         *float64 `json:"cost_cny,omitempty"`
 
+	// ProjectedCNY is the budget gate's pre-request projected turn cost, set on
+	// budget.* records (T6.4) so the inspector can show realized vs projected.
+	ProjectedCNY *float64 `json:"projected_cny,omitempty"`
+
 	// pending_change / drift.blocked
 	Kind        string `json:"kind,omitempty"`
 	Description string `json:"description,omitempty"`

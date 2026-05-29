@@ -226,7 +226,14 @@ func (s *TraceSink) Handle(ev Event) {
 		case BudgetKindUnpriced:
 			t = "budget.unpriced"
 		}
-		s.write(traceRecord{Type: t, Model: e.Model})
+		rec := traceRecord{Type: t, Model: e.Model}
+		// Carry the projected turn cost so the inspector can show realized vs
+		// projected (T6.4). Unpriced gates have no computable projection.
+		if e.Kind != BudgetKindUnpriced {
+			pc := e.ProjectedCNY
+			rec.ProjectedCNY = &pc
+		}
+		s.write(rec)
 	case EventPermissionDenied:
 		// Tool call refused by the permission layer (T1.3). Kind is rule|policy;
 		// Description carries the tool name; Reason the cause.

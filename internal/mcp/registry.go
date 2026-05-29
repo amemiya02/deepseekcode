@@ -9,20 +9,89 @@ import (
 	"time"
 )
 
+// dialResult bundles the outputs of a successful dial: the live
+// transport plus the capabilities and tools discovered during the
+// handshake.
+type dialResult struct {
+	t     *StdioTransport
+	caps  ServerCapabilities
+	tools []McpToolMeta
+}
+
 // Registry manages the lifecycle of multiple MCP servers and provides
 // unified tool discovery and calling.
+//
+// LOCK MODEL: r.mu (the RWMutex) is the SOLE authority over r.servers
+// and every state transition (markDegraded, the reconnect commit, the
+// backoff fields). There is intentionally no per-ServerProxy lock.
+// Network/IO (NewStdioTransport/initialize/listTools, performed by dial)
+// MUST run WITHOUT r.mu held; only the final commit re-takes r.mu and
+// re-validates state before installing a new transport.
 type Registry struct {
 	mu       sync.RWMutex
 	servers  map[string]*ServerProxy
 	timeouts map[string]int // per-server call timeout in seconds
+
+	// Watcher lifecycle. Each connected StdioTransport owns exactly one
+	// watcher goroutine bound to that transport's Done() channel; wg
+	// tracks them and Shutdown closes done (once) to stop them.
+	wg            sync.WaitGroup
+	done          chan struct{}
+	closeDoneOnce sync.Once
+
+	// reconnectBackoff is the negative-result cooldown applied after a
+	// failed reconnect; a flapping server must not re-dial within it.
+	reconnectBackoff time.Duration
+	// reconnectTimeout bounds the single automatic reconnect attempt.
+	reconnectTimeout time.Duration
+
+	// dialer performs the spawn+initialize+listTools sequence. It is a
+	// seam: defaulted to the real dial, overridable in-package by tests
+	// to inject a pipe transport instead of exec'ing a real process.
+	dialer func(ctx context.Context, name, command string, args []string, env map[string]string) (dialResult, error)
 }
 
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
-	return &Registry{
-		servers:  make(map[string]*ServerProxy),
-		timeouts: make(map[string]int),
+	r := &Registry{
+		servers:          make(map[string]*ServerProxy),
+		timeouts:         make(map[string]int),
+		done:             make(chan struct{}),
+		reconnectBackoff: 30 * time.Second,
+		reconnectTimeout: 10 * time.Second,
 	}
+	r.dialer = r.dial
+	return r
+}
+
+// dial performs the spawn + initialize + listTools sequence and returns
+// a live transport with its discovered capabilities and tools. It does
+// NOT touch r.servers or r.mu — it is pure IO, shared by Connect and
+// attemptReconnect so their wire behavior cannot diverge. The caller is
+// responsible for closing the returned transport on a later failure.
+func (r *Registry) dial(ctx context.Context, name, command string, args []string, env map[string]string) (dialResult, error) {
+	if command == "" {
+		return dialResult{}, fmt.Errorf("mcp %q: empty command", name)
+	}
+
+	transport, err := NewStdioTransport(ctx, command, args, env)
+	if err != nil {
+		return dialResult{}, fmt.Errorf("mcp %q: spawn: %w", name, err)
+	}
+
+	caps, err := initialize(ctx, transport)
+	if err != nil {
+		transport.Close()
+		return dialResult{}, fmt.Errorf("mcp %q: initialize: %w", name, err)
+	}
+
+	tools, err := listTools(ctx, transport)
+	if err != nil {
+		transport.Close()
+		return dialResult{}, fmt.Errorf("mcp %q: tools/list: %w", name, err)
+	}
+
+	return dialResult{t: transport, caps: caps, tools: tools}, nil
 }
 
 // Connect spawns an MCP server, runs initialize, discovers tools, and
@@ -38,47 +107,158 @@ func (r *Registry) Connect(ctx context.Context, name, command string, args []str
 	r.servers[name] = &ServerProxy{Name: name, State: StateInitializing}
 	r.mu.Unlock()
 
-	transport, err := NewStdioTransport(ctx, command, args, env)
+	res, err := r.dialer(ctx, name, command, args, env)
 	if err != nil {
 		r.mu.Lock()
 		r.servers[name].State = StateFailed
 		r.mu.Unlock()
-		return fmt.Errorf("mcp %q: spawn: %w", name, err)
-	}
-
-	caps, err := initialize(ctx, transport)
-	if err != nil {
-		transport.Close()
-		r.mu.Lock()
-		r.servers[name].State = StateFailed
-		r.mu.Unlock()
-		return fmt.Errorf("mcp %q: initialize: %w", name, err)
-	}
-
-	tools, err := listTools(ctx, transport)
-	if err != nil {
-		transport.Close()
-		r.mu.Lock()
-		r.servers[name].State = StateFailed
-		r.mu.Unlock()
-		return fmt.Errorf("mcp %q: tools/list: %w", name, err)
+		return err
 	}
 
 	r.mu.Lock()
 	r.servers[name] = &ServerProxy{
-		Name:  name,
-		State: StateConnected,
-		Caps:  caps,
-		Tools: tools,
-		t:     transport,
+		Name:    name,
+		State:   StateConnected,
+		Caps:    res.caps,
+		Tools:   res.tools,
+		t:       res.t,
+		command: command,
+		args:    args,
+		env:     env,
 	}
 	r.mu.Unlock()
+
+	// Spawn the liveness watcher bound to THIS transport's Done channel.
+	// A later reconnect installs a fresh transport with its own watcher;
+	// this watcher exits once its old Done is closed, so it can never
+	// degrade a freshly-reconnected transport.
+	r.wg.Add(1)
+	go r.watch(name, res.t.Done())
 	return nil
 }
 
-// Shutdown closes all server transports. Each gets up to 5s to exit
-// before the context cancels; a best-effort Kill is already in Close.
+// watch is the per-transport liveness watcher. It is bound to a specific
+// transport's Done channel (passed by value), so an old watcher can never
+// observe or degrade a newer transport. It runs exactly one reconnect
+// attempt per process-death incident and then returns — it does NOT loop.
+// The "single bounded reconnect" guarantee is structural: each connected
+// transport gets one watcher, and a successful reconnect installs a NEW
+// transport+watcher (so recovery is per-incident); a failed reconnect
+// sets backoffUntil and the watcher exits, leaving the server degraded.
+func (r *Registry) watch(name string, transportDone <-chan struct{}) {
+	defer r.wg.Done()
+	select {
+	case <-r.done:
+		// Registry shutting down — stop without touching state.
+		return
+	case <-transportDone:
+		// The transport's reader goroutine exited: process is dead.
+		r.markDegraded(name)
+		r.attemptReconnect(name)
+	}
+}
+
+// markDegraded flips a still-connected proxy to StateDegraded and clears
+// its Tools so Registry.Tools() (which skips State != StateConnected)
+// immediately stops advertising them. This is the Capability-Set drift
+// trigger: the removal surfaces on the next agent turn via
+// buildCapabilitySet / CompareToolLists as a PendingChange, NOT as live
+// fingerprint movement (the frozen epoch keeps serving epoch.FrozenTools).
+func (r *Registry) markDegraded(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	proxy, ok := r.servers[name]
+	if !ok || proxy.State != StateConnected {
+		return
+	}
+	proxy.State = StateDegraded
+	proxy.Tools = nil // belt-and-suspenders; Tools() already filters by State.
+	proxy.reconnectAttempted = false
+}
+
+// attemptReconnect runs the single bounded reconnect for a degraded
+// server. The dial IO runs WITHOUT r.mu held; r.mu is only re-taken for
+// the gate read and the final commit. It enforces:
+//   - exactly one automatic attempt per degraded incident
+//     (reconnectAttempted gate), and
+//   - a negative-result cooldown (backoffUntil) so a flapping server is
+//     not re-dialed within the window.
+func (r *Registry) attemptReconnect(name string) {
+	// Gate read under r.mu — no IO here.
+	r.mu.RLock()
+	proxy, ok := r.servers[name]
+	if !ok || proxy.State != StateDegraded || proxy.reconnectAttempted || time.Now().Before(proxy.backoffUntil) {
+		r.mu.RUnlock()
+		return
+	}
+	command := proxy.command
+	args := proxy.args
+	env := proxy.env
+	r.mu.RUnlock()
+
+	// Dial without holding r.mu so the spawn/handshake can't block the
+	// lock and stall the rest of the registry.
+	dialCtx, cancel := context.WithTimeout(context.Background(), r.reconnectTimeout)
+	defer cancel()
+	res, err := r.dialer(dialCtx, name, command, args, env)
+	if err != nil {
+		// Failure: record the single attempt and arm the cooldown gate.
+		r.mu.Lock()
+		if p, ok := r.servers[name]; ok && p.State == StateDegraded {
+			p.reconnectAttempted = true
+			p.backoffUntil = time.Now().Add(r.reconnectBackoff)
+		}
+		r.mu.Unlock()
+		return
+	}
+
+	// Success: re-validate under r.mu before committing the new
+	// transport. If a concurrent Shutdown/Connect changed the state, or
+	// the registry is shutting down, discard the fresh transport.
+	select {
+	case <-r.done:
+		res.t.Close()
+		return
+	default:
+	}
+
+	r.mu.Lock()
+	proxy, ok = r.servers[name]
+	if !ok || proxy.State != StateDegraded || proxy.reconnectAttempted {
+		r.mu.Unlock()
+		res.t.Close()
+		return
+	}
+	r.servers[name] = &ServerProxy{
+		Name:    name,
+		State:   StateConnected,
+		Caps:    res.caps,
+		Tools:   res.tools,
+		t:       res.t,
+		command: command,
+		args:    args,
+		env:     env,
+	}
+	r.mu.Unlock()
+
+	// New transport gets a new watcher bound to its own Done channel.
+	r.wg.Add(1)
+	go r.watch(name, res.t.Done())
+}
+
+// Shutdown stops all watchers and closes all server transports. Order:
+//  1. close r.done (once) to signal every watcher to exit;
+//  2. close each transport (which also closes its readerDone, unblocking
+//     any watcher still parked in its select);
+//  3. r.wg.Wait() within a deadline so no watcher goroutine outlives
+//     Shutdown — this is what keeps -race and goroutine-leak detection
+//     clean.
+//
+// Double Shutdown is safe: closeDoneOnce guards close(r.done).
 func (r *Registry) Shutdown() {
+	// Signal watchers to exit. Guarded so a double Shutdown is safe.
+	r.closeDoneOnce.Do(func() { close(r.done) })
+
 	r.mu.RLock()
 	proxies := make([]*ServerProxy, 0, len(r.servers))
 	for _, s := range r.servers {
@@ -86,18 +266,28 @@ func (r *Registry) Shutdown() {
 	}
 	r.mu.RUnlock()
 
-	var wg sync.WaitGroup
+	var cwg sync.WaitGroup
 	for _, s := range proxies {
-		wg.Add(1)
+		cwg.Add(1)
 		go func(sp *ServerProxy) {
-			defer wg.Done()
+			defer cwg.Done()
 			_ = sp.Close()
 		}(s)
 	}
-	done := make(chan struct{})
-	go func() { wg.Wait(); close(done) }()
+	closed := make(chan struct{})
+	go func() { cwg.Wait(); close(closed) }()
 	select {
-	case <-done:
+	case <-closed:
+	case <-time.After(5 * time.Second):
+	}
+
+	// Wait for all watcher goroutines to drain. They exit either on
+	// r.done (closed above) or on their transport's Done (closed by
+	// Close above), so this returns promptly.
+	watchers := make(chan struct{})
+	go func() { r.wg.Wait(); close(watchers) }()
+	select {
+	case <-watchers:
 	case <-time.After(5 * time.Second):
 	}
 }

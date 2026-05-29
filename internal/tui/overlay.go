@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/amemiya02/deepseekcode/internal/session"
 )
 
@@ -141,14 +143,19 @@ func renderTape(t Theme, items []chatItem, cursor int, width, height int) string
 	if cursor >= len(tape) {
 		cursor = len(tape) - 1
 	}
+	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	if rowW < 20 {
+		rowW = 20
+	}
 	var b strings.Builder
 	for i, e := range tape {
-		prefix := "  "
 		if i == cursor {
-			prefix = t.UserPrompt.Render("▶ ")
+			// Selected entry: brandDeep bg-fill with onAccent fg, plus ▶ marker.
+			b.WriteString(selectedRow(t, "▶ "+e.glyph+" "+e.label, rowW))
+		} else {
+			b.WriteString("  ")
+			b.WriteString(e.renderLine(t))
 		}
-		b.WriteString(prefix)
-		b.WriteString(e.renderLine(t))
 		b.WriteByte('\n')
 	}
 	header := fmt.Sprintf("%d entries · cursor %d/%d", len(tape), cursor+1, len(tape))
@@ -205,26 +212,37 @@ func (e tapeEntry) renderLine(t Theme) string {
 }
 
 // renderModelsPicker draws the /models picker overlay.
-func renderModelsPicker(t Theme, models []modelOption, cursor int, active string, width, height int) string {
+func renderModelsPicker(t Theme, models []modelOption, cursor int, activeID string, width, height int) string {
 	if cursor < 0 {
 		cursor = 0
 	}
 	if cursor >= len(models) {
 		cursor = len(models) - 1
 	}
+	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	if rowW < 20 {
+		rowW = 20
+	}
 	var b strings.Builder
 	for i, m := range models {
-		marker := " "
-		if m.ID == active {
-			marker = t.StatusGood.Render("*")
+		active := " "
+		if m.ID == activeID {
+			active = "*"
 		}
-		line := fmt.Sprintf("%s %s  %s", marker, t.StatusModel.Render(m.Short), t.Hint.Render(m.Note))
 		if i == cursor {
-			line = t.UserPrompt.Render("▶ ") + line
+			// Selected row: brandDeep bg-fill with onAccent fg spanning the
+			// row, in addition to the ▶ marker. Plain text inside the filled
+			// style so the foreground stays legible on the accent band.
+			text := fmt.Sprintf("▶ %s %s  %s", active, m.Short, m.Note)
+			b.WriteString(selectedRow(t, text, rowW) + "\n")
 		} else {
-			line = "  " + line
+			marker := " "
+			if m.ID == activeID {
+				marker = t.StatusGood.Render("*")
+			}
+			line := fmt.Sprintf("  %s %s  %s", marker, t.StatusModel.Render(m.Short), t.Hint.Render(m.Note))
+			b.WriteString(line + "\n")
 		}
-		b.WriteString(line + "\n")
 	}
 	header := fmt.Sprintf("%d models · ⏎ to switch · esc to cancel", len(models))
 	return wrapPane(t, "/models", header, b.String(), width, height)
@@ -242,12 +260,12 @@ func renderSessionsPicker(t Theme, rows []sessionRow, cursor int, activeID strin
 	if cursor >= len(rows) {
 		cursor = len(rows) - 1
 	}
+	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	if rowW < 20 {
+		rowW = 20
+	}
 	var b strings.Builder
 	for i, r := range rows {
-		marker := " "
-		if r.Sess.ID == activeID {
-			marker = t.StatusGood.Render("*")
-		}
 		indent := strings.Repeat("  ", r.Indent)
 		summary := r.Sess.Summary
 		if summary == "" {
@@ -257,27 +275,67 @@ func renderSessionsPicker(t Theme, rows []sessionRow, cursor int, activeID strin
 		if len(shortID) > 8 {
 			shortID = shortID[:8]
 		}
-		line := fmt.Sprintf("%s %s%s  %s  %s",
-			marker, indent, t.StatusModel.Render(shortID),
-			r.Sess.LastUsedAt.Local().Format("2006-01-02 15:04"),
-			summary)
-		if i == cursor {
-			line = t.UserPrompt.Render("▶ ") + line
-		} else {
-			line = "  " + line
+		when := r.Sess.LastUsedAt.Local().Format("2006-01-02 15:04")
+		active := " "
+		if r.Sess.ID == activeID {
+			active = "*"
 		}
-		b.WriteString(line + "\n")
+		if i == cursor {
+			// Selected row: brandDeep bg-fill with onAccent fg, plus ▶ marker.
+			text := fmt.Sprintf("▶ %s %s%s  %s  %s", active, indent, shortID, when, summary)
+			b.WriteString(selectedRow(t, text, rowW) + "\n")
+		} else {
+			marker := " "
+			if r.Sess.ID == activeID {
+				marker = t.StatusGood.Render("*")
+			}
+			line := fmt.Sprintf("  %s %s%s  %s  %s",
+				marker, indent, t.StatusModel.Render(shortID), when, summary)
+			b.WriteString(line + "\n")
+		}
 	}
 	header := fmt.Sprintf("%d sessions · ⏎ to switch · esc to cancel", len(rows))
 	return wrapPane(t, "/sessions", header, b.String(), width, height)
 }
 
-// wrapPane decorates an overlay body with a header bar + a hint footer.
+// selectedRow renders a picker's focused row as a filled selection band:
+// brandDeep background with onAccent foreground, padded to width so the
+// fill spans the row. When fills are disabled (transparent mode or a
+// non-truecolor terminal) it degrades to a bold brandDeep foreground with
+// no background, so the ▶ marker in the text still carries the selection.
+func selectedRow(t Theme, text string, width int) string {
+	style := lipgloss.NewStyle().Width(width)
+	if t.Transparent() || !t.Truecolor() {
+		return style.Foreground(t.BrandDeep).Bold(true).Render(text)
+	}
+	return style.
+		Background(t.BrandDeep).
+		Foreground(t.OnAccent).
+		Bold(true).
+		Render(text)
+}
+
+// wrapPane decorates an overlay body as a raised in-slot pane: a bgRaised
+// surface with a rounded border in the border token, Padding(1,2), and a
+// gradient "/// <title>" accent header above the hint line. The body is
+// padded to fill the available height so the panel background reads as a
+// solid slab (degrades to fg-only when fills are disabled).
 func wrapPane(t Theme, title, header, body string, width, height int) string {
-	titleBar := t.StatusModel.Render(title) + "  " + t.Hint.Render(header)
-	pad := height - 3 - strings.Count(body, "\n")
+	gradHead := ApplyBoldForegroundGrad(lipgloss.NewStyle(), "/// "+title, t.BrandDeep, t.BrandLight)
+	titleBar := gradHead + "  " + t.Hint.Render(header)
+
+	// Account for border (2) + vertical padding (2) so the body fills the
+	// pane's interior without overflowing the allotted height.
+	pad := height - 6 - strings.Count(body, "\n")
 	if pad > 0 {
 		body += strings.Repeat("\n", pad)
 	}
-	return titleBar + "\n" + body
+
+	content := titleBar + "\n" + body
+	pane := t.Panel(TierRaised).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.BorderColor).
+		Padding(1, 2).
+		Width(width - 2)
+	return pane.Render(content)
 }

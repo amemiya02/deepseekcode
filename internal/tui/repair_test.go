@@ -147,9 +147,14 @@ func TestRepairNotRoutedThroughEventInfo(t *testing.T) {
 	infoOut := infoItem.render(th, 80)
 	repairOut := repairItem.render(th, 80)
 
-	// Info items have [info] prefix
-	if !strings.Contains(infoOut, "[info]") {
-		t.Errorf("info item should contain '[info]', got %q", infoOut)
+	// Info items carry a NOTE chip + the message text (the badge wraps the
+	// word in ANSI, so assert on the ANSI-stripped form).
+	infoPlain := stripANSI(infoOut)
+	if !strings.Contains(infoPlain, "NOTE") {
+		t.Errorf("info item should carry a NOTE chip, got %q", infoOut)
+	}
+	if !strings.Contains(infoPlain, "some info message") {
+		t.Errorf("info item should contain its message text, got %q", infoOut)
 	}
 	// Repair items have 'repaired tool call:' prefix
 	if !strings.Contains(repairOut, "repaired tool call:") {

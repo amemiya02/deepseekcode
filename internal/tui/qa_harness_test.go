@@ -61,8 +61,11 @@ func TestQAFrame_ReasoningFolded(t *testing.T) {
 
 	frame := CaptureScrollbackFrame("reasoning_folded", sb, 80)
 
-	// Inline expected string for folded reasoning (includes duration and tokens)
-	expected := `▸ thinking (0.0s · ~7 tok)  "This is my thinking process..."  [^R to expand]`
+	// Inline expected string for folded reasoning: dim left bar + fold glyph +
+	// "thinking Xs ~N tok" + a short quoted preview + the expand hint. (The
+	// leading gutter + bar opens the line; assertFrameSnapshot trims the
+	// outer whitespace so the bar leads here.)
+	expected := `▌ ▸ thinking 0.0s ~7 tok  "This is my thinking process..."  [^R to expand]`
 	assertFrameSnapshot(t, frame, expected)
 }
 
@@ -72,7 +75,8 @@ func TestQAFrame_ToolCall(t *testing.T) {
 
 	frame := CaptureScrollbackFrame("tool_call", sb, 80)
 
-	// Inline expected string for tool call
+	// Inline expected string for tool call: gutter + model-accent bar +
+	// status glyph + summary. assertFrameSnapshot trims the outer gutter.
 	expected := "▌ ● read test.go"
 	assertFrameSnapshot(t, frame, expected)
 }
@@ -88,8 +92,12 @@ func TestQAFrame_ToolResult(t *testing.T) {
 	// Print actual output for debugging
 	t.Logf("Actual tool result frame:\n%s", view)
 
-	// Inline expected string for tool result (note: empty line has trailing space)
-	expected := "▌ ● read test.go\n▌ ✓ read test.go (3 lines)  100ms\n▌  package main\n▌  \n▌  func main() {}"
+	// Inline expected string for tool result: the barred CALL header, then the
+	// barred RESULT header (model accent + status glyph + summary + duration),
+	// then the panelled body lines under the shared 2-cell gutter (no per-line
+	// bar). assertFrameSnapshot strips ANSI (so the panel background is not
+	// visible) and trims outer whitespace (so the first line's gutter drops).
+	expected := "▌ ● read test.go\n  ▌ ✓ read test.go (3 lines)  100ms\n  package main\n  \n  func main() {}"
 	assertFrameSnapshot(t, frame, expected)
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -110,6 +111,11 @@ type Config struct {
 	Theme    string
 	Cwd      string
 
+	// TransparentBackground opts out of the painted canvas (ui.transparent_background).
+	// When true, the canvas is not painted and bg-tier panels degrade to
+	// left-bars / separators (no opaque fills).
+	TransparentBackground bool
+
 	// Optional persistence integration. Provide all three or none.
 	SessionID    string
 	UndoFn       func(n int) (int, error)
@@ -139,6 +145,14 @@ func New(cfg Config) *App {
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
+	// Theme the cursor to the brand block so the caret reads as part of the
+	// Ocean identity rather than the terminal default. The textarea exposes a
+	// Cursor style on its Styles bag; everything else stays at library default.
+	theme := PickTheme(cfg.Theme).WithTransparent(cfg.TransparentBackground)
+	st := ta.Styles()
+	st.Cursor.Color = theme.BrandDeep
+	st.Cursor.Shape = tea.CursorBlock
+	ta.SetStyles(st)
 	ta.Focus()
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
@@ -150,7 +164,7 @@ func New(cfg Config) *App {
 		model:          cfg.Model,
 		thinking:       cfg.Thinking,
 		cwd:            cfg.Cwd,
-		theme:          PickTheme(cfg.Theme),
+		theme:          theme,
 		keymap:         defaultKeymap(),
 		vp:             vp,
 		input:          ta,
@@ -183,6 +197,9 @@ func New(cfg Config) *App {
 			app.chrome.SetFirstTokenTimeout(cfg.Agent.Client.FirstTokenTimeout)
 		}
 	}
+	// Seed the scrollback's model context so tool cards get the right per-model
+	// accent bar from the first turn (kept in sync on /models switches).
+	app.scrollback.SetModel(cfg.Model)
 	return app
 }
 
@@ -509,6 +526,24 @@ func (a *App) ensureTick() tea.Cmd {
 	return a.scheduleRedraw()
 }
 
+// paintCanvas wraps a fully-composed screen string in the painted canvas:
+// a lipgloss style backgrounded with the base surface, sized to the window.
+// It is a no-op (returns content unchanged) when the theme is in transparent
+// mode or the terminal is not truecolor, so the terminal's own background
+// shows through and bg-tier panels degrade gracefully. Overlays/modals are
+// part of the content string passed in, so they render correctly over the
+// painted fill.
+func (a *App) paintCanvas(content string) string {
+	if a.theme.Transparent() || !a.theme.Truecolor() {
+		return content
+	}
+	return lipgloss.NewStyle().
+		Background(a.theme.BgBase).
+		Width(a.width).
+		Height(a.height).
+		Render(content)
+}
+
 // View renders the whole UI.
 func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
@@ -522,7 +557,7 @@ func (a *App) View() tea.View {
 	}
 
 	if a.overlay.IsOpen() {
-		return tea.View{Content: a.renderOverlay(), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: a.paintCanvas(a.renderOverlay()), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Pager is a modal body replacement: it takes the entire body band
@@ -533,7 +568,7 @@ func (a *App) View() tea.View {
 	if a.pager != nil {
 		body = a.pager.render(a.theme, a.width, a.vp.Height())
 	} else {
-		body = a.vp.View()
+		body = a.overlayScrollbar(a.vp.View())
 	}
 
 	// Reserved chrome row — always one line tall. Streaming spinner
@@ -563,11 +598,11 @@ func (a *App) View() tea.View {
 	// above the status line.
 	if permView != "" {
 		parts := []string{body, chrome, permView, divider, status}
-		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 	if questionView != "" {
 		parts := []string{body, chrome, questionView, divider, status}
-		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+		return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
 	// Choose input border style based on mode.
@@ -583,6 +618,13 @@ func (a *App) View() tea.View {
 		Width(a.width - 2).
 		MaxHeight(a.input.Height() + 2).
 		Render(a.input.View())
+
+	// Mode chip: a small filled badge surfaced just above the input border
+	// when the launch mode is anything other than the tiered default, so the
+	// elevated/lowered permission posture is always visible at the prompt.
+	if chip := a.modeChip(); chip != "" {
+		inputBox = lipgloss.JoinVertical(lipgloss.Left, a.theme.Gutter()+chip, inputBox)
+	}
 
 	// Mode-aware hint text.
 	var hint string
@@ -606,7 +648,33 @@ func (a *App) View() tea.View {
 	}
 
 	parts := []string{body, chrome, divider, status, inputBox, hint}
-	return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+	return tea.View{Content: a.paintCanvas(lipgloss.JoinVertical(lipgloss.Left, parts...)), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+}
+
+// modeChip returns a filled badge string for the active permission mode, or
+// "" for the tiered default (no chip). YOLO is an error-colored chip,
+// READ-ONLY rides the brand chip, and PLAN uses an fgSubtle-backed chip built
+// on the same filled-chip contract as Theme.Badge. nil-safe: an App built
+// without a Permissions policy (test fixtures) shows no chip.
+func (a *App) modeChip() string {
+	if a.agent == nil || a.agent.Permissions == nil {
+		return ""
+	}
+	switch a.agent.Permissions.Mode {
+	case permissions.ModeYolo:
+		return a.theme.Badge(BadgeErr).Render("YOLO")
+	case permissions.ModeReadOnly:
+		return a.theme.Badge(BadgeBrand).Render("READ-ONLY")
+	case permissions.ModePlan:
+		return lipgloss.NewStyle().
+			Background(a.theme.FgSubtle).
+			Foreground(a.theme.OnAccent).
+			Padding(0, 1).
+			Bold(true).
+			Render("PLAN")
+	default:
+		return ""
+	}
 }
 
 // renderOverlay renders the active fullscreen overlay (tape, models,
@@ -646,6 +714,9 @@ func (a *App) layout() {
 	// fixed inputH would make the viewport render into the input area
 	// (garbled overlap on scroll).
 	inputH := a.input.Height() + 2 // textarea + rounded border(2)
+	if a.modeChip() != "" {
+		inputH++ // mode chip rides one row above the input border
+	}
 	hintH := 1
 	permH := 0
 	if a.permission.Active() {
@@ -1296,6 +1367,7 @@ func (a *App) applyModelSwitch(id string) {
 	a.model = id
 	a.status.model = id
 	a.agent.Model = id
+	a.scrollback.SetModel(id) // tool cards appended after the switch get the new accent
 	if a.session.setModel != nil {
 		if err := a.session.setModel(id); err != nil {
 			a.scrollback.AppendInfo("model switched (warning: persist failed: " + err.Error() + ")")

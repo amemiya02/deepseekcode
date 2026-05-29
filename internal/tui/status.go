@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
@@ -29,62 +30,129 @@ type statusState struct {
 
 // render returns the one-line status string. When in Normal (scroll)
 // mode, a "NORMAL" badge is shown on the left.
+//
+// Brightness hierarchy (spec): the model name is the brightest element
+// (fgBase, bold); the "·" separators recede to fgFaint; metric labels sit
+// in between at fgSubtle. Health-bearing metrics layer a semantic color on
+// top of that base (cache% ok/warn, cost warn-when-high). Only genuinely
+// transient state — the prefix-cache invalidation note, "compacted N", and
+// error states — is promoted to a filled Theme.Badge chip; the always-on
+// metrics stay plain colored text so the line doesn't strobe with chips.
 func (s statusState) render(t Theme) string {
 	hit := llm.CacheHitRate(s.usage) * 100
-	dot := lipgloss.NewStyle().Foreground(t.BrandDeep).Render(" · ")
+
+	// Separators recede (fgFaint); metric labels sit at fgSubtle; the model
+	// name is the single bright anchor (fgBase, bold).
+	sep := lipgloss.NewStyle().Foreground(t.FgFaint)
+	label := lipgloss.NewStyle().Foreground(t.FgSubtle)
+	dot := sep.Render(" · ")
+
 	var modeBadge string
 	if s.mode == modeNormal {
-		modeBadge = t.Hint.Render("NORMAL") + dot
+		modeBadge = t.Badge(BadgeInfo).Render("NORMAL") + " "
 	}
+
 	// ¥? is reserved for models with no pricing entry. A known model
 	// reads ¥0.0000 before the first turn — not ¥?, which would conflate
 	// "unknown pricing" with "no cost yet".
 	costStr := "¥?"
+	costStyle := label
 	if s.costKnown || llm.CostKnown(s.model) {
 		costStr = fmt.Sprintf("¥%.4f", s.costYuan)
+		// Cost turns amber once it climbs past a noticeable per-session spend
+		// so an expensive run reads at a glance; cheap runs stay subtle.
+		if s.costYuan >= costWarnYuan {
+			costStyle = lipgloss.NewStyle().Foreground(t.WarnColor)
+		}
 	}
 
 	// Single cache chip for the live line: "cache N% · saved ¥X". The cache
-	// hit/miss tokens are intentionally NOT fed into hudData below — doing so
-	// would render a second, redundant cache chip on the same line. RenderHUD
-	// retains its own cache+saved chip for callers that do pass those tokens
-	// (the HUD snapshot test and any future standalone HUD surface).
-	cacheChip := fmt.Sprintf("cache %.0f%%", hit)
+	// percentage is health-colored — ok (green) when the prefix cache is
+	// landing, warn (amber) when it has dropped low — because the 50× cache
+	// discount is the cost story and a sagging hit-rate is what a user wants
+	// to notice. The saved-¥ suffix stays at label brightness.
+	cacheStyle := label
+	if hit >= cacheOkPct {
+		cacheStyle = lipgloss.NewStyle().Foreground(t.OkColor)
+	} else if hit < cacheWarnPct {
+		cacheStyle = lipgloss.NewStyle().Foreground(t.WarnColor)
+	}
+	cacheChip := cacheStyle.Render(fmt.Sprintf("cache %.0f%%", hit))
 	if s.savedYuan > 0 {
-		cacheChip += fmt.Sprintf(" · saved ¥%.3f", s.savedYuan)
+		cacheChip += label.Render(fmt.Sprintf(" · saved ¥%.3f", s.savedYuan))
 	}
 
-	// Build HUD data for additional metrics (without model to avoid duplication)
-	hudData := HUDData{
-		ContextTokens: s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens,
-		ContextLimit:  s.contextLimit,
-		OutputTokens:  s.usage.CompletionTokens,
-		ActiveAgent:   s.activeAgent,
-		RunningJobs:   s.runningJobs,
+	// Context fill bar with accent-colored filled cells. Built locally (not
+	// via RenderHUD) so the filled cells can carry the brand accent while the
+	// track + counts stay at label brightness. RenderHUD stays plain for its
+	// standalone / golden-test callers.
+	ctxTokens := s.usage.PromptCacheHitTokens + s.usage.PromptCacheMissTokens + s.usage.CompletionTokens
+	var ctxSeg string
+	if ctxTokens > 0 && s.contextLimit > 0 {
+		ctxSeg = renderContextBar(t, ctxTokens, s.contextLimit)
 	}
 
-	hudLine := RenderHUD(hudData, 200) // Use wide width for status line
-
-	// Build the full status line preserving existing model/step/cost semantics
-	line1 := modeBadge + t.StatusModel.Render(shortModel(s.model)) +
-		dot + fmt.Sprintf("%d steps", s.steps) +
+	// Build the full status line preserving existing model/step/cost semantics.
+	line1 := modeBadge +
+		t.StatusModel.Render(shortModel(s.model)) +
+		dot + label.Render(fmt.Sprintf("%d steps", s.steps)) +
 		dot + cacheChip +
-		dot + costStr
-	if hudLine != "" {
-		line1 += dot + hudLine
+		dot + costStyle.Render(costStr)
+	if ctxSeg != "" {
+		line1 += dot + ctxSeg
 	}
+	if s.activeAgent != "" {
+		line1 += dot + label.Render("agent "+s.activeAgent)
+	}
+	if s.runningJobs > 0 {
+		line1 += dot + label.Render(fmt.Sprintf("jobs %d", s.runningJobs))
+	}
+
+	// Transient-state chips. "compacted N" is an episodic event, so it reads
+	// as a brand chip rather than a plain metric.
 	if s.compactionCount > 0 {
-		line1 += dot + fmt.Sprintf("compacted %d", s.compactionCount)
+		line1 += "  " + t.Badge(BadgeBrand).Render(fmt.Sprintf("compacted %d", s.compactionCount))
 	}
-	// cacheNote (prefix-cache invalidation warning) and the generic transient
-	// hint occupy separate slots so neither clobbers the other.
+	// cacheNote (prefix-cache invalidation) is a warning-worthy transient: a
+	// cache miss just cost real money. Surface it as a "⚠ CACHE" amber chip
+	// with the original note trailing at label brightness, kept in its own
+	// slot so it never clobbers the generic hint. The note CONTENT is
+	// preserved verbatim — only its presentation is upgraded.
 	if s.cacheNote != "" {
-		line1 += t.Hint.Render("  · " + s.cacheNote)
+		line1 += "  " + t.Badge(BadgeWarn).Render("⚠ CACHE") +
+			" " + label.Render(s.cacheNote)
 	}
 	if s.hint != "" {
-		line1 += t.Hint.Render("  · " + s.hint)
+		line1 += dot + t.Hint.Render(s.hint)
 	}
 	return t.Status.Render(line1)
+}
+
+// Health thresholds for status-line metric coloring. Tuned for the DeepSeek
+// prompt-cache economics: a hit-rate at or above cacheOkPct is "the cache is
+// working" (green); below cacheWarnPct it is worth flagging (amber); the band
+// between stays neutral. costWarnYuan is the per-session spend past which the
+// cost figure turns amber.
+const (
+	cacheOkPct   = 80.0
+	cacheWarnPct = 50.0
+	costWarnYuan = 1.0
+)
+
+// renderContextBar renders the ctx fill bar with the brand accent on the
+// filled cells. The label "ctx", the track "[…]" brackets, the empty cells,
+// and the "N/M" counts stay at label (fgSubtle) brightness; only the filled
+// "█" run is promoted to BrandLight so the consumed slice pops. Layout matches
+// the pure contextBar() so the golden tests on that function are unaffected.
+func renderContextBar(t Theme, tokens, limit int) string {
+	const cells = 10
+	filled := contextFill(tokens, limit, cells) // shared geometry; cannot drift from contextBar
+	label := lipgloss.NewStyle().Foreground(t.FgSubtle)
+	accent := lipgloss.NewStyle().Foreground(t.BrandLight)
+	bar := label.Render("[") +
+		accent.Render(strings.Repeat("█", filled)) +
+		label.Render(strings.Repeat("░", cells-filled)+"]")
+	return label.Render("ctx ") + bar + label.Render(" "+humanTokens(tokens)+"/"+humanTokens(limit))
 }
 
 // shortModel returns a one-word friendly name for the status slot.

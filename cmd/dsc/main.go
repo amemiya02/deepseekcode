@@ -571,18 +571,20 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg.Register(tools.NewWorktreeTool(wtMgr))
 
 	app := tui.New(tui.Config{
-		Agent:           a,
-		Model:           rt.Model,
-		Thinking:        cfg.Defaults.Thinking,
-		Theme:           cfg.Defaults.Theme,
-		Cwd:             cwd,
-		SessionID:       sessionID,
-		UndoFn:          undoFn,
-		ListSessions:    listFn,
-		SetModelFn:      setModelFn,
-		Commands:        customCmds,
-		StartupNotices:  notices,
-		CompactionCount: sess.CompactionCount,
+		Agent:    a,
+		Model:    rt.Model,
+		Thinking: cfg.Defaults.Thinking,
+		Theme:    cfg.Defaults.Theme,
+		Cwd:      cwd,
+
+		TransparentBackground: cfg.UI.TransparentBackground,
+		SessionID:             sessionID,
+		UndoFn:                undoFn,
+		ListSessions:          listFn,
+		SetModelFn:            setModelFn,
+		Commands:              customCmds,
+		StartupNotices:        notices,
+		CompactionCount:       sess.CompactionCount,
 	})
 	return app.Run()
 }

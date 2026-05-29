@@ -52,6 +52,45 @@ func Highlight(t Theme, source, lang string) string {
 	return buf.String()
 }
 
+// highlightOnBg syntax-highlights source by lang exactly like Highlight, but
+// FORCES every token's background to bg instead of CardBody. It is the entry
+// point used by the unified diff view so highlighted code sits on the filled
+// +/- band (or the recessed well for context lines). Returns source unchanged
+// if lang is empty/unrecognized or lexing fails.
+func highlightOnBg(t Theme, source, lang string, bg color.Color) string {
+	if source == "" {
+		return source
+	}
+	lexer := lexers.Get(lang)
+	if lexer == nil {
+		lexer = lexers.Analyse(source)
+	}
+	if lexer == nil {
+		return source
+	}
+	lexer = chroma.Coalesce(lexer)
+
+	styleName := "dracula"
+	if t.Name == "light" {
+		styleName = "github"
+	}
+	style := styles.Get(styleName)
+	if style == nil {
+		style = styles.Fallback
+	}
+
+	formatter := chromaFormatter(bg)
+	iter, err := lexer.Tokenise(nil, source)
+	if err != nil {
+		return source
+	}
+	var buf strings.Builder
+	if err := formatter.Format(&buf, style, iter); err != nil {
+		return source
+	}
+	return buf.String()
+}
+
 // chromaFormatter returns a chroma.Formatter that maps token types to
 // lipgloss foreground styles with a fixed background color.
 func chromaFormatter(bg color.Color) chroma.Formatter {

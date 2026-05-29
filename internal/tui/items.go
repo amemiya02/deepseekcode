@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"sort"
 	"strings"
 	"time"
@@ -107,44 +108,106 @@ func (i chatItem) renderKey(width int, theme string) string {
 	}
 }
 
+// gutterLine prefixes one logical line with the 2-cell gutter. Used for item
+// kinds that carry no left bar (assistant prose lives airy on the canvas, but
+// still shares the universal indent).
+func gutterLine(t Theme, s string) string {
+	return t.Gutter() + s
+}
+
+// barLine prefixes one logical line with the 2-cell gutter followed by a
+// role-colored left bar glyph rendered through c, then a single space. This is
+// the universal opener for every barred item kind (user / tool / reasoning) so
+// the gutter + bar geometry is defined in exactly one place.
+func barLine(t Theme, c color.Color, s string) string {
+	return t.Gutter() + t.LeftBar(c).Render(LeftBarGlyph()) + " " + s
+}
+
+// toolAccent picks the tool bar/accent color for an item: accentPro when the
+// item was produced by the pro model, accentFlash otherwise. itemToolCall /
+// itemToolResult only carry a model when the scrollback populates it; the
+// flash default is correct for the common (unset) case.
+func toolAccent(t Theme, model string) color.Color {
+	if model == "deepseek-v4-pro" {
+		return t.AccentPro
+	}
+	return t.AccentFlash
+}
+
+// maxReasoningLines caps the expanded reasoning panel so long chains of thought
+// can't flood the viewport. Overflow collapses to a fgFaint "… N more lines"
+// hint pointing at the ctrl+t toggle.
+const maxReasoningLines = 16
+
 func (i chatItem) render(t Theme, width int) string {
 	switch i.kind {
 	case itemUser:
-		return t.UserPrompt.Render("> "+i.text) + "\n"
+		// User message: brandDeep left bar + the DeepSeek '>' identity glyph.
+		return barLine(t, t.BrandDeep, t.UserPrompt.Render("> "+i.text)) + "\n"
 	case itemAssistantText:
-		// Assistant output is markdown — render through Glamour so
-		// **bold** / `code` / lists / headings get proper ANSI styling
-		// AND the line wrapping respects the terminal width. Without
-		// this, long lines overflow past the viewport's right edge.
-		body := renderMarkdown(i.text, t.Name, width)
-		return body + "\n"
+		// Assistant prose is airy markdown on the canvas: NO left bar and NO
+		// panel, just the shared 2-cell gutter so it lines up with barred
+		// items. Render through Glamour so **bold** / `code` / lists /
+		// headings get proper ANSI styling AND line wrapping respects the
+		// terminal width (account for the gutter so long lines don't overflow).
+		body := renderMarkdown(i.text, t.Name, t.fillsEnabled(), width-len(t.Gutter()))
+		return indent(body, t.Gutter()) + "\n"
 	case itemReasoning:
+		barColor := t.FgSubtle // dim bar for the latent thinking channel
 		if i.folded {
-			label := fmt.Sprintf("▸ thinking (%.1fs · ~%d tok)", i.duration.Seconds(), i.tokens)
+			label := fmt.Sprintf("%s thinking %.1fs ~%d tok", IconFoldClosed, i.duration.Seconds(), i.tokens)
+			line := t.ReasoningFold.Render(label)
 			if peek := reasoningPeek(i.reasoning, 60); peek != "" {
-				label += "  " + t.Reasoning.Render(peek)
+				line += "  " + t.Reasoning.Render(peek)
 			}
-			return t.ReasoningFold.Render(label) + t.Hint.Render("  [^R to expand]") + "\n"
+			return barLine(t, barColor, line) + t.Hint.Render("  [^R to expand]") + "\n"
 		}
-		// expanded — reasoning is plain text, not markdown; just wrap.
-		body := wrapWords(i.reasoning, width-2)
-		return t.ReasoningFold.Render("▾ thinking") + "\n" +
-			t.Reasoning.Render(indent(body, "  ")) + "\n" +
-			t.Hint.Render(fmt.Sprintf("  (%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens)) + "\n"
+		// Expanded — reasoning is plain text, not markdown; wrap it and lay it
+		// inside a surface panel, capped at maxReasoningLines visible rows.
+		header := barLine(t, barColor, t.ReasoningFold.Render(
+			fmt.Sprintf("%s thinking %.1fs ~%d tok", IconFoldOpen, i.duration.Seconds(), i.tokens)))
+		panel := t.Panel(TierSurface).Foreground(t.FgSubtle).Italic(true)
+		body := wrapWords(i.reasoning, width-len(t.Gutter()))
+		lines := strings.Split(body, "\n")
+		var b strings.Builder
+		b.WriteString(header + "\n")
+		shown := lines
+		if len(lines) > maxReasoningLines {
+			shown = lines[:maxReasoningLines]
+		}
+		for _, line := range shown {
+			b.WriteString(gutterLine(t, panel.Render(line)) + "\n")
+		}
+		if len(lines) > maxReasoningLines {
+			remaining := len(lines) - maxReasoningLines
+			b.WriteString(gutterLine(t, t.Hint.Render(
+				fmt.Sprintf("… %d more lines (ctrl+t)", remaining))) + "\n")
+		}
+		b.WriteString(gutterLine(t, t.Hint.Render(
+			fmt.Sprintf("(%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens))) + "\n")
+		return b.String()
 	case itemToolCall:
-		// Card header: ▌ ● toolName  args (pending state)
-		prefix := t.CardBar.Render(BarThick + " ")
+		// Tool CALL header: bar (model accent) + status glyph + summary. The
+		// call header stays barred but un-panelled — only the RESULT body
+		// gets a surface.
+		accent := toolAccent(t, i.model)
 		mcpTag := ""
 		if strings.HasPrefix(i.tool, "mcp__") {
 			mcpTag = "[MCP] "
 		}
-		// Use RenderToolSummary for consistent tool rendering
-		summary := RenderToolSummary(i.tool, i.args, "", false, width-8)
-		return prefix + t.ToolCall.Render(IconToolPending+" "+mcpTag+summary) + "\n"
+		summary := RenderToolSummary(i.tool, i.args, "", false, width-len(t.Gutter())-6)
+		header := t.LeftBar(accent).Render(IconToolPending + " " + mcpTag + summary)
+		return barLine(t, accent, header) + "\n"
 	case itemToolResult:
-		// Card: header line with status + duration, then body lines.
-		prefix := t.CardBar.Render(BarThick + " ")
-		indent := t.CardBar.Render(BarThick) + "  "
+		// Tool RESULT: barred header (model accent, or err on failure), then a
+		// surface-panelled body. The header stays un-panelled; the body lives
+		// inside Theme.Panel(TierSurface) with fgMuted text, and highlighted
+		// code content sits on bgWell.
+		accent := toolAccent(t, i.model)
+		barColor := accent
+		if i.result.IsError {
+			barColor = t.ErrColor
+		}
 
 		dur := i.duration.Round(time.Millisecond).String()
 		mcpTag := ""
@@ -152,70 +215,115 @@ func (i chatItem) render(t Theme, width int) string {
 			mcpTag = "[MCP] "
 		}
 
-		// Use RenderToolSummary for consistent tool rendering
-		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, width-len(dur)-10)
+		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, width-len(t.Gutter())-len(dur)-8)
 
-		// Header line with status icon + summary + duration.
+		// Header line: status glyph + summary + duration, plus an inline chip.
 		var statusIcon string
-		var statusStyle lipgloss.Style
+		var headColor color.Color
 		if i.result.IsError {
 			statusIcon = IconToolErr
-			statusStyle = t.ToolErr
+			headColor = t.ErrColor
 		} else {
 			statusIcon = IconToolOk
-			statusStyle = t.ToolOk
+			headColor = accent
 		}
-		header := prefix +
-			statusStyle.Render(statusIcon+" "+mcpTag+summary) +
-			"  " + statusStyle.Render(dur) + "\n"
+		headStyle := lipgloss.NewStyle().Foreground(headColor)
+		headText := headStyle.Render(statusIcon+" "+mcpTag+summary) + "  " + headStyle.Render(dur)
+		if i.result.IsError {
+			headText += " " + t.Badge(BadgeErr).Render("ERROR")
+		} else if isNoticeTool(i.tool) {
+			headText += " " + t.Badge(BadgeInfo).Render("NOTE")
+		}
+		header := barLine(t, barColor, headText) + "\n"
 
 		body := i.result.Content
 		if body == "" {
 			return header
 		}
 
-		// Body lines with card bar prefix.
-		const maxBodyLines = 10
+		// Highlighted code content sits on the bgWell tier; everything else
+		// (plain output) on the bgSurface tier with fgMuted text.
 		lang := highlightLang(i.tool, i.args)
 		// Auto-detect raw diffs in tool output (e.g. `git diff` run via bash,
 		// which would otherwise be lexed as shell) and route them through the
-		// diff lexer regardless of which tool produced the content.
+		// diff path regardless of which tool produced the content.
 		if lang != "diff" && looksLikeDiff(body) {
 			lang = "diff"
 		}
-		bodyLines := strings.Split(body, "\n")
-		if lang != "" {
-			highlighted := Highlight(t, body, lang)
-			bodyLines = strings.Split(highlighted, "\n")
-		}
-		if !i.expanded && len(bodyLines) > maxBodyLines {
-			// Folded: show first maxBodyLines + truncation hint.
+
+		const maxBodyLines = 10
+
+		// Rich unified-diff rendering: edit/write/apply_patch and the
+		// structured git_diff tool (plus any auto-detected raw diff) route to
+		// diffview, which draws a line-number gutter and background-filled
+		// +/- bands. The diff already prefixes its own gutter, so we split its
+		// fully-rendered lines for truncation rather than re-indenting.
+		if lang == "diff" {
+			codeLang := diffCodeLang(body)
+			rendered := renderDiff(t, body, codeLang, width)
+			bodyLines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 			var b strings.Builder
 			b.WriteString(header)
-			for _, line := range bodyLines[:maxBodyLines] {
-				b.WriteString(indent + t.CardBody.Render(line) + "\n")
+			shown := bodyLines
+			truncated := false
+			if !i.expanded && len(bodyLines) > maxBodyLines {
+				shown = bodyLines[:maxBodyLines]
+				truncated = true
 			}
-			remaining := len(bodyLines) - maxBodyLines
-			b.WriteString(indent + t.Hint.Render(fmt.Sprintf("… %d more lines, press e to expand", remaining)) + "\n")
+			for _, line := range shown {
+				b.WriteString(line + "\n")
+			}
+			if truncated {
+				remaining := len(bodyLines) - maxBodyLines
+				b.WriteString(gutterLine(t, t.Hint.Render(
+					fmt.Sprintf("… %d more lines, press e to expand", remaining))) + "\n")
+			}
 			return b.String()
 		}
-		// Expanded or short body.
+
+		surface := t.Panel(TierSurface).Foreground(t.FgMuted)
+		bodyLines := strings.Split(body, "\n")
+		highlighted := lang != ""
+		if highlighted {
+			h := Highlight(t, body, lang)
+			bodyLines = strings.Split(h, "\n")
+		}
+		lineStyle := surface
+		if highlighted {
+			// Code keeps its chroma foreground colors; only the background
+			// tier moves down to the recessed well.
+			lineStyle = t.Panel(TierWell)
+		}
+
 		var b strings.Builder
 		b.WriteString(header)
-		for _, line := range bodyLines {
-			b.WriteString(indent + t.CardBody.Render(line) + "\n")
+		shown := bodyLines
+		truncated := false
+		if !i.expanded && len(bodyLines) > maxBodyLines {
+			shown = bodyLines[:maxBodyLines]
+			truncated = true
+		}
+		for _, line := range shown {
+			b.WriteString(gutterLine(t, lineStyle.Render(line)) + "\n")
+		}
+		if truncated {
+			remaining := len(bodyLines) - maxBodyLines
+			b.WriteString(gutterLine(t, t.Hint.Render(
+				fmt.Sprintf("… %d more lines, press e to expand", remaining))) + "\n")
 		}
 		return b.String()
 	case itemHookFired:
 		style := t.HookInfo
+		barColor := t.WarnColor
 		if i.hookDecision == "deny" {
 			style = t.HookDeny
+			barColor = t.ErrColor
 		}
 		line := fmt.Sprintf("[hook %s] %s (%s): %s",
 			i.tool, i.hookDecision,
 			i.duration.Round(time.Millisecond).String(),
 			i.hookReason)
-		return style.Render(line) + "\n"
+		return barLine(t, barColor, style.Render(line)) + "\n"
 	case itemRepair:
 		// Compact one-line repair receipt with wrapping for long messages.
 		// Format: "repaired tool call: <tool> <message>"
@@ -225,9 +333,11 @@ func (i chatItem) render(t Theme, width int) string {
 			toolPart = i.repairTool + " "
 		}
 		line := "repaired tool call: " + toolPart + i.repairMessage
-		return t.Repair.Render(wrapWords(line, width)) + "\n"
+		wrapped := wrapWords(line, width)
+		return indent(t.Repair.Render(wrapped), t.Gutter()) + "\n"
 	case itemInfo:
-		return t.Info.Render("[info] "+i.text) + "\n"
+		// Notice line: NOTE chip + the message, under the shared gutter.
+		return gutterLine(t, t.Badge(BadgeInfo).Render("NOTE")+" "+t.Info.Render(i.text)) + "\n"
 	case itemStepFinish:
 		cost := llm.Cost(i.model, i.usage)
 		hit := llm.CacheHitRate(i.usage)
@@ -237,13 +347,26 @@ func (i chatItem) render(t Theme, width int) string {
 		}
 		label := fmt.Sprintf("[step done: %s · in=%d out=%d cache=%.0f%% %s]",
 			i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens, hit*100, costStr)
-		return t.Status.Render(label) + "\n"
+		return gutterLine(t, t.Status.Render(label)) + "\n"
 	case itemError:
-		return t.Error.Render("error: "+i.text) + "\n"
+		// Error line: ERROR chip + the message, under the shared gutter.
+		return gutterLine(t, t.Badge(BadgeErr).Render("ERROR")+" "+t.Error.Render(i.text)) + "\n"
 	case itemWelcome:
 		return renderWelcome(t, width)
 	}
 	return ""
+}
+
+// isNoticeTool reports whether a tool's result should carry the informational
+// NOTE chip rather than the default success rendering — used for multi-edit /
+// notice-style tools whose output is advisory, not a code/output payload.
+func isNoticeTool(tool string) bool {
+	switch tool {
+	case "multi_edit", "multiedit", "notice", "note":
+		return true
+	default:
+		return false
+	}
 }
 
 func indent(s, prefix string) string {
@@ -340,6 +463,57 @@ func looksLikeDiff(content string) bool {
 		}
 	}
 	return false
+}
+
+// diffCodeLang infers the chroma language to syntax-highlight the code WITHIN
+// a unified diff, from the diff's own file headers. It prefers the "+++ b/path"
+// (new side) header, then "--- a/path", then the "diff --git a/x b/x" line,
+// and maps the file extension to a chroma lexer name. Returns "" when no path
+// is discoverable or the extension is unknown — diffview then draws the bands
+// without syntax color.
+func diffCodeLang(diff string) string {
+	var newPath, oldPath, gitPath string
+	for _, ln := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(ln, "+++ "):
+			newPath = trimDiffPath(strings.TrimPrefix(ln, "+++ "))
+		case strings.HasPrefix(ln, "--- "):
+			oldPath = trimDiffPath(strings.TrimPrefix(ln, "--- "))
+		case strings.HasPrefix(ln, "diff --git "):
+			// "diff --git a/foo b/foo" → take the b/ side.
+			fields := strings.Fields(strings.TrimPrefix(ln, "diff --git "))
+			if len(fields) == 2 {
+				gitPath = trimDiffPath(fields[1])
+			}
+		}
+	}
+	// Prefer the new side; fall back to the old side, then the git header.
+	// Skip /dev/null sentinels (add/delete diffs) so we don't infer a lang
+	// from the missing side.
+	for _, p := range []string{newPath, oldPath, gitPath} {
+		if p == "" || p == "/dev/null" {
+			continue
+		}
+		idx := strings.LastIndex(p, ".")
+		if idx < 0 || idx == len(p)-1 {
+			continue
+		}
+		return p[idx+1:]
+	}
+	return ""
+}
+
+// trimDiffPath strips the conventional "a/" or "b/" prefix and any trailing
+// tab-delimited metadata (timestamps) from a diff file-header path.
+func trimDiffPath(s string) string {
+	s = strings.TrimSpace(s)
+	if idx := strings.IndexByte(s, '\t'); idx >= 0 {
+		s = s[:idx]
+	}
+	if strings.HasPrefix(s, "a/") || strings.HasPrefix(s, "b/") {
+		s = s[2:]
+	}
+	return s
 }
 
 // lineCount counts effective lines (ignores trailing blank line).

@@ -66,6 +66,19 @@ func cleanStyle(name string, fills bool) ansi.StyleConfig {
 			ch.Background.BackgroundColor = bg
 			s.CodeBlock.Chroma = &ch
 		}
+
+		// Inline code (`path/like/this`). Glamour's stock dark style is red
+		// (203) on a flat grey (236) with a space of padding each side — chunky
+		// chips that carpet a markdown table of filenames and clash hard with
+		// the ocean canvas (this was the "not beautiful" complaint). Retune to a
+		// calm cyan accent with NO opaque background and no padding, so inline
+		// code reads as a quiet color shift, not a block. Degrades cleanly since
+		// it never paints a fill.
+		codeFg := tokenHex(DarkTheme().AccentFlash)
+		s.Code.Color = &codeFg
+		s.Code.BackgroundColor = nil
+		s.Code.Prefix = ""
+		s.Code.Suffix = ""
 	}
 	for _, h := range []*ansi.StyleBlock{&s.H1, &s.H2, &s.H3, &s.H4, &s.H5, &s.H6} {
 		h.Prefix = ""

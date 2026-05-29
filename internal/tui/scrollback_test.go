@@ -193,3 +193,29 @@ func TestRenderCachesByWidthAndSeq(t *testing.T) {
 		t.Errorf("render missing user text: %q", first)
 	}
 }
+
+// TestExpandLastResultMatchesRenderThreshold pins the fix for the broken `e`
+// affordance: a tool result longer than maxBodyLines (so the renderer shows
+// "… press e to expand") MUST be expandable, while a short one is a no-op. The
+// old hard-coded > 30 gate left 11..30-line results stuck — hint shown,
+// expansion refused.
+func TestExpandLastResultMatchesRenderThreshold(t *testing.T) {
+	s := NewScrollback()
+	s.AppendToolCall("c1", "bash", "echo")
+	// > maxBodyLines (10) but well under the old 30-line gate.
+	s.AppendToolResult("c1", tools.Result{Content: strings.Repeat("x\n", maxBodyLines+5)}, 0)
+	if !s.ExpandLastResult() {
+		t.Fatalf("a %d-line result (> maxBodyLines=%d) must be expandable via e", maxBodyLines+5, maxBodyLines)
+	}
+	if s.ExpandLastResult() {
+		t.Error("an already-expanded result must not re-expand")
+	}
+
+	// A short result is never truncated, so e is a no-op.
+	short := NewScrollback()
+	short.AppendToolCall("c2", "bash", "echo")
+	short.AppendToolResult("c2", tools.Result{Content: "a\nb\nc"}, 0)
+	if short.ExpandLastResult() {
+		t.Error("a result <= maxBodyLines must not report as expandable")
+	}
+}

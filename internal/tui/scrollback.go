@@ -350,7 +350,11 @@ func (s *Scrollback) ToggleAllReasoning() {
 // truncated) tool result. Returns true if it found one.
 func (s *Scrollback) ExpandLastResult() bool {
 	for i := len(s.items) - 1; i >= 0; i-- {
-		if s.items[i].kind == itemToolResult && !s.items[i].expanded && lineCount(s.items[i].result.Content) > 30 {
+		// Match the renderer's truncation threshold (maxBodyLines) so `e`
+		// expands precisely the results that show "… press e to expand".
+		// The old hard-coded > 30 left results of 11..30 lines stuck: hint
+		// shown, expansion refused.
+		if s.items[i].kind == itemToolResult && !s.items[i].expanded && lineCount(s.items[i].result.Content) > maxBodyLines {
 			s.items[i].expanded = true
 			s.bump()
 			return true

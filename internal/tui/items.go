@@ -139,6 +139,14 @@ func toolAccent(t Theme, model string) color.Color {
 // hint pointing at the ctrl+t toggle.
 const maxReasoningLines = 16
 
+// maxBodyLines is the collapsed height of a tool result / diff before it shows
+// the "… N more lines, press e to expand" hint. It is a PACKAGE const so the
+// renderer (which truncates here) and Scrollback.ExpandLastResult (which
+// decides whether `e` has anything to reveal) share ONE threshold — otherwise
+// a result longer than this but under the old hard-coded gate showed the hint
+// yet refused to expand.
+const maxBodyLines = 10
+
 func (i chatItem) render(t Theme, width int) string {
 	switch i.kind {
 	case itemUser:
@@ -251,7 +259,7 @@ func (i chatItem) render(t Theme, width int) string {
 			lang = "diff"
 		}
 
-		const maxBodyLines = 10
+		// maxBodyLines is a package const (shared with ExpandLastResult).
 
 		// Rich unified-diff rendering: edit/write/apply_patch and the
 		// structured git_diff tool (plus any auto-detected raw diff) route to

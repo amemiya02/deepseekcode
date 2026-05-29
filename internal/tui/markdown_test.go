@@ -25,6 +25,26 @@ func TestCleanStyleCodeBlockFillGate(t *testing.T) {
 	}
 }
 
+// TestCleanStyleInlineCodeRetuned pins the inline-code retune: glamour's stock
+// red-on-grey padded chip is replaced by a calm cyan accent with NO opaque
+// background and no padding, so a markdown table full of `path/like/this`
+// doesn't carpet the ocean canvas with grey blocks. Holds in both fill modes
+// (inline code never paints a fill, so it degrades trivially).
+func TestCleanStyleInlineCodeRetuned(t *testing.T) {
+	for _, fills := range []bool{true, false} {
+		s := cleanStyle("dark", fills)
+		if s.Code.BackgroundColor != nil {
+			t.Errorf("fills=%v: inline code must have no opaque background, got %q", fills, *s.Code.BackgroundColor)
+		}
+		if s.Code.Color == nil {
+			t.Errorf("fills=%v: inline code must set a calm accent color (not glamour's red)", fills)
+		}
+		if s.Code.Prefix != "" || s.Code.Suffix != "" {
+			t.Errorf("fills=%v: inline code padding must be removed, got prefix=%q suffix=%q", fills, s.Code.Prefix, s.Code.Suffix)
+		}
+	}
+}
+
 // TestCleanStyleDoesNotMutateGlamourGlobal guards the aliasing hazard: cleanStyle
 // copies glamour's shared StyleConfig by value, but CodeBlock.Chroma is a
 // *Chroma that aliases the process-global styles.DarkStyleConfig. Writing

@@ -194,6 +194,16 @@ type Agent struct {
 	toolCallCount int
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
+
+	// loopNudged records that the one-shot loop-break nudge has been spent in
+	// the current Run. loopFloor is the step index from which loop detection
+	// counts *after* a nudge: without it the pre-nudge repeats stay inside the
+	// detection window and re-trip the detector on the very next step, robbing
+	// the model of the single recovery turn the nudge is meant to grant. Both
+	// are per-Run, touched only on the single Run/runStep goroutine, and reset
+	// at the top of Run.
+	loopNudged bool
+	loopFloor  int
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -220,10 +230,13 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		MaxContextTokens: MaxContextTokens,
 		Jobs:             NewJobRegistry(),
 		stormBreaker:     repair.NewStormBreaker(6, 3),
-		StopWhen: []StopCondition{
-			MaxSteps(50),
-			LoopDetection(5, 3),
-		},
+	}
+
+	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
+	// after the literal rather than inside it.
+	a.StopWhen = []StopCondition{
+		MaxSteps(50),
+		a.loopDetection(5, 3),
 	}
 
 	a.bus = NewBus()
@@ -304,6 +317,9 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	// Clear any stop request from a previous run so a stale ctrl+c can't
 	// mislabel this run's termination.
 	a.stopRequested.Store(false)
+	// Each Run gets its own single loop-break nudge and a fresh detection floor.
+	a.loopNudged = false
+	a.loopFloor = 0
 
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
@@ -356,6 +372,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	// overflow in a long run gets its own recovery rather than failing hard.
 	overflowRetried := false
 
+agentLoop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -414,6 +431,25 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		// check so loop-detection can fire on tool-emitting steps too.
 		for _, sc := range a.StopWhen {
 			if stop, reason := sc(a.steps); stop {
+				// First loop detection in this Run: give the model exactly one
+				// corrective nudge to change approach before hard-stopping. The
+				// offending assistant tool_calls are already in a.Messages but
+				// have no results yet (this check runs before runToolCalls), so
+				// the nudge synthesizes a result per dangling call (keeping the
+				// tool_call/tool_result pairing valid) and then appends a single
+				// user message. loopFloor is raised so the repeats that tripped
+				// the detector are forgiven for the recovery turn. The nudge text
+				// rides the message tail only — it never enters the system prompt
+				// or any tool schema, so the cache-stable prefix is untouched.
+				if reason == StopLoopDetected && !a.loopNudged {
+					a.loopNudged = true
+					a.loopFloor = len(a.steps)
+					a.injectLoopBreakNudge(step.ToolCalls)
+					a.bus.Publish(EventInfo{Text: "loop detected; nudging the model to change approach (one chance before hard stop)"})
+					a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage})
+					stepCancel()
+					continue agentLoop
+				}
 				stepCancel()
 				a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage})
 				return reason, nil
@@ -1046,6 +1082,41 @@ func (a *Agent) fullMessagesWithFrozenSystem(frozenSystem string) []llm.Message 
 	})
 	out = append(out, a.Messages...)
 	return out
+}
+
+// loopBreakToolResultText and loopBreakNudgeText are the message-tail strings
+// the one-shot loop-break nudge injects. They live ONLY in tool-result and
+// user messages on the conversation tail — never in DefaultSystemPrompt or any
+// tool schema — so they cannot move the Prefix Fingerprint or invalidate the
+// prompt cache.
+const (
+	loopBreakToolResultText = "Stopped: this tool call has repeated several times without making progress (possible loop)."
+	loopBreakNudgeText      = "You appear to be repeating the same action without making progress. Briefly summarize what you were trying to accomplish and why it isn't working, then try a different approach — do not repeat the previous tool call."
+)
+
+// injectLoopBreakNudge appends, to the conversation tail, one synthetic error
+// tool-result for each still-dangling tool call from the offending step,
+// followed by a single user-role nudge asking the model to change approach.
+// Loop detection fires before runToolCalls has produced any results, so the
+// offending assistant tool_calls sit in a.Messages unpaired; synthesizing a
+// result per call.ID is what keeps the next request's tool_call/tool_result
+// pairing valid for DeepSeek. Both the results and the nudge are persisted so
+// a Replay reconstructs the same paired transcript.
+func (a *Agent) injectLoopBreakNudge(calls []llm.ToolCall) {
+	for _, call := range calls {
+		a.Messages = append(a.Messages, llm.Message{
+			Role:   "tool",
+			Blocks: []llm.ContentBlock{llm.ToolResultBlock{ToolUseID: call.ID, Content: loopBreakToolResultText, IsError: true}},
+		})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendToolResult(context.Background(), call.ID, loopBreakToolResultText, true)
+		}
+	}
+	nudge := []llm.ContentBlock{llm.TextBlock{Text: loopBreakNudgeText}}
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: nudge})
+	if a.Persister != nil {
+		_, _ = a.Persister.AppendUserMessage(context.Background(), nudge)
+	}
 }
 
 // runToolCalls dispatches all tool calls from one step, respecting

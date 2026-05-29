@@ -244,9 +244,17 @@ deterministic.
 ### 6.6 Stop conditions
 
 - **Loop detection**: same tool call (name + arg hash) appearing 3+
-  times in the last 5 steps → emit a `StopReason=LoopDetected` and
-  return a synthetic tool result asking the model to summarize what it
-  was trying to do.
+  times in the last 5 steps. The **first** detection in a Run is not a
+  hard stop: the loop injects a synthetic error tool-result for each
+  still-dangling tool call (keeping `tool_call`/`tool_result` pairing
+  valid) plus a single user-role nudge asking the model to summarize what
+  it was attempting and try a different approach, then continues for
+  exactly one more turn. A per-Run `loopFloor` scopes detection to steps
+  *after* the nudge so the repeats that tripped it are forgiven and the
+  recovery turn is judged on its own. If loop detection fires **again**
+  in the same Run, the loop hard-stops with `StopReason=LoopDetected`.
+  The nudge is message-tail only — it never enters the system prompt or
+  any tool schema, so the cache-stable prefix is untouched.
 - **Token-budget compaction**: when remaining context drops below 20k
   tokens (large model) or 20% of window (small model), an automatic
   summarize-and-trim runs. This is `sessionAgent.Run`'s exact

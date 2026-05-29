@@ -99,6 +99,26 @@ func LoopDetection(window, maxRepeats int) StopCondition {
 	}
 }
 
+// loopDetection wraps the package-level LoopDetection so it only considers
+// steps recorded at or after a.loopFloor. The Run loop raises the floor to the
+// current step count when it injects the one-shot loop-break nudge, so the
+// repeats that tripped the detector are forgiven and the model's recovery turn
+// is judged on its own merits. With loopFloor==0 (the default and the
+// post-reset state) it behaves exactly like LoopDetection.
+func (a *Agent) loopDetection(window, maxRepeats int) StopCondition {
+	base := LoopDetection(window, maxRepeats)
+	return func(steps []StepRecord) (bool, StopReason) {
+		floor := a.loopFloor
+		if floor < 0 {
+			floor = 0
+		}
+		if floor > len(steps) {
+			floor = len(steps)
+		}
+		return base(steps[floor:])
+	}
+}
+
 func sha8(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:4])

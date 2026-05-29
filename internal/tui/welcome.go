@@ -17,12 +17,12 @@ func renderWelcome(t Theme, width int) string {
 
 	if width < fullWidth {
 		return t.ToolCall.Render("⏺ deepseekcode") + " " +
-			t.Hint.Render("v"+version.Version+" · /help for commands") + "\n"
+			t.Hint.Render(version.Display()+" · /help for commands") + "\n"
 	}
 
 	var b strings.Builder
 	b.WriteByte('\n')
-	b.WriteString(renderLogo(t, "deepseek", "deepseekcode", "v"+version.Version, width))
+	b.WriteString(renderLogo(t, "deepseek", "deepseekcode", version.Display(), width))
 	b.WriteByte('\n')
 	b.WriteString(t.Hint.Render("  Terminal coding agent for DeepSeek"))
 	b.WriteByte('\n')

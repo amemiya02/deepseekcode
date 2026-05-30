@@ -80,21 +80,28 @@ func TestLooksLikeDiff(t *testing.T) {
 	}
 }
 
-// TestToolResultRoutesDiffThroughDiffLexer proves a diff produced by bash is
-// highlighted (ANSI present) and its text round-trips intact through the
-// renderer — i.e. detection routes it through the lexer without mangling.
-func TestToolResultRoutesDiffThroughDiffLexer(t *testing.T) {
+// TestToolResultRoutesDiffThroughDiffView proves a diff produced by bash is
+// routed through the rich diffview: the band fills emit ANSI, and the code
+// text round-trips intact. The leading +/- marker column is replaced by the
+// colored band + line-number gutter, so the surviving payload is the code
+// text ("was" / "now") and the hunk header — NOT the literal "-was" / "+now".
+func TestToolResultRoutesDiffThroughDiffView(t *testing.T) {
 	diff := "diff --git a/x.go b/x.go\n@@ -1,2 +1,2 @@\n-was\n+now\n"
 	item := chatItem{kind: itemToolResult, tool: "bash", args: `{"command":"git diff"}`, result: tools.Result{Content: diff}, expanded: true}
 	out := item.render(DarkTheme(), 80)
 	if !strings.Contains(out, "\x1b[") {
-		t.Errorf("expected ANSI highlight in diff render, got %q", out)
+		t.Errorf("expected ANSI band fills in diff render, got %q", out)
 	}
 	plain := stripANSI(out)
-	for _, want := range []string{"-was", "+now", "@@ -1,2 +1,2 @@"} {
+	for _, want := range []string{"was", "now", "@@ -1,2 +1,2 @@"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("diff text %q missing from render:\n%s", want, plain)
 		}
+	}
+	// The diff view draws a line-number gutter; the new-side line numbers for
+	// the added line must appear.
+	if !strings.Contains(plain, "1") {
+		t.Errorf("expected a line-number gutter in diff render:\n%s", plain)
 	}
 }
 

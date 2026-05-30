@@ -104,19 +104,28 @@ func RenderHUD(data HUDData, width int) string {
 // Callers guarantee limit > 0.
 func contextBar(tokens, limit int) string {
 	const cells = 10
-	filled := 0
-	if limit > 0 {
-		// integer round-half-up of tokens/limit*cells, no math import
-		filled = (tokens*cells + limit/2) / limit
-		if filled < 0 {
-			filled = 0
-		}
-		if filled > cells {
-			filled = cells
-		}
-	}
+	filled := contextFill(tokens, limit, cells)
 	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", cells-filled) + "]"
 	return fmt.Sprintf("ctx %s %s/%s", bar, humanTokens(tokens), humanTokens(limit))
+}
+
+// contextFill returns the number of filled cells (0..cells) for a context bar:
+// an integer round-half-up of tokens/limit, clamped. It is the SINGLE source of
+// the bar geometry shared by the plain contextBar (HUD / golden tests) and the
+// accent-colored renderContextBar (status line) so the two can never drift —
+// no math import, deterministic and golden-test safe.
+func contextFill(tokens, limit, cells int) int {
+	if limit <= 0 {
+		return 0
+	}
+	filled := (tokens*cells + limit/2) / limit
+	if filled < 0 {
+		return 0
+	}
+	if filled > cells {
+		return cells
+	}
+	return filled
 }
 
 // humanTokens formats a token count compactly: 1_000_000 → "1M",

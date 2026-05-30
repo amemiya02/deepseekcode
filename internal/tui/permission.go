@@ -126,7 +126,9 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 	tool := p.pending.Check.Tool.Name()
 	args := oneline(string(p.pending.Check.Args), innerW-10)
 
-	title := t.PermPrompt.Render("⚠ permission required")
+	// Gradient "/// permission required" accent header, with a warn glyph.
+	gradHead := ApplyBoldForegroundGrad(lipgloss.NewStyle(), "/// permission required", t.BrandDeep, t.BrandLight)
+	header := t.PermPrompt.Render("⚠ ") + gradHead
 	toolLine := t.AssistantText.Render("  tool  ") + t.StatusModel.Render(tool)
 	argsLine := t.AssistantText.Render("  args  ") + t.Hint.Render(args)
 
@@ -154,20 +156,30 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 	row2 := "  " + renderBtn(2) + "  " + renderBtn(3)
 	hint := t.Hint.Render("  ←↑↓→ / tab move · ⏎ select · esc deny · y/s/a/n direct")
 
-	body := strings.Join([]string{
-		title,
+	lines := []string{
+		header,
 		toolLine,
 		argsLine,
 		"",
 		row1,
 		row2,
 		hint,
-	}, "\n")
+	}
 
-	return lipgloss.NewStyle().
+	// Warn-colored left bar down the card interior: one bar glyph per line,
+	// rendered in the warn token, to flag the destructive ask.
+	bar := t.LeftBar(t.WarnColor)
+	for i, ln := range lines {
+		lines[i] = bar.Render(LeftBarGlyph()) + " " + ln
+	}
+	body := strings.Join(lines, "\n")
+
+	// Raised in-slot pane: bgRaised surface, rounded border in the border
+	// token, Padding(1,2). Degrades to fg-only when fills are disabled.
+	pane := t.Panel(TierRaised).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.PermPrompt.GetForeground()).
-		Padding(0, 1).
-		Width(width - 2).
-		Render(body)
+		BorderForeground(t.BorderColor).
+		Padding(1, 2).
+		Width(width - 2)
+	return pane.Render(body)
 }

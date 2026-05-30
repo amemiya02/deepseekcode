@@ -57,7 +57,18 @@ type Scrollback struct {
 
 	// Per-item render cache keyed by content hash.
 	itemRenderCache *RenderCache
+
+	// curModel is the active main-loop model id, stamped onto tool items as
+	// they are appended so each tool card's left bar reads the model that
+	// produced it (flash=cyan, pro=purple). Set via SetModel on construction
+	// and on /models switches; empty defaults to the flash accent.
+	curModel string
 }
+
+// SetModel records the active main-loop model so subsequently appended tool
+// items carry it (for the per-model tool-bar accent). Stamped at append time,
+// so a mid-session /models switch only colors tool cards produced afterward.
+func (s *Scrollback) SetModel(model string) { s.curModel = model }
 
 // NewScrollback returns an empty Scrollback with no in-progress
 // streams and no selection.
@@ -106,6 +117,7 @@ func (s *Scrollback) AppendToolCall(callID, tool, args string) {
 		tool:       tool,
 		args:       args,
 		toolCallID: callID,
+		model:      s.curModel,
 		timestamp:  time.Now(),
 	})
 }
@@ -130,6 +142,7 @@ func (s *Scrollback) AppendToolResult(callID string, result tools.Result, dur ti
 		toolCallID: callID,
 		result:     result,
 		duration:   dur,
+		model:      s.curModel,
 		timestamp:  time.Now(),
 	})
 }
@@ -337,7 +350,11 @@ func (s *Scrollback) ToggleAllReasoning() {
 // truncated) tool result. Returns true if it found one.
 func (s *Scrollback) ExpandLastResult() bool {
 	for i := len(s.items) - 1; i >= 0; i-- {
-		if s.items[i].kind == itemToolResult && !s.items[i].expanded && lineCount(s.items[i].result.Content) > 30 {
+		// Match the renderer's truncation threshold (maxBodyLines) so `e`
+		// expands precisely the results that show "… press e to expand".
+		// The old hard-coded > 30 left results of 11..30 lines stuck: hint
+		// shown, expansion refused.
+		if s.items[i].kind == itemToolResult && !s.items[i].expanded && lineCount(s.items[i].result.Content) > maxBodyLines {
 			s.items[i].expanded = true
 			s.bump()
 			return true
@@ -376,6 +393,7 @@ func (s *Scrollback) Clear() {
 	s.streamThinkIdx = noStream
 	s.vis = visualState{}
 	s.itemRenderCache = NewRenderCache(128)
+	diffCache = NewRenderCache(64)
 	s.bump()
 }
 

@@ -130,5 +130,8 @@ func renderLogo(t Theme, hero, brand, version string, width int) string {
 	return b.String()
 }
 
-// logoFieldColor returns the muted brand-blue used for the diagonal field.
-func logoFieldColor(_ Theme) color.Color { return lipgloss.Color("#264b73") }
+// logoFieldColor returns the color of the diagonal ╱ field flanking the
+// wordmark. It rides the border token so the field reads as a quiet structural
+// frame that harmonizes with the painted canvas (border sits just above the
+// bgRaised tier) instead of competing with the gradient wordmark.
+func logoFieldColor(t Theme) color.Color { return t.BorderColor }

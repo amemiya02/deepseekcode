@@ -363,3 +363,266 @@ func TestPermissionModeEatsKeys(t *testing.T) {
 		t.Fatalf("permission modal should stay up after an unmapped key, got mode %v", a.mode)
 	}
 }
+
+// --- G1/G2/G3: inline completions popup + prompt history wiring -----------
+//
+// These pin the new Insert-mode precedence chain (design-tui-interaction.md
+// §5.1/§5.2/§7): the `/` menu is derived from the post-keystroke buffer,
+// ↑/↓ recall history only at the cursor's top/bottom edge, accepting a
+// completion inserts without submitting, and a real Enter still submits.
+
+func keyUp() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyUp} }
+func keyDown() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyDown} }
+func keyTab() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyTab} }
+
+// TestSlashOpensPopupViaBufferSync: typing '/' is an ordinary printable key
+// that falls through to the textarea; syncCompletions then derives the popup
+// from the buffer and opens the `/` menu. The popup must reserve layout rows
+// so it cannot push the input off-screen.
+func TestSlashOpensPopupViaBufferSync(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	if a.completions.Active() {
+		t.Fatal("popup should start closed")
+	}
+	a = drive(t, a, press('/'))
+	if got := a.input.Value(); got != "/" {
+		t.Fatalf("typing '/' should reach the textarea, input = %q", got)
+	}
+	if !a.completions.Active() {
+		t.Fatal("typing '/' at a word boundary should open the / menu")
+	}
+	if a.completions.Trigger() != '/' {
+		t.Fatalf("popup trigger = %q, want '/'", a.completions.Trigger())
+	}
+	if a.popupLines <= 0 {
+		t.Fatalf("popupLines should be reserved while the menu is open, got %d", a.popupLines)
+	}
+	// Filtering narrows as the query grows: "/mod" should still match /models.
+	a = drive(t, a, press('m'))
+	a = drive(t, a, press('o'))
+	a = drive(t, a, press('d'))
+	sel, ok := a.completions.Selected()
+	if !ok {
+		t.Fatal("expected a selected completion after typing /mod")
+	}
+	if sel.insert != "/models" {
+		t.Fatalf("/mod should select /models, got %q", sel.insert)
+	}
+}
+
+// TestSlashMidWordIsInert: a '/' that is not at a word boundary (e.g. inside
+// a path token) must NOT open the menu — only a token-leading trigger does.
+func TestSlashMidWordIsInert(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a = drive(t, a, press('a'))
+	a = drive(t, a, press('/'))
+	if got := a.input.Value(); got != "a/" {
+		t.Fatalf("input = %q, want %q", got, "a/")
+	}
+	if a.completions.Active() {
+		t.Fatal("a mid-word '/' must not open the menu")
+	}
+	if a.popupLines != 0 {
+		t.Fatalf("popupLines should be 0 with no menu, got %d", a.popupLines)
+	}
+}
+
+// TestAcceptCompletionInsertsAndDoesNotSubmit: with the popup open, Enter
+// accepts the selected command into the input and closes the popup; it must
+// NOT submit (no user line appended, input retains the command text). A
+// second Enter is what actually submits.
+func TestAcceptCompletionInsertsAndDoesNotSubmit(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a = drive(t, a, press('/'))
+	if !a.completions.Active() {
+		t.Fatal("expected the / menu open")
+	}
+	sel, _ := a.completions.Selected()
+	want := sel.insert
+
+	beforeItems := len(a.scrollback.Items())
+	a = drive(t, a, keyEnter())
+
+	if a.completions.Active() {
+		t.Fatal("accepting a completion should close the popup")
+	}
+	if got := a.input.Value(); got != want {
+		t.Fatalf("accept should insert %q into the input, got %q", want, got)
+	}
+	if len(a.scrollback.Items()) != beforeItems {
+		t.Fatal("accepting a completion must NOT submit (no scrollback item should be added)")
+	}
+	if a.popupLines != 0 {
+		t.Fatalf("popupLines should reset to 0 after accept, got %d", a.popupLines)
+	}
+}
+
+// TestTabAlsoAcceptsCompletion: Tab is an accept alias while the menu is open.
+func TestTabAlsoAcceptsCompletion(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a = drive(t, a, press('/'))
+	sel, _ := a.completions.Selected()
+	want := sel.insert
+	a = drive(t, a, keyTab())
+	if a.completions.Active() {
+		t.Fatal("Tab should accept and close the popup")
+	}
+	if got := a.input.Value(); got != want {
+		t.Fatalf("Tab accept should insert %q, got %q", want, got)
+	}
+}
+
+// TestEscClosesPopupStaysInsert: Esc with the popup open closes the menu only
+// and stays in Insert mode (it does not fall through to the Normal-mode
+// switch). Esc with no popup still leaves to Normal.
+func TestEscClosesPopupStaysInsert(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a = drive(t, a, press('/'))
+	if !a.completions.Active() {
+		t.Fatal("expected the / menu open")
+	}
+	a = drive(t, a, keyEscape())
+	if a.completions.Active() {
+		t.Fatal("Esc should close the popup")
+	}
+	if a.mode != modeInsert {
+		t.Fatalf("Esc with a popup open should stay in Insert, got mode %v", a.mode)
+	}
+	// With no popup, Esc now leaves to Normal.
+	a = drive(t, a, keyEscape())
+	if a.mode != modeNormal {
+		t.Fatalf("Esc with no popup should switch to Normal, got %v", a.mode)
+	}
+}
+
+// TestEnterSubmitsNormalPrompt: a plain prompt (no popup, no slash) still
+// submits — the user line is appended and the input is cleared.
+func TestEnterSubmitsNormalPrompt(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a.input.SetValue("hello world")
+	if a.completions.Active() {
+		t.Fatal("a plain prompt should not have a popup open")
+	}
+	before := len(a.scrollback.Items())
+	a = drive(t, a, keyEnter())
+	if got := a.input.Value(); got != "" {
+		t.Fatalf("submit should clear the input, got %q", got)
+	}
+	if len(a.scrollback.Items()) <= before {
+		t.Fatal("submitting a normal prompt should append a user line to the scrollback")
+	}
+	// The submitted prompt joins the recall ring.
+	ents := a.history.Entries()
+	if len(ents) == 0 || ents[len(ents)-1] != "hello world" {
+		t.Fatalf("submit should add the prompt to history, entries = %v", ents)
+	}
+}
+
+// TestHistoryRecallAtTopEdge: with a single-line draft the cursor is on row 0,
+// so ↑ recalls the previous prompt and ↓ walks back to the saved draft.
+func TestHistoryRecallAtTopEdge(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a.history = newPromptHistory([]string{"older", "newer"}, 500)
+
+	a.input.SetValue("draft")
+	a = drive(t, a, keyUp())
+	if got := a.input.Value(); got != "newer" {
+		t.Fatalf("↑ on row 0 should recall newest entry 'newer', got %q", got)
+	}
+	a = drive(t, a, keyUp())
+	if got := a.input.Value(); got != "older" {
+		t.Fatalf("second ↑ should recall 'older', got %q", got)
+	}
+	a = drive(t, a, keyDown())
+	if got := a.input.Value(); got != "newer" {
+		t.Fatalf("↓ should step back to 'newer', got %q", got)
+	}
+	a = drive(t, a, keyDown())
+	if got := a.input.Value(); got != "draft" {
+		t.Fatalf("↓ past the newest entry should restore the live draft, got %q", got)
+	}
+}
+
+// TestHistoryEdgeGatingMidDraft: ↑ on a NON-top row of a multi-line draft must
+// move the textarea cursor (multiline editing) and must NOT recall history.
+// This is the readline edge rule from §5.2.
+func TestHistoryEdgeGatingMidDraft(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a.history = newPromptHistory([]string{"prev-prompt"}, 500)
+
+	// A 3-line draft; SetValue parks the cursor at the end (row 2).
+	a.input.SetValue("line1\nline2\nline3")
+	if a.input.Line() != a.input.LineCount()-1 {
+		t.Fatalf("expected cursor on the last row after SetValue, got row %d of %d", a.input.Line(), a.input.LineCount())
+	}
+
+	// ↑ from the last row: cursor moves up to row 1, draft is untouched, and
+	// history is NOT consulted (idx stays -1, value unchanged).
+	a = drive(t, a, keyUp())
+	if got := a.input.Value(); got != "line1\nline2\nline3" {
+		t.Fatalf("↑ on a non-top row must not recall history; value = %q", got)
+	}
+	if a.input.Line() == a.input.LineCount()-1 {
+		t.Fatalf("↑ should have moved the cursor off the last row, still at row %d", a.input.Line())
+	}
+	if a.history.idx != -1 {
+		t.Fatalf("history must not be browsing after a mid-draft ↑, idx = %d", a.history.idx)
+	}
+}
+
+// TestAcceptWithQuerySplicesAtAnchor: after narrowing with a query, accepting
+// replaces from the trigger anchor to the cursor with the full command,
+// leaving a clean "/models" rather than duplicating the typed query. This
+// pins the cursorByteOffset + anchor splice (acceptCompletion).
+func TestAcceptWithQuerySplicesAtAnchor(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	for _, r := range "/mod" {
+		a = drive(t, a, press(r))
+	}
+	if !a.completions.Active() {
+		t.Fatal("expected the / menu open after typing /mod")
+	}
+	sel, ok := a.completions.Selected()
+	if !ok || sel.insert != "/models" {
+		t.Fatalf("/mod should select /models, got %+v ok=%v", sel, ok)
+	}
+	a = drive(t, a, keyEnter())
+	if got := a.input.Value(); got != "/models" {
+		t.Fatalf("accept after /mod should yield %q, got %q", "/models", got)
+	}
+	if a.completions.Active() {
+		t.Fatal("accept should close the popup")
+	}
+}
+
+// TestAtTriggerStubDoesNotTrapInput: typing '@' at a word boundary opens the @
+// file-mention menu (G4). Before the background walk's fileIndexMsg lands it
+// shows the single non-insertable "(indexing files…)" placeholder; Enter on
+// that row neither submits nor traps — it just closes, leaving the '@' in the
+// buffer.
+func TestAtTriggerStubDoesNotTrapInput(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	a = drive(t, a, press('@'))
+	if got := a.input.Value(); got != "@" {
+		t.Fatalf("typing '@' should reach the textarea, got %q", got)
+	}
+	if a.completions.Trigger() != '@' || !a.completions.Active() {
+		t.Fatalf("'@' should open the @ trigger popup, active=%v trigger=%q", a.completions.Active(), a.completions.Trigger())
+	}
+	// The placeholder is one row plus the two card borders.
+	if a.popupLines != 3 {
+		t.Fatalf("the @ indexing placeholder should reserve 3 rows, got %d", a.popupLines)
+	}
+	// Enter on the placeholder closes it without submitting (empty insert).
+	before := len(a.scrollback.Items())
+	a = drive(t, a, keyEnter())
+	if a.completions.Active() {
+		t.Fatal("Enter on the @ placeholder should close the popup")
+	}
+	if len(a.scrollback.Items()) != before {
+		t.Fatal("Enter on the @ placeholder must not submit")
+	}
+	if got := a.input.Value(); got != "@" {
+		t.Fatalf("Enter on the placeholder should leave the '@' intact, got %q", got)
+	}
+}

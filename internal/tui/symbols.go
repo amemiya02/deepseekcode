@@ -15,4 +15,6 @@ const (
 	ScrollbarTrack  = "│"
 	IconSkill       = "▲"
 	IconModel       = "◇"
+	IconFoldClosed  = "▸" // collapsed reasoning fold glyph
+	IconFoldOpen    = "▾" // expanded reasoning fold glyph
 )

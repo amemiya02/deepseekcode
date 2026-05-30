@@ -31,10 +31,23 @@ type Config struct {
 	Sandbox     SandboxConfig                 `toml:"sandbox"`
 	Active      ActiveConfig                  `toml:"active"`
 	Providers   map[string]ProviderConfigTOML `toml:"providers"`
+	UI          UIConfig                      `toml:"ui"`
 
 	LegacyAPIUsed         bool `toml:"-"`
 	DefaultsModelExplicit bool `toml:"-"`
 	providersExplicit     bool
+}
+
+// UIConfig holds presentational TUI options. Purely cosmetic — nothing
+// here touches the wire / prompt-cache path.
+type UIConfig struct {
+	// TransparentBackground, when true, degrades the bg-tier panels (tool
+	// results, diffs, reasoning) to left-bars / separators with no opaque
+	// fills — a fully flat / fg-only look. The full-screen canvas is not
+	// painted in either case (it bled through glamour/viewport ANSI resets;
+	// see docs/adr/0002), so this is a "no backgrounds at all" toggle.
+	// Default false (panels render their fills).
+	TransparentBackground bool `toml:"transparent_background"`
 }
 
 // WebConfig configures web fetch and search tools.
@@ -325,6 +338,12 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	}
 	if meta.IsDefined("sandbox", "allow_network") {
 		base.Sandbox.AllowNetwork = ov.Sandbox.AllowNetwork
+	}
+
+	// UI: TransparentBackground defaults to false, so only flip when the
+	// overlay explicitly defined it (mirrors sandbox/web bool handling).
+	if meta.IsDefined("ui", "transparent_background") {
+		base.UI.TransparentBackground = ov.UI.TransparentBackground
 	}
 
 	if ov.Active.Provider != "" {

@@ -189,16 +189,23 @@ func (c *Chrome) Render(t Theme, showNewBelow bool) string {
 	default:
 		caption = fmt.Sprintf("working… %.1fs", elapsed)
 	}
-	return "  " + t.StatusModel.Render(c.spinner(t)) + " " +
-		t.AssistantText.Render(caption) + "  " +
-		t.Hint.Render("[^C cancel]")
+	// Caption rides fgBase (primary text), the cancel hint rides fgFaint
+	// (meta), both straight off the semantic tokens so the band harmonizes
+	// with the painted canvas instead of borrowing legacy styles.
+	captionStyle := lipgloss.NewStyle().Foreground(t.FgBase)
+	hintStyle := lipgloss.NewStyle().Foreground(t.FgFaint)
+	return "  " + c.spinner(t) + " " +
+		captionStyle.Render(caption) + "  " +
+		hintStyle.Render("[^C cancel]")
 }
 
 func (c *Chrome) spinner(t Theme) string {
 	c.ensureRamp(t)
 	ch := spinnerFrames[c.frame%len(spinnerFrames)]
 	if len(c.ramp) == 0 {
-		return ch
+		// Ramp unavailable (degraded color) — fall back to a flat brand color
+		// so the spinner still reads as live activity.
+		return lipgloss.NewStyle().Foreground(t.BrandLight).Render(ch)
 	}
 	return lipgloss.NewStyle().
 		Foreground(c.ramp[c.frame%len(c.ramp)]).

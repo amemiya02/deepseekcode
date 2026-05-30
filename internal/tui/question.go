@@ -120,7 +120,11 @@ func (q *QuestionFlow) Render(t Theme, width int) string {
 	}
 	qu := q.current()
 
-	title := t.PermPrompt.Render(fmt.Sprintf("? question %d/%d", q.qIndex+1, len(q.pending.Questions)))
+	// Gradient "/// question N/M" accent header.
+	gradTitle := ApplyBoldForegroundGrad(lipgloss.NewStyle(),
+		fmt.Sprintf("/// question %d/%d", q.qIndex+1, len(q.pending.Questions)),
+		t.BrandDeep, t.BrandLight)
+	title := t.PermPrompt.Render("? ") + gradTitle
 	header := qu.Header
 	if header == "" {
 		header = qu.Question
@@ -167,10 +171,13 @@ func (q *QuestionFlow) Render(t Theme, width int) string {
 	lines = append(lines, "", hint)
 
 	body := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().
+
+	// Raised in-slot pane: bgRaised surface, rounded border in the border
+	// token, Padding(1,2). Degrades to fg-only when fills are disabled.
+	pane := t.Panel(TierRaised).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.PermPrompt.GetForeground()).
-		Padding(0, 1).
-		Width(width - 2).
-		Render(body)
+		BorderForeground(t.BorderColor).
+		Padding(1, 2).
+		Width(width - 2)
+	return pane.Render(body)
 }

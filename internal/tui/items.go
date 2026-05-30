@@ -158,7 +158,7 @@ func (i chatItem) render(t Theme, width int) string {
 		// items. Render through Glamour so **bold** / `code` / lists /
 		// headings get proper ANSI styling AND line wrapping respects the
 		// terminal width (account for the gutter so long lines don't overflow).
-		body := renderMarkdown(i.text, t.Name, t.fillsEnabled(), width-len(t.Gutter()))
+		body := renderMarkdown(i.text, t, t.fillsEnabled(), width-len(t.Gutter()))
 		return indent(body, t.Gutter()) + "\n"
 	case itemReasoning:
 		barColor := t.FgSubtle // dim bar for the latent thinking channel

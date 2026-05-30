@@ -536,3 +536,112 @@ func TestTapeIgnoresTabSwitchKeys(t *testing.T) {
 		t.Fatalf("Tab in tape: Cursor() = %d, want %d (unchanged)", got, before)
 	}
 }
+
+// --- Task 4207: /theme command, palette verb, and live-preview key flow ---
+
+func TestThemeCommandOpensPicker(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.handleSlash("/theme")
+	if a.overlay.Mode() != modeThemes {
+		t.Fatalf("expected modeThemes, got %d", a.overlay.Mode())
+	}
+	if a.overlay.SelectedThemeID() != a.theme.Name {
+		t.Fatalf("expected selected %q, got %q", a.theme.Name, a.overlay.SelectedThemeID())
+	}
+}
+
+func TestThemePaletteVerbPresent(t *testing.T) {
+	a := newKeyflowApp(t)
+	found := false
+	for _, act := range a.paletteActions() {
+		if act.id == "/theme" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("paletteActions() should contain id '/theme'")
+	}
+}
+
+func TestThemePreviewOnMove(t *testing.T) {
+	var called bool
+	recorder := func(name string) error {
+		called = true
+		return nil
+	}
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.session.setTheme = recorder
+	a.handleSlash("/theme")
+	orig := a.theme.Name
+	// Move down to the next theme
+	a.handleOverlayKey(keyDown())
+	if a.theme.Name == orig {
+		t.Fatal("moving cursor should preview a different theme")
+	}
+	if called {
+		t.Error("cursor move should NOT persist (no setTheme call)")
+	}
+}
+
+func TestThemeCommitOnEnter(t *testing.T) {
+	var persisted string
+	recorder := func(name string) error {
+		persisted = name
+		return nil
+	}
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.session.setTheme = recorder
+	a.handleSlash("/theme")
+	// Filter to aurora
+	for _, r := range "aurora" {
+		a.handleOverlayKey(press(r))
+	}
+	if a.overlay.SelectedThemeID() != "aurora" {
+		t.Fatalf("filter should narrow to aurora, got %q", a.overlay.SelectedThemeID())
+	}
+	a.handleOverlayKey(keyEnter())
+	if a.overlay.IsOpen() {
+		t.Fatal("overlay should be closed after Enter")
+	}
+	if a.theme.Name != "aurora" {
+		t.Fatalf("expected theme 'aurora' after commit, got %q", a.theme.Name)
+	}
+	if persisted != "aurora" {
+		t.Errorf("expected persist('aurora'), got %q", persisted)
+	}
+}
+
+func TestThemeCancelRestores(t *testing.T) {
+	var called bool
+	recorder := func(name string) error {
+		called = true
+		return nil
+	}
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.session.setTheme = recorder
+	origName := a.theme.Name // "dark"
+	a.handleSlash("/theme")
+	// Preview midnight
+	for i := 0; i < 2; i++ {
+		a.handleOverlayKey(keyDown())
+	}
+	if a.theme.Name == origName {
+		t.Fatal("should have previewed a different theme")
+	}
+	// Esc on empty filter should restore
+	a.handleOverlayKey(keyEscape())
+	if a.overlay.IsOpen() {
+		t.Fatal("overlay should be closed after Esc")
+	}
+	if a.theme.Name != origName {
+		t.Fatalf("expected theme restored to %q, got %q", origName, a.theme.Name)
+	}
+	if called {
+		t.Error("cancel should NOT persist (no setTheme call)")
+	}
+}

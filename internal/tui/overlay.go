@@ -20,6 +20,7 @@ const (
 	modeSessions             // /sessions — session tree picker (filterable, G6)
 	modePalette              // ctrl+p — fuzzy command palette (G5)
 	modeHelp                 // ? / ctrl+g / /help — keybinding + command overlay (G7)
+	modeThemes               // /theme — theme picker (filterable, live preview)
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -48,6 +49,7 @@ type Overlay struct {
 	models       []modelOption
 	sessionsRows []sessionRow
 	palette      []paletteAction
+	themes       []themeOption
 	filter       filterableList
 }
 
@@ -146,7 +148,7 @@ func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % 
 // keys. modeTape and modeHelp are not filterable.
 func (o *Overlay) Filterable() bool {
 	switch o.mode {
-	case modeModels, modeSessions, modePalette:
+	case modeModels, modeSessions, modePalette, modeThemes:
 		return true
 	}
 	return false
@@ -226,6 +228,38 @@ func (o *Overlay) SelectedAction() (paletteAction, bool) {
 	}
 	return paletteAction{}, false
 }
+
+// OpenThemes switches to the /theme picker. The filterableList is seeded with
+// "Label  Desc" per row; the cursor lands on the row that matches activeID,
+// falling back to 0 if no match.
+func (o *Overlay) OpenThemes(activeID string) {
+	o.themes = availableThemes()
+	o.mode = modeThemes
+	o.cursor = 0
+	labels := make([]string, len(o.themes))
+	for i, th := range o.themes {
+		labels[i] = th.Label + "  " + th.Desc
+	}
+	o.filter.SetRows(labels)
+	for i, th := range o.themes {
+		if th.ID == activeID {
+			o.cursorTo(i)
+			break
+		}
+	}
+}
+
+// SelectedThemeID returns the theme id under the cursor (mapped through the
+// filter), or "" when nothing matches.
+func (o *Overlay) SelectedThemeID() string {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.themes) {
+		return o.themes[i].ID
+	}
+	return ""
+}
+
+// Themes returns the picker rows (read-only).
+func (o *Overlay) Themes() []themeOption { return o.themes }
 
 // modelOption is one row in the /models picker.
 type modelOption struct {
@@ -383,6 +417,58 @@ func renderModelsPicker(t Theme, models []modelOption, visible []int, cursor int
 	}
 	header := fmt.Sprintf("%d models · type to filter · ⏎ switch · esc cancel", len(models))
 	return wrapPane(t, "/models", header, b.String(), width, height)
+}
+
+// renderThemesPicker draws the /theme picker overlay. Each row shows a color
+// swatch built from the row's own theme colors (brandDeep, accentFlash,
+// accentPro), then the Label and dim Desc. The active theme is marked with *,
+// the cursor row uses selectedRow. Mirrors renderModelsPicker's structure.
+func renderThemesPicker(t Theme, rows []themeOption, visible []int, cursor int, filter, activeID string, width, height int) string {
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no themes match the filter)"))
+	}
+	// Swatch: three colored blocks. Fixed 6-cell display width.
+	swatchW := 6
+	for vi, idx := range visible {
+		th := themeByID(rows[idx].ID)
+		swatch := lipgloss.NewStyle().Foreground(th.BrandDeep).Render("█") +
+			lipgloss.NewStyle().Foreground(th.AccentFlash).Render("█") +
+			lipgloss.NewStyle().Foreground(th.AccentPro).Render("█")
+		active := " "
+		if rows[idx].ID == activeID {
+			active = "*"
+		}
+		if vi == cursor {
+			// Selected row: swatch + label + desc, all inside the selection band.
+			text := fmt.Sprintf("▶ %s %s  %s  %s", active, swatch, rows[idx].Label, rows[idx].Desc)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			marker := " "
+			if rows[idx].ID == activeID {
+				marker = t.StatusGood.Render("*")
+			}
+			label := t.StatusModel.Render(rows[idx].Label)
+			// Truncate only the label+desc tail so the swatch stays fixed.
+			remain := rowW - 2 - 1 - swatchW - 4 // "  " + marker + " " + swatch + "  "
+			if remain < 0 {
+				remain = 0
+			}
+			descRemain := remain - lipgloss.Width(label)
+			if descRemain < 0 {
+				descRemain = 0
+			}
+			line := fmt.Sprintf("  %s %s  %s  %s", marker, swatch, label, truncateCells(rows[idx].Desc, descRemain))
+			b.WriteString(line + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d themes · type to filter · ⏎ apply · esc cancel", len(rows))
+	return wrapPane(t, "/theme", header, b.String(), width, height)
 }
 
 // renderSessionsPicker draws the /sessions picker overlay. visible is the

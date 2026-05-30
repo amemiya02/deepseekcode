@@ -55,6 +55,9 @@ const (
 // Theme style is re-derived from these tokens so call sites never touch
 // raw hex.
 type palette struct {
+	// Polarity: true for light-canvas themes; drives glamour base + degrade choices.
+	isLight bool
+
 	// Brand + accents.
 	brandDeep   color.Color // primary; focus borders; user bar
 	brandLight  color.Color // secondary; info
@@ -99,6 +102,7 @@ type palette struct {
 // flaw was three high-saturation hues (royal blue, neon teal, hot violet) all
 // fighting at once; restraint is what makes it read as coordinated.
 var oceanPalette = palette{
+	isLight:     false,
 	brandDeep:   lipgloss.Color("#4d7fe0"), // azure — gradients, cursor, user bar, headers
 	brandLight:  lipgloss.Color("#8fc7ff"), // light azure — gradient end, scrollbar, info
 	accentFlash: lipgloss.Color("#5cc9d6"), // muted cyan — flash model / tool bar / input border
@@ -127,6 +131,7 @@ var oceanPalette = palette{
 }
 
 var lightPalette = palette{
+	isLight:     true,
 	brandDeep:   lipgloss.Color("#1D4ED8"),
 	brandLight:  lipgloss.Color("#0087af"),
 	accentFlash: lipgloss.Color("#0087af"),
@@ -173,6 +178,93 @@ var lightDiff = diffBands{
 	delFg: lipgloss.Color("#b31d28"), delBg: lipgloss.Color("#ffeef0"),
 }
 
+// midnightPalette — azure on near-black, max contrast.
+var midnightPalette = palette{
+	isLight:     false,
+	brandDeep:   lipgloss.Color("#5b8def"),
+	brandLight:  lipgloss.Color("#a9d4ff"),
+	accentFlash: lipgloss.Color("#56d6e0"),
+	accentPro:   lipgloss.Color("#b39bff"),
+	selBg:       lipgloss.Color("#1f3a6b"),
+	selFg:       lipgloss.Color("#eef4ff"),
+	bgBase:      lipgloss.Color("#060a10"),
+	bgWell:      lipgloss.Color("#03060b"),
+	bgSurface:   lipgloss.Color("#0c121c"),
+	bgRaised:    lipgloss.Color("#121a28"),
+	fgBase:      lipgloss.Color("#eaf0f8"),
+	fgMuted:     lipgloss.Color("#9fb0c6"),
+	fgSubtle:    lipgloss.Color("#6b7b90"),
+	fgFaint:     lipgloss.Color("#54627a"),
+	border:      lipgloss.Color("#243349"),
+	ok:          lipgloss.Color("#5fdb91"),
+	errc:        lipgloss.Color("#f26a72"),
+	warn:        lipgloss.Color("#e6b84e"),
+	onAccent:    lipgloss.Color("#04070d"),
+}
+
+var midnightDiff = diffBands{
+	addFg: lipgloss.Color("#7ee787"), addBg: lipgloss.Color("#0e2a1b"),
+	delFg: lipgloss.Color("#ff7b72"), delBg: lipgloss.Color("#2a1216"),
+}
+
+// nebulaPalette — indigo & violet lean.
+var nebulaPalette = palette{
+	isLight:     false,
+	brandDeep:   lipgloss.Color("#6f7bf0"),
+	brandLight:  lipgloss.Color("#b3b0ff"),
+	accentFlash: lipgloss.Color("#7aa2ff"),
+	accentPro:   lipgloss.Color("#c08af0"),
+	selBg:       lipgloss.Color("#3a3470"),
+	selFg:       lipgloss.Color("#efeafc"),
+	bgBase:      lipgloss.Color("#11101d"),
+	bgWell:      lipgloss.Color("#0b0a14"),
+	bgSurface:   lipgloss.Color("#181627"),
+	bgRaised:    lipgloss.Color("#201d36"),
+	fgBase:      lipgloss.Color("#ece9f5"),
+	fgMuted:     lipgloss.Color("#ada7c4"),
+	fgSubtle:    lipgloss.Color("#7a7491"),
+	fgFaint:     lipgloss.Color("#635d7e"),
+	border:      lipgloss.Color("#322d4f"),
+	ok:          lipgloss.Color("#66d6a0"),
+	errc:        lipgloss.Color("#ef6a86"),
+	warn:        lipgloss.Color("#e0a85a"),
+	onAccent:    lipgloss.Color("#0a0814"),
+}
+
+var nebulaDiff = diffBands{
+	addFg: lipgloss.Color("#8be0a8"), addBg: lipgloss.Color("#16291f"),
+	delFg: lipgloss.Color("#ff7b9c"), delBg: lipgloss.Color("#2a1420"),
+}
+
+// auroraPalette — cool teal & green lean.
+var auroraPalette = palette{
+	isLight:     false,
+	brandDeep:   lipgloss.Color("#2f9fd0"),
+	brandLight:  lipgloss.Color("#86d9ef"),
+	accentFlash: lipgloss.Color("#4fd1c5"),
+	accentPro:   lipgloss.Color("#6ad0b0"),
+	selBg:       lipgloss.Color("#14515a"),
+	selFg:       lipgloss.Color("#e8fbfb"),
+	bgBase:      lipgloss.Color("#081417"),
+	bgWell:      lipgloss.Color("#040d0f"),
+	bgSurface:   lipgloss.Color("#0f2024"),
+	bgRaised:    lipgloss.Color("#163034"),
+	fgBase:      lipgloss.Color("#e4f1f0"),
+	fgMuted:     lipgloss.Color("#9fc0bd"),
+	fgSubtle:    lipgloss.Color("#6d8b88"),
+	fgFaint:     lipgloss.Color("#577471"),
+	border:      lipgloss.Color("#1f4044"),
+	ok:          lipgloss.Color("#5ad6a0"),
+	errc:        lipgloss.Color("#ef7a72"),
+	warn:        lipgloss.Color("#dcb85a"),
+	onAccent:    lipgloss.Color("#04100f"),
+}
+
+var auroraDiff = diffBands{
+	addFg: lipgloss.Color("#6fe0a0"), addBg: lipgloss.Color("#0c2a20"),
+	delFg: lipgloss.Color("#ff8a72"), delBg: lipgloss.Color("#2a1512"),
+}
+
 // Theme holds the lipgloss styles used across the TUI, composed from a raw
 // palette. We ship a dark theme as default and a light alt. Theme is
 // selected at startup from config.
@@ -183,6 +275,11 @@ var lightDiff = diffBands{
 // LeftBar/Gutter helpers over the legacy named styles.
 type Theme struct {
 	Name string
+
+	// isLight is the polarity flag: true for light-canvas themes (light),
+	// false for dark themes (dark/midnight/nebula/aurora). Drives glamour
+	// base selection and degrade choices in markdown rendering.
+	isLight bool
 
 	// transparent disables canvas painting + bg-tier fills (config opt-out).
 	// truecolor is false on terminals that can't render 24-bit color, which
@@ -339,6 +436,9 @@ func (t Theme) Transparent() bool { return t.transparent }
 // Truecolor reports whether the terminal can render 24-bit color.
 func (t Theme) Truecolor() bool { return t.truecolor }
 
+// IsLight reports whether this is a light-canvas theme.
+func (t Theme) IsLight() bool { return t.isLight }
+
 // WithTransparent returns a copy of the theme with the transparent flag set.
 // Used to thread the ui.transparent_background config opt-out into the theme.
 func (t Theme) WithTransparent(v bool) Theme {
@@ -359,6 +459,7 @@ func (t Theme) WithTruecolor(v bool) Theme {
 func buildTheme(name string, p palette, d diffBands) Theme {
 	return Theme{
 		Name:      name,
+		isLight:   p.isLight,
 		truecolor: true,
 
 		BrandDeep:   p.brandDeep,
@@ -434,19 +535,56 @@ func DarkTheme() Theme { return buildTheme("dark", oceanPalette, oceanDiff) }
 // LightTheme returns the light alt. Same semantics, inverted contrast.
 func LightTheme() Theme { return buildTheme("light", lightPalette, lightDiff) }
 
+// MidnightTheme returns the midnight theme — azure on near-black, max contrast.
+func MidnightTheme() Theme { return buildTheme("midnight", midnightPalette, midnightDiff) }
+
+// NebulaTheme returns the nebula theme — indigo & violet lean.
+func NebulaTheme() Theme { return buildTheme("nebula", nebulaPalette, nebulaDiff) }
+
+// AuroraTheme returns the aurora theme — cool teal & green lean.
+func AuroraTheme() Theme { return buildTheme("aurora", auroraPalette, auroraDiff) }
+
+// themeOption is one row in the /theme picker (mirrors modelOption).
+type themeOption struct {
+	ID    string // canonical id == Theme.Name: dark|light|midnight|nebula|aurora
+	Label string // display: "DeepSeek Ocean" | "Ocean Light" | "Midnight" | "Nebula" | "Aurora"
+	Desc  string // one-line description
+}
+
+// availableThemes returns all theme picker rows in a stable order.
+func availableThemes() []themeOption {
+	return []themeOption{
+		{ID: "dark", Label: "DeepSeek Ocean", Desc: "cool azure on deep slate"},
+		{ID: "light", Label: "Ocean Light", Desc: "azure on a bright canvas"},
+		{ID: "midnight", Label: "Midnight", Desc: "azure on near-black, max contrast"},
+		{ID: "nebula", Label: "Nebula", Desc: "indigo & violet"},
+		{ID: "aurora", Label: "Aurora", Desc: "cool teal & green"},
+	}
+}
+
+// themeByID builds a theme by canonical id; unknown id => DarkTheme().
+// Returns the raw built theme (truecolor=true); callers apply With* as needed.
+func themeByID(name string) Theme {
+	switch name {
+	case "light":
+		return LightTheme()
+	case "midnight":
+		return MidnightTheme()
+	case "nebula":
+		return NebulaTheme()
+	case "aurora":
+		return AuroraTheme()
+	default:
+		return DarkTheme()
+	}
+}
+
 // PickTheme returns the configured theme by name; defaults to dark on
 // unknown names. truecolor is detected from the environment so themes built
 // here degrade fills automatically on limited terminals; callers may still
 // override via WithTransparent (config opt-out).
 func PickTheme(name string) Theme {
-	var t Theme
-	switch name {
-	case "light":
-		t = LightTheme()
-	default:
-		t = DarkTheme()
-	}
-	return t.WithTruecolor(detectTruecolor())
+	return themeByID(name).WithTruecolor(detectTruecolor())
 }
 
 // detectTruecolor reports whether the terminal advertises 24-bit color.

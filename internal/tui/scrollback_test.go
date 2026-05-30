@@ -219,3 +219,25 @@ func TestExpandLastResultMatchesRenderThreshold(t *testing.T) {
 		t.Error("a result <= maxBodyLines must not report as expandable")
 	}
 }
+
+func TestInvalidateRenderCacheKeepsItems(t *testing.T) {
+	s := NewScrollback()
+	s.AppendText("hello world")
+	s.AppendToolCall("tc1", "bash", "echo hi")
+	s.AppendToolResult("tc1", tools.Result{Content: "output"}, 0)
+	before := len(s.Items())
+	if before == 0 {
+		t.Fatal("expected items before invalidation")
+	}
+
+	s.InvalidateRenderCache()
+
+	after := len(s.Items())
+	if after != before {
+		t.Errorf("items count changed: before=%d after=%d", before, after)
+	}
+	// Verify items are still accessible and correct.
+	if s.Items()[0].text != "hello world" {
+		t.Errorf("text lost after invalidation: %q", s.Items()[0].text)
+	}
+}

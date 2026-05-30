@@ -104,7 +104,7 @@ func TestModeChip(t *testing.T) {
 // renderer is left untouched.
 func TestDarkCodeBlockBackgroundIsBgWell(t *testing.T) {
 	want := tokenHex(DarkTheme().BgWell)
-	dark := cleanStyle("dark", true) // fills enabled: code-block bg painted to bgWell
+	dark := cleanStyle(DarkTheme(), true) // fills enabled: code-block bg painted to bgWell
 	if dark.CodeBlock.BackgroundColor == nil {
 		t.Fatal("dark code block has no background color")
 	}

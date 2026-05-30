@@ -206,12 +206,18 @@ Slash commands：
 /clear      清空 scrollback
 /quit       退出
 /models     列出或切换主循环模型
+/theme      切换颜色主题（实时预览；重启后保持）
 /tape       打开 reasoning tape
 /sessions   列出当前项目会话
 /export     在 $PAGER 中打开完整 scrollback
 /undo       恢复上一次编辑 step
 /compact    强制压缩消息
 ```
+
+内置五款主题：**DeepSeek Ocean**（默认深色）、**Ocean Light**（明亮画布）、
+**Midnight**（近黑底上的天蓝）、**Nebula**（靛紫）和 **Aurora**（青绿）。
+使用 `/theme` 打开可过滤的选择器并实时预览；选择会持久化到
+`~/.deepseek/state.toml`。
 
 自定义 slash 命令会从项目和 home 目录下的 `.deepseek/command/*.md` 加载。
 发现到的 skills 也会被提升为 slash commands；同名时用户命令优先。

@@ -531,8 +531,29 @@ Keybindings:
 - **Reasoning text**: dimmed (60% fg)
 - **Tool calls**: bright fg, monospace-emphasized
 - **Errors**: red
-- Two themes ship: `dark` (default) and `light`. Adaptive lipgloss
-  styles so colors look right on both.
+
+**Theme family.** Five themes ship, all using the two-layer model (raw
+`palette` tokens → semantic `Theme` styles):
+
+| ID | Label | Polarity | Identity |
+|---|---|---|---|
+| `dark` | DeepSeek Ocean | dark | balanced azure on cool slate |
+| `light` | Ocean Light | light | azure on a bright canvas |
+| `midnight` | Midnight | dark | azure on near-black, max contrast |
+| `nebula` | Nebula | dark | indigo & violet lean |
+| `aurora` | Aurora | dark | cool teal & green lean |
+
+**Runtime `/theme` switcher.** The `/theme` command (also in `Ctrl+P`
+palette) opens a filterable picker with live preview — moving the cursor
+repaints the whole UI in the highlighted theme. `Enter` commits; `Esc`
+restores the original. A polarity flag (`IsLight()`) drives the markdown
+glamour base selection so code blocks adopt the active theme's colors.
+
+**Persistence.** The committed theme is written to
+`~/.deepseek/state.toml` (`[ui] theme = "..."`), a machine-managed overlay
+file layered above `config.toml`'s `defaults.theme`. Precedence:
+`state.toml` > `config.toml` > built-in default (`dark`). The user's
+hand-authored `config.toml` is never rewritten.
 
 ### 10.6 Vim keys throughout
 

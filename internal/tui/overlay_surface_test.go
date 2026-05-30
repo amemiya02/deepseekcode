@@ -20,6 +20,7 @@ func TestOverlayFillsScreenNoBlackGaps(t *testing.T) {
 		"models":  func(a *App) { a.handleSlash("/models") },
 		"palette": func(a *App) { a.openPalette() },
 		"help":    func(a *App) { a.openHelp() },
+		"themes":  func(a *App) { a.overlay.OpenThemes("dark") },
 	}
 	for name, openFn := range open {
 		t.Run(name, func(t *testing.T) {

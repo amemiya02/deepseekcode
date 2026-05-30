@@ -39,13 +39,14 @@ type App struct {
 	cwd      string
 
 	// UI state
-	theme  Theme
-	keymap keymap
-	vp     viewport.Model
-	input  textarea.Model
-	width  int
-	height int
-	mode   appMode
+	theme            Theme
+	themePreviewOrig Theme // theme to restore if the /theme picker is cancelled
+	keymap           keymap
+	vp               viewport.Model
+	input            textarea.Model
+	width            int
+	height           int
+	mode             appMode
 
 	// Sub-modules. Each owns the state it renders/mutates; App
 	// orchestrates by calling their methods rather than reaching
@@ -149,6 +150,7 @@ type sessionIntegration struct {
 	undo     func(n int) (int, error)
 	list     func() ([]session.Session, error)
 	setModel func(model string) error
+	setTheme func(theme string) error
 }
 
 // Config bundles construction params for New.
@@ -171,6 +173,7 @@ type Config struct {
 	UndoFn       func(n int) (int, error)
 	ListSessions func() ([]session.Session, error)
 	SetModelFn   func(model string) error
+	SetThemeFn   func(theme string) error
 
 	// StartupNotices are shown as info chat items at TUI start. Used for
 	// resume confirmations, warnings about degraded persistence, etc. —
@@ -250,6 +253,7 @@ func New(cfg Config) *App {
 			undo:     cfg.UndoFn,
 			list:     cfg.ListSessions,
 			setModel: cfg.SetModelFn,
+			setTheme: cfg.SetThemeFn,
 		},
 		status: statusState{
 			model:           cfg.Model,
@@ -851,6 +855,9 @@ func (a *App) renderOverlay() string {
 	case modeHelp:
 		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.HelpTab(), a.overlay.Cursor(), a.width, h)
 		footerText = "tab/←→/hl switch · j/k scroll · esc close"
+	case modeThemes:
+		body = renderThemesPicker(a.theme, a.overlay.Themes(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.theme.Name, a.width, h)
+		footerText = "j/k move · ⏎ apply · esc cancel · live preview"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -1487,6 +1494,8 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			return a.applyModelSwitch(fields[1])
 		}
 		a.overlay.OpenModels(a.model)
+	case "/theme":
+		return a.openThemes()
 	case "/tape":
 		a.overlay.OpenTape()
 	case "/sessions":
@@ -1811,36 +1820,57 @@ func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 }
 
 // handleFilterableOverlayKey drives the filterable overlays (/models,
-// /sessions, palette): ↑/↓ navigate the narrowed set, ⏎ selects/executes, a
-// printable rune extends the filter, backspace trims it, and esc clears a
-// non-empty filter before a second esc closes.
+// /sessions, palette, /theme): ↑/↓ navigate the narrowed set, ⏎ selects/executes,
+// a printable rune extends the filter, backspace trims it, and esc clears a
+// non-empty filter before a second esc closes. For modeThemes, cursor/filter
+// changes trigger live preview; esc on an empty filter restores the original theme.
 func (a *App) handleFilterableOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 	switch km.String() {
 	case "ctrl+c":
 		return tea.Quit
 	case "esc":
 		if a.overlay.FilterClear() {
+			// Filter was non-empty and is now cleared; re-preview the current
+			// selection so the theme matches the now-visible row.
+			if a.overlay.Mode() == modeThemes {
+				a.previewTheme(a.overlay.SelectedThemeID())
+			}
 			return nil // first esc clears the filter; a second one closes
+		}
+		// Empty filter: restore original theme on cancel, then close.
+		if a.overlay.Mode() == modeThemes {
+			a.setActiveTheme(a.themePreviewOrig.Name)
 		}
 		a.overlay.Close()
 		return nil
 	case "up":
 		a.overlay.MoveUp()
+		a.maybePreviewTheme()
 		return nil
 	case "down":
 		a.overlay.MoveDown()
+		a.maybePreviewTheme()
 		return nil
 	case "backspace":
 		a.overlay.FilterBackspace()
+		a.maybePreviewTheme()
 		return nil
 	case "enter":
 		return a.acceptOverlaySelection()
 	}
 	if isPrintableKey(km) {
 		a.overlay.FilterType(rune(km.String()[0]))
+		a.maybePreviewTheme()
 		return nil
 	}
 	return nil
+}
+
+// maybePreviewTheme triggers a live preview if the active overlay is modeThemes.
+func (a *App) maybePreviewTheme() {
+	if a.overlay.Mode() == modeThemes {
+		a.previewTheme(a.overlay.SelectedThemeID())
+	}
 }
 
 // acceptOverlaySelection commits the cursor row of a filterable overlay: a
@@ -1870,6 +1900,12 @@ func (a *App) acceptOverlaySelection() tea.Cmd {
 		if ok {
 			return a.runPaletteAction(act.id)
 		}
+	case modeThemes:
+		id := a.overlay.SelectedThemeID()
+		a.overlay.Close()
+		if id != "" {
+			return a.applyThemeSwitch(id)
+		}
 	}
 	return nil
 }
@@ -1890,6 +1926,15 @@ func (a *App) helpCommandRows() []slashCmd {
 func (a *App) openHelp() tea.Cmd {
 	cmd := a.setMode(modeNormal)
 	a.overlay.OpenHelp()
+	return cmd
+}
+
+// openThemes puts up the /theme picker with live preview. It snapshots the
+// current theme so Esc can restore it exactly.
+func (a *App) openThemes() tea.Cmd {
+	cmd := a.setMode(modeNormal)
+	a.themePreviewOrig = a.theme
+	a.overlay.OpenThemes(a.theme.Name)
 	return cmd
 }
 
@@ -1933,6 +1978,10 @@ func (a *App) paletteActions() []paletteAction {
 		paletteAction{id: "open-help", label: "open help", detail: "show the keybinding + command overlay"},
 		paletteAction{id: "yank-last", label: "yank last assistant text", detail: "copy the last reply to the clipboard (OSC 52)"},
 	)
+	// /theme is a slash command but also lives in the palette for discoverability.
+	out = append(out, paletteAction{
+		id: "/theme", label: "/theme", detail: "switch the color theme (live preview)",
+	})
 	return out
 }
 
@@ -2022,6 +2071,57 @@ func (a *App) applyModelSwitch(id string) tea.Cmd {
 		}
 	}
 	return a.toast(BadgeBrand, "model → "+id)
+}
+
+// setActiveTheme swaps the running theme by id, preserving the current
+// transparent/truecolor flags, re-applies the textarea cursor color,
+// invalidates the render cache, and refreshes the viewport.
+func (a *App) setActiveTheme(id string) {
+	orig := a.theme
+	a.theme = themeByID(id).WithTransparent(orig.Transparent()).WithTruecolor(orig.Truecolor())
+	st := a.input.Styles()
+	st.Cursor.Color = a.theme.BrandDeep
+	a.input.SetStyles(st)
+	a.scrollback.InvalidateRenderCache()
+	a.refreshView()
+}
+
+// previewTheme applies a theme live without persisting (used by the picker
+// cursor). No-op on empty id.
+func (a *App) previewTheme(id string) {
+	if id != "" {
+		a.setActiveTheme(id)
+	}
+}
+
+// applyThemeSwitch commits a theme: validates id against availableThemes,
+// setActiveTheme, persists via a.session.setTheme (nil-safe; error => non-fatal
+// info line), returns a toast Cmd.
+func (a *App) applyThemeSwitch(id string) tea.Cmd {
+	if id == "" {
+		return nil
+	}
+	known := false
+	for _, th := range availableThemes() {
+		if th.ID == id {
+			known = true
+			break
+		}
+	}
+	if !known {
+		a.scrollback.AppendError("unknown theme: " + id)
+		a.refreshView()
+		return nil
+	}
+	a.setActiveTheme(id)
+	if a.session.setTheme != nil {
+		if err := a.session.setTheme(id); err != nil {
+			a.scrollback.AppendInfo("theme switched (warning: persist failed: " + err.Error() + ")")
+			a.refreshView()
+			return nil
+		}
+	}
+	return a.toast(BadgeBrand, "theme → "+id)
 }
 
 // applyUndo reverts the last n snapshot steps.

@@ -448,6 +448,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		undoFn     func(int) (int, error)
 		listFn     func() ([]session.Session, error)
 		setModelFn func(string) error
+		setThemeFn func(string) error
 		notices    []string
 		sess       session.Session
 	)
@@ -533,6 +534,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 				a.Model = m
 				return store.UpdateModel(context.Background(), sess.ID, m)
 			}
+			setThemeFn = func(name string) error {
+				return config.SaveThemePreference(name)
+			}
 		}
 	}
 
@@ -585,6 +589,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		UndoFn:                undoFn,
 		ListSessions:          listFn,
 		SetModelFn:            setModelFn,
+		SetThemeFn:            setThemeFn,
 		Commands:              customCmds,
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,

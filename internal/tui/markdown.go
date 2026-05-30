@@ -35,21 +35,19 @@ var (
 // but visual noise in a TUI that already styles headings with bold +
 // color. We want Claude-Code-style clean headings.
 //
-// For the dark renderer, when fills are enabled (owned canvas + truecolor), we
-// repaint the fenced code-block background to the bgWell surface token so code
-// blocks read as the same recessed inset as the diff/tool panels rather than
-// glamour's stock near-black. When fills are disabled (transparent mode or a
-// non-truecolor terminal) we instead CLEAR the code-block background entirely —
-// honoring ADR-0002's no-opaque-fills degrade contract so nothing paints a band
-// over the user's terminal. The light renderer is left GitHub-ish (untouched).
+// Polarity is driven by t.IsLight(): light themes use the light glamour
+// base; dark themes use the dark base with per-theme code-block bg
+// (t.BgWell) and inline-code color (t.AccentFlash). When fills are
+// disabled (transparent mode or non-truecolor) the code-block background
+// is cleared entirely — honoring ADR-0002's no-opaque-fills degrade.
 //
 // Both bg writes operate on copies only: `s` is a value copy of glamour's
 // shared StyleConfig, but s.CodeBlock.Chroma is a *Chroma that still aliases
 // the process-wide styles.DarkStyleConfig — so we copy it before mutating,
 // never writing through the shared global.
-func cleanStyle(name string, fills bool) ansi.StyleConfig {
+func cleanStyle(t Theme, fills bool) ansi.StyleConfig {
 	var s ansi.StyleConfig
-	if name == "light" {
+	if t.IsLight() {
 		s = styles.LightStyleConfig
 	} else {
 		s = styles.DarkStyleConfig
@@ -57,7 +55,7 @@ func cleanStyle(name string, fills bool) ansi.StyleConfig {
 		if fills {
 			// Read the surface token (never an inline hex) and convert to the
 			// hex string glamour's StylePrimitive expects.
-			well := tokenHex(DarkTheme().BgWell)
+			well := tokenHex(t.BgWell)
 			bg = &well
 		}
 		s.CodeBlock.BackgroundColor = bg
@@ -67,14 +65,11 @@ func cleanStyle(name string, fills bool) ansi.StyleConfig {
 			s.CodeBlock.Chroma = &ch
 		}
 
-		// Inline code (`path/like/this`). Glamour's stock dark style is red
-		// (203) on a flat grey (236) with a space of padding each side — chunky
-		// chips that carpet a markdown table of filenames and clash hard with
-		// the ocean canvas (this was the "not beautiful" complaint). Retune to a
-		// calm cyan accent with NO opaque background and no padding, so inline
-		// code reads as a quiet color shift, not a block. Degrades cleanly since
-		// it never paints a fill.
-		codeFg := tokenHex(DarkTheme().AccentFlash)
+		// Inline code (`path/like/this`). Retune to the theme's accent flash
+		// with NO opaque background and no padding, so inline code reads as a
+		// quiet color shift, not a block. Degrades cleanly since it never
+		// paints a fill.
+		codeFg := tokenHex(t.AccentFlash)
 		s.Code.Color = &codeFg
 		s.Code.BackgroundColor = nil
 		s.Code.Prefix = ""
@@ -98,11 +93,11 @@ func tokenHex(c color.Color) string {
 // renderMarkdown turns markdown text into ANSI-styled output that fits
 // the given column width. Falls back to the raw text on any error so a
 // markdown bug never blanks the UI.
-func renderMarkdown(text, style string, fills bool, width int) string {
+func renderMarkdown(text string, t Theme, fills bool, width int) string {
 	if width <= 0 {
 		return text
 	}
-	r := getRenderer(style, fills, width)
+	r := getRenderer(t, fills, width)
 	if r == nil {
 		return text
 	}
@@ -114,15 +109,15 @@ func renderMarkdown(text, style string, fills bool, width int) string {
 	return strings.TrimRight(out, "\n")
 }
 
-func getRenderer(style string, fills bool, width int) *glamour.TermRenderer {
-	key := rendererKey{style: style, fills: fills, width: width}
+func getRenderer(t Theme, fills bool, width int) *glamour.TermRenderer {
+	key := rendererKey{style: t.Name, fills: fills, width: width}
 	mdMu.Lock()
 	defer mdMu.Unlock()
 	if r, ok := mdCache[key]; ok {
 		return r
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStyles(cleanStyle(style, fills)),
+		glamour.WithStyles(cleanStyle(t, fills)),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

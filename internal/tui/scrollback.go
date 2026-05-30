@@ -397,6 +397,14 @@ func (s *Scrollback) Clear() {
 	s.bump()
 }
 
+// InvalidateRenderCache resets the per-item render cache AND the package-level
+// diffCache WITHOUT dropping items or resetting seq (unlike Clear()). Used by
+// theme switching so cached renders in the old theme are evicted.
+func (s *Scrollback) InvalidateRenderCache() {
+	s.itemRenderCache = NewRenderCache(128)
+	diffCache = NewRenderCache(64)
+}
+
 // --- selection -------------------------------------------------------------
 
 // BeginSelection starts a visual-mode selection anchored at line.

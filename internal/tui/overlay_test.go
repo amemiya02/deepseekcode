@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -125,5 +126,55 @@ func TestAvailableModelsArePricedAndNamed(t *testing.T) {
 		if m.Short == "" {
 			t.Errorf("model %q has an empty Short label", m.ID)
 		}
+	}
+}
+
+func TestOpenThemesSelectsActive(t *testing.T) {
+	o := NewOverlay()
+	o.OpenThemes("nebula")
+	if o.Mode() != modeThemes {
+		t.Fatalf("expected modeThemes, got %d", o.Mode())
+	}
+	if o.SelectedThemeID() != "nebula" {
+		t.Fatalf("expected selected 'nebula', got %q", o.SelectedThemeID())
+	}
+}
+
+func TestThemesFilterNarrows(t *testing.T) {
+	o := NewOverlay()
+	o.OpenThemes("dark")
+	// Type "aurora" to narrow
+	for _, r := range "aurora" {
+		o.FilterType(r)
+	}
+	if o.SelectedThemeID() != "aurora" {
+		t.Fatalf("after filter 'aurora': expected selected 'aurora', got %q", o.SelectedThemeID())
+	}
+	// Backspace to clear
+	for i := 0; i < 6; i++ {
+		o.FilterBackspace()
+	}
+	if len(o.VisibleRows()) != 5 {
+		t.Fatalf("after clearing filter: expected 5 visible rows, got %d", len(o.VisibleRows()))
+	}
+}
+
+func TestRenderThemesPickerListsAll(t *testing.T) {
+	th := DarkTheme()
+	rows := availableThemes()
+	visible := make([]int, len(rows))
+	for i := range visible {
+		visible[i] = i
+	}
+	out := renderThemesPicker(th, rows, visible, 0, "", "dark", 100, 40)
+	stripped := stripANSI(out)
+	for _, want := range []string{"DeepSeek Ocean", "Ocean Light", "Midnight", "Nebula", "Aurora"} {
+		if !strings.Contains(stripped, want) {
+			t.Errorf("renderThemesPicker output missing label %q", want)
+		}
+	}
+	// Active marker should be present for "dark"
+	if !strings.Contains(stripped, "*") {
+		t.Error("renderThemesPicker output missing active marker '*'")
 	}
 }

@@ -652,3 +652,66 @@ func TestAtTriggerStubDoesNotTrapInput(t *testing.T) {
 		t.Fatalf("Enter on the placeholder should leave the '@' intact, got %q", got)
 	}
 }
+
+// --- theme apply/preview tests (Task 4206) -----------------------------------
+
+func TestApplyThemeSwitchChangesTheme(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	if a.theme.Name != "dark" {
+		t.Fatalf("expected initial theme 'dark', got %q", a.theme.Name)
+	}
+	a.applyThemeSwitch("aurora")
+	if a.theme.Name != "aurora" {
+		t.Fatalf("expected theme 'aurora' after switch, got %q", a.theme.Name)
+	}
+}
+
+func TestApplyThemeSwitchPersists(t *testing.T) {
+	var persisted string
+	recorder := func(name string) error {
+		persisted = name
+		return nil
+	}
+	a := newKeyflowApp(t)
+	a.session.setTheme = recorder
+	a.applyThemeSwitch("nebula")
+	if persisted != "nebula" {
+		t.Errorf("expected persist('nebula'), got %q", persisted)
+	}
+
+	// With nil setTheme, it should not panic.
+	a2 := newKeyflowApp(t)
+	a2.session.setTheme = nil
+	a2.applyThemeSwitch("aurora") // should not panic
+	if a2.theme.Name != "aurora" {
+		t.Errorf("expected theme 'aurora' with nil setTheme, got %q", a2.theme.Name)
+	}
+}
+
+func TestApplyThemeSwitchUnknownRejected(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	orig := a.theme.Name
+	a.applyThemeSwitch("bogus")
+	if a.theme.Name != orig {
+		t.Errorf("unknown theme should leave theme unchanged: got %q", a.theme.Name)
+	}
+}
+
+func TestPreviewThemeNoPersist(t *testing.T) {
+	var called bool
+	recorder := func(name string) error {
+		called = true
+		return nil
+	}
+	a := newKeyflowApp(t)
+	a.session.setTheme = recorder
+	a.previewTheme("midnight")
+	if a.theme.Name != "midnight" {
+		t.Errorf("expected theme 'midnight' after preview, got %q", a.theme.Name)
+	}
+	if called {
+		t.Error("previewTheme must NOT call setTheme (persist)")
+	}
+}

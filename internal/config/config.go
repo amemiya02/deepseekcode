@@ -173,6 +173,12 @@ func Load() (Config, error) {
 		cfg.API.Key = os.Getenv("DEEPSEEK_API_KEY")
 	}
 	applyLegacyAPICompat(&cfg)
+
+	// Overlay state.toml [ui].theme over config.toml defaults.theme.
+	if st, err := LoadState(); err == nil && st.UI.Theme != "" {
+		cfg.Defaults.Theme = st.UI.Theme
+	}
+
 	return cfg, nil
 }
 

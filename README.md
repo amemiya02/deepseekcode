@@ -217,12 +217,18 @@ Slash commands:
 /clear      clear scrollback
 /quit       exit
 /models     list or switch the main-loop model
+/theme      switch the color theme (live preview; persists across restarts)
 /tape       open the reasoning tape
 /sessions   list this project's sessions
 /export     open full scrollback in $PAGER
 /undo       restore the previous edit step
 /compact    force message compaction
 ```
+
+Five themes ship: **DeepSeek Ocean** (default dark), **Ocean Light** (bright
+canvas), **Midnight** (azure on near-black), **Nebula** (indigo & violet),
+and **Aurora** (cool teal & green). Use `/theme` to open a filterable picker
+with live preview; the choice persists to `~/.deepseek/state.toml`.
 
 Custom slash commands are loaded from `.deepseek/command/*.md` in the
 project and home directories. Discovered skills are also promoted to

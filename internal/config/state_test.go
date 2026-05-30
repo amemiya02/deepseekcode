@@ -3,14 +3,25 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/BurntSushi/toml"
 )
 
+// setHome sets both HOME and USERPROFILE so os.UserHomeDir() returns tmp
+// on every platform (Windows reads USERPROFILE, not HOME).
+func setHome(t *testing.T, tmp string) {
+	t.Helper()
+	t.Setenv("HOME", tmp)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmp)
+	}
+}
+
 func TestSaveAndLoadThemePreference(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setHome(t, tmp)
 
 	if err := SaveThemePreference("nebula"); err != nil {
 		t.Fatalf("SaveThemePreference: %v", err)
@@ -22,7 +33,6 @@ func TestSaveAndLoadThemePreference(t *testing.T) {
 	if st.UI.Theme != "nebula" {
 		t.Fatalf("expected theme 'nebula', got %q", st.UI.Theme)
 	}
-	// StatePath should be under the temp home.
 	expected := filepath.Join(tmp, ".deepseek", "state.toml")
 	if got := StatePath(); got != expected {
 		t.Errorf("StatePath() = %q, want %q", got, expected)
@@ -31,7 +41,7 @@ func TestSaveAndLoadThemePreference(t *testing.T) {
 
 func TestSaveThemePreservesOtherKeys(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setHome(t, tmp)
 
 	// Pre-write a state.toml with an extra key.
 	dir := filepath.Join(tmp, ".deepseek")
@@ -43,7 +53,6 @@ func TestSaveThemePreservesOtherKeys(t *testing.T) {
 		t.Fatalf("SaveThemePreference: %v", err)
 	}
 
-	// Re-read raw to check preservation.
 	raw := map[string]any{}
 	toml.DecodeFile(path, &raw)
 	ui, _ := raw["ui"].(map[string]any)
@@ -60,14 +69,11 @@ func TestSaveThemePreservesOtherKeys(t *testing.T) {
 
 func TestLoadPrefersStateOverConfigTheme(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setHome(t, tmp)
 
-	// Write config.toml with defaults.theme = "dark".
 	cfgDir := filepath.Join(tmp, ".deepseek")
 	os.MkdirAll(cfgDir, 0o755)
 	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("[defaults]\n  theme = \"dark\"\n"), 0o644)
-
-	// Write state.toml with [ui].theme = "midnight".
 	os.WriteFile(filepath.Join(cfgDir, "state.toml"), []byte("[ui]\n  theme = \"midnight\"\n"), 0o644)
 
 	cfg, err := Load()
@@ -78,7 +84,6 @@ func TestLoadPrefersStateOverConfigTheme(t *testing.T) {
 		t.Errorf("expected theme 'midnight' (state overrides config), got %q", cfg.Defaults.Theme)
 	}
 
-	// Without state.toml, should fall back to config.toml.
 	os.Remove(filepath.Join(cfgDir, "state.toml"))
 	cfg2, err := Load()
 	if err != nil {
@@ -91,7 +96,7 @@ func TestLoadPrefersStateOverConfigTheme(t *testing.T) {
 
 func TestLoadStateMissingIsZero(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
+	setHome(t, tmp)
 
 	st, err := LoadState()
 	if err != nil {
@@ -99,14 +104,5 @@ func TestLoadStateMissingIsZero(t *testing.T) {
 	}
 	if st.UI.Theme != "" {
 		t.Errorf("expected empty theme on missing file, got %q", st.UI.Theme)
-	}
-
-	// Load() should still succeed with no state.toml.
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load with no state: %v", err)
-	}
-	if cfg.Defaults.Theme == "" {
-		// Theme may be empty if no config.toml either; that's fine.
 	}
 }

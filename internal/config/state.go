@@ -11,11 +11,11 @@ import (
 // StatePath returns the path to the machine-managed state overlay file
 // (~/.deepseek/state.toml), or "" if no home directory is available.
 func StatePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := UserConfigDir()
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(home, ".deepseek", "state.toml")
+	return filepath.Join(dir, "state.toml")
 }
 
 // State is the machine-managed state overlay. Only [ui].theme is managed

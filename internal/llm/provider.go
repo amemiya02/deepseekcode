@@ -7,11 +7,16 @@ import (
 )
 
 type Capabilities struct {
-	Thinking         bool
-	PrefixCache      bool
-	JSONMode         bool
-	MaxContextTokens int
-	SupportsModels   []string
+	Thinking               bool
+	PrefixCache            bool
+	JSONMode               bool
+	MaxContextTokens       int
+	MaxOutputTokens        int
+	ReasoningEfforts       []ReasoningEffort
+	ChatPrefixCompletion   bool
+	FIM                    bool
+	FIMRequiresThinkingOff bool
+	SupportsModels         []string
 }
 
 type Provider interface {
@@ -54,5 +59,6 @@ func applyProviderTimeouts(c *Client, cfg ProviderConfig) {
 
 func (c Capabilities) clone() Capabilities {
 	c.SupportsModels = append([]string(nil), c.SupportsModels...)
+	c.ReasoningEfforts = append([]ReasoningEffort(nil), c.ReasoningEfforts...)
 	return c
 }

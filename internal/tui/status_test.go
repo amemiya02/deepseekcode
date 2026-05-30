@@ -64,6 +64,38 @@ func TestStatusCacheSavingsAndNoteCoexist(t *testing.T) {
 	}
 }
 
+// Rework Task-004 crit 4: the live status line (statusState.render) shows
+// "effort" when thinking is enabled and a valid effort is set.
+func TestStatusEffortShownWhenThinkingOn(t *testing.T) {
+	th := DarkTheme()
+	s := statusState{
+		model:           "deepseek-v4-flash",
+		thinking:        true,
+		reasoningEffort: llm.ReasoningEffortMax,
+		steps:           1,
+	}
+	plain := stripANSI(s.render(th))
+	if !strings.Contains(plain, "effort max") {
+		t.Errorf("thinking=true + valid effort should show 'effort max'; got %q", plain)
+	}
+}
+
+// Rework Task-004 crit 4: the live status line hides "effort" when thinking
+// is disabled, even if a valid effort is configured.
+func TestStatusEffortHiddenWhenThinkingOff(t *testing.T) {
+	th := DarkTheme()
+	s := statusState{
+		model:           "deepseek-v4-flash",
+		thinking:        false,
+		reasoningEffort: llm.ReasoningEffortMax,
+		steps:           1,
+	}
+	plain := stripANSI(s.render(th))
+	if strings.Contains(plain, "effort") {
+		t.Errorf("thinking=false should hide effort; got %q", plain)
+	}
+}
+
 // TestStatusCapabilitySegment verifies the mcp/lsp/skills capability
 // segment: non-zero/true parts are shown, zero/false parts are omitted.
 func TestStatusCapabilitySegment(t *testing.T) {

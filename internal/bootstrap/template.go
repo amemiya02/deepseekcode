@@ -127,7 +127,8 @@ func configToml(l Lang) string {
 	default:
 		b.WriteString("# model = \"deepseek-v4\"\n")
 	}
-	b.WriteString("thinking = true\n\n")
+	b.WriteString("thinking = true\n")
+	b.WriteString("# reasoning_effort = \"max\"  # low|medium|high|max\n\n")
 
 	b.WriteString("[duet]\n")
 	b.WriteString("enabled = true\n\n")

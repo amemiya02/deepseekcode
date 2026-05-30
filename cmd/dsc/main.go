@@ -182,6 +182,7 @@ func run() error {
 		askAll      bool
 		noDuet      bool
 		model       string
+		effort      string
 		newSession  bool
 		continueSes bool
 		resumeSes   string
@@ -195,6 +196,7 @@ func run() error {
 	flag.BoolVar(&askAll, "ask-all", false, "prompt for every tool, ignoring allowlist")
 	flag.BoolVar(&noDuet, "no-duet", false, "disable the Two-Model Duet (Pro Validator)")
 	flag.StringVar(&model, "model", "", "override main-loop model (e.g. deepseek-v4-pro)")
+	flag.StringVar(&effort, "effort", "", "override reasoning effort (low|medium|high|max)")
 	flag.BoolVar(&newSession, "new", false, "force new session, even if a recent one exists")
 	flag.BoolVar(&continueSes, "c", false, "continue last session in cwd")
 	flag.StringVar(&resumeSes, "r", "", "resume session by ID (empty opens picker)")
@@ -232,6 +234,9 @@ func run() error {
 	if model != "" {
 		cfg.Defaults.Model = model
 		cfg.DefaultsModelExplicit = true
+	}
+	if effort != "" {
+		cfg.Defaults.ReasoningEffort = effort
 	}
 	if noDuet {
 		cfg.Duet.Enabled = false
@@ -361,6 +366,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
+	a.ReasoningEffort = llm.ReasoningEffort(cfg.Defaults.ReasoningEffort)
+	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 
@@ -769,6 +776,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 
 	a.Thinking = cfg.Defaults.Thinking
 	a.AutoReasoning = cfg.Defaults.AutoReasoning
+	a.ReasoningEffort = llm.ReasoningEffort(cfg.Defaults.ReasoningEffort)
+	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 

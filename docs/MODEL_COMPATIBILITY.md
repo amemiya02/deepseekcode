@@ -10,10 +10,10 @@ the single reference for those facts; the authoritative behavior lives in
 
 | Model ID | Role | Notes |
 |---|---|---|
-| `deepseek-v4-flash` | default working model | 1M context window |
+| `deepseek-v4-flash` | default working model | 1M context, 384K max output |
 | `deepseek-v4-pro` | escalation / Duet validator | invoked selectively, not every turn |
-| `deepseek-chat` | alias → flash semantics | |
-| `deepseek-reasoner` | alias → flash with thinking | reasoner cold-start applies |
+| `deepseek-chat` | alias → flash semantics | **legacy until 2026-07-24** |
+| `deepseek-reasoner` | alias → flash with thinking | **legacy until 2026-07-24** |
 
 Pricing (¥ per 1M tokens, locked at design time — see `docs/pricing.md` and
 `internal/llm/cache_metrics.go`):
@@ -34,6 +34,17 @@ DeepSeek V4 rejects `"thinking": true` with `expected struct ThinkingOptions`.
 Always construct it via `llm.ThinkingEnabled(bool)`, which returns
 `*ThinkingOptions{Type: "enabled"}` or `nil`. Pinned by
 `internal/llm/thinking_shape_test.go`.
+
+### `reasoning_effort` controls reasoning depth
+
+When thinking is enabled, `reasoning_effort` caps the model's reasoning
+depth. Allowed values: `low`, `medium`, `high`, `max`. The default is
+`max` (complex coding-agent tasks benefit from full reasoning). Set via
+config (`defaults.reasoning_effort`), CLI (`-effort`), or TUI (`/effort`).
+
+When thinking is disabled, `reasoning_effort` is omitted from the wire
+request. Pinned by `TestReasoningEffortMaxSerializes` and
+`TestLoopReasoningEffortAppearsWhenThinkingEnabled`.
 
 ### Cache-stable request serialization
 

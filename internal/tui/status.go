@@ -21,6 +21,7 @@ type statusState struct {
 	contextLimit    int
 	costKnown       bool
 	thinking        bool
+	reasoningEffort llm.ReasoningEffort
 	hint            string
 	cacheNote       string
 	mode            appMode
@@ -107,6 +108,9 @@ func (s statusState) render(t Theme) string {
 		dot + label.Render(fmt.Sprintf("%d steps", s.steps)) +
 		dot + cacheChip +
 		dot + costStyle.Render(costStr)
+	if s.thinking && s.reasoningEffort.Valid() {
+		line1 += dot + label.Render("effort "+string(s.reasoningEffort))
+	}
 	if ctxSeg != "" {
 		line1 += dot + ctxSeg
 	}

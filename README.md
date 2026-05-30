@@ -16,8 +16,8 @@ SQLite-backed sessions, and a conservative permission model.
 ## Features
 
 - Interactive Bubble Tea TUI and scriptable `dsc -p "prompt"` mode.
-- DeepSeek-first runtime with thinking, long context, prefix-cache metrics, and
-  `deepseek-v4-flash` / `deepseek-v4-pro` support.
+- DeepSeek-first runtime with thinking, `reasoning_effort` control, long context,
+  prefix-cache metrics, and `deepseek-v4-flash` / `deepseek-v4-pro` support.
 - OpenAI-compatible provider configuration for alternate chat-completions
   endpoints.
 - Repository tools for file reads/edits, patches, shell commands, git, grep,

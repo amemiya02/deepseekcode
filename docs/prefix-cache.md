@@ -68,3 +68,19 @@ The monitor is lightweight — three SHA-256 hashes per turn.
 3. **Frequent drift**: If every turn drifts, the "static" prefix isn't
    actually static. Audit `PromptBuilder.Build()` and hook output for
    non-deterministic content (timestamps, random IDs).
+
+## Trace-inspection evidence report
+
+After a run, use `dsc trace inspect <trace.jsonl>` to verify prefix
+stability and cache savings. The report includes a cache evidence line:
+
+```
+cache 99.6% | hit 48700000 | miss 190000 | saved CNY 47.73 | prefixes 1 | expected_miss 1
+```
+
+- **prefixes** — unique `static_prefix_hash` values seen. A stable run
+  has exactly 1; drift produces 2+.
+- **expected_miss** — number of first-turn cache misses (one per epoch
+  creation). Expected to equal the number of distinct epochs.
+- **saved CNY** — the cost difference between cache-hit and cache-miss
+  pricing for the hit tokens, computed from `llm.CacheSavings`.

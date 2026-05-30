@@ -278,6 +278,7 @@ func New(cfg Config) *App {
 	// an App without an Agent (or a provider Client) still construct cleanly.
 	if cfg.Agent != nil {
 		app.status.contextLimit = cfg.Agent.MaxContextTokens
+		app.status.reasoningEffort = cfg.Agent.ReasoningEffort
 		if cfg.Agent.Client != nil {
 			app.chrome.SetFirstTokenTimeout(cfg.Agent.Client.FirstTokenTimeout)
 		}
@@ -1541,6 +1542,37 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			return a.applyModelSwitch(fields[1])
 		}
 		a.overlay.OpenModels(a.model)
+	case "/effort":
+		if len(fields) < 2 {
+			// Show current effort and allowed values.
+			cur := a.agent.ReasoningEffort
+			if !cur.Valid() {
+				cur = llm.ReasoningEffortMax
+			}
+			a.scrollback.AppendInfo(fmt.Sprintf("effort: %s (allowed: low, medium, high, max)", cur))
+			a.refreshView()
+			return nil
+		}
+		// Reject while running.
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running {
+			a.scrollback.AppendInfo("/effort unavailable while the agent is running — retry when idle")
+			a.refreshView()
+			return nil
+		}
+		newEffort, ok := llm.ParseReasoningEffort(fields[1])
+		if !ok {
+			a.scrollback.AppendError(fmt.Sprintf("invalid effort %q; allowed: low, medium, high, max", fields[1]))
+			a.refreshView()
+			return nil
+		}
+		old := a.agent.ReasoningEffort
+		a.agent.ReasoningEffort = newEffort
+		a.status.reasoningEffort = newEffort
+		a.scrollback.AppendInfo(fmt.Sprintf("effort: %s -> %s", old, newEffort))
+		a.refreshView()
 	case "/theme":
 		return a.openThemes()
 	case "/tape":

@@ -87,15 +87,17 @@ type ProviderConfigTOML struct {
 type APIConfig struct {
 	Key                 string `toml:"key"`
 	BaseURL             string `toml:"base_url"`
+	UserID              string `toml:"user_id"`
 	FirstTokenTimeoutMs int    `toml:"first_token_timeout_ms"`
 	ChunkStallTimeoutMs int    `toml:"chunk_stall_timeout_ms"`
 }
 
 type DefaultsConfig struct {
-	Model          string `toml:"model"`
-	Thinking       bool   `toml:"thinking"`
-	Theme          string `toml:"theme"`
-	VimKeybindings bool   `toml:"vim_keybindings"`
+	Model           string `toml:"model"`
+	Thinking        bool   `toml:"thinking"`
+	ReasoningEffort string `toml:"reasoning_effort"`
+	Theme           string `toml:"theme"`
+	VimKeybindings  bool   `toml:"vim_keybindings"`
 	// AutoReasoning enables per-turn thinking selection based on the
 	// user's last message. When true, SelectThinking decides whether
 	// to enable/disable thinking each turn using keyword heuristics.
@@ -244,6 +246,9 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if ov.API.ChunkStallTimeoutMs != 0 {
 		base.API.ChunkStallTimeoutMs = ov.API.ChunkStallTimeoutMs
 	}
+	if ov.API.UserID != "" {
+		base.API.UserID = ov.API.UserID
+	}
 	if meta.IsDefined("api", "key") || meta.IsDefined("api", "base_url") {
 		base.LegacyAPIUsed = true
 	}
@@ -270,6 +275,10 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	// overlayHasKey dance that Thinking/VimKeybindings require (those
 	// default true and need "false means explicit disable" logic).
 	base.Defaults.AutoReasoning = ov.Defaults.AutoReasoning || base.Defaults.AutoReasoning
+
+	if ov.Defaults.ReasoningEffort != "" {
+		base.Defaults.ReasoningEffort = ov.Defaults.ReasoningEffort
+	}
 
 	if ov.Tools.MaxReadBytes != 0 {
 		base.Tools.MaxReadBytes = ov.Tools.MaxReadBytes

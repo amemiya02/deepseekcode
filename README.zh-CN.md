@@ -15,8 +15,8 @@
 ## 功能
 
 - 交互式 Bubble Tea TUI，以及可脚本化的 `dsc -p "prompt"` 模式。
-- DeepSeek-first runtime，支持 thinking、长上下文、前缀缓存指标，以及
-  `deepseek-v4-flash` / `deepseek-v4-pro`。
+- DeepSeek-first runtime，支持 thinking、`reasoning_effort` 控制、长上下文、
+  前缀缓存指标，以及 `deepseek-v4-flash` / `deepseek-v4-pro`。
 - 可配置 OpenAI-compatible provider，用于接入其他 chat-completions 端点。
 - 仓库工具覆盖文件读写、patch、shell 命令、git、grep、LSP 查询、网页抓取/搜索和用户提问。
 - 持久化项目会话，支持恢复、分支、导出 scrollback，以及用 `/undo` 撤销最近编辑 step。

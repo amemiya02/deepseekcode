@@ -54,6 +54,127 @@ func TestDefaultAutoReasoning(t *testing.T) {
 	}
 }
 
+func TestDefaultReasoningEffort(t *testing.T) {
+	cfg := Default()
+	if cfg.Defaults.ReasoningEffort != "max" {
+		t.Errorf("default reasoning_effort = %q, want %q", cfg.Defaults.ReasoningEffort, "max")
+	}
+}
+
+func TestOverlayReasoningEffort(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[defaults]
+reasoning_effort = "high"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Defaults.ReasoningEffort != "high" {
+		t.Errorf("reasoning_effort = %q, want %q", cfg.Defaults.ReasoningEffort, "high")
+	}
+}
+
+func TestValidateStrictReasoningEffortInvalid(t *testing.T) {
+	cfg := Default()
+	cfg.Defaults.ReasoningEffort = "extreme"
+	errs := ValidateStrict(&cfg)
+	var found bool
+	for _, e := range errs {
+		if e.Path == "defaults.reasoning_effort" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected defaults.reasoning_effort error, got %v", errs)
+	}
+}
+
+func TestValidateStrictReasoningEffortValid(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high", "max"} {
+		cfg := Default()
+		cfg.Defaults.ReasoningEffort = effort
+		errs := ValidateStrict(&cfg)
+		for _, e := range errs {
+			if e.Path == "defaults.reasoning_effort" {
+				t.Errorf("effort %q should be valid, got error: %s", effort, e.Message)
+			}
+		}
+	}
+}
+
+func TestValidateStrictReasoningEffortEmpty(t *testing.T) {
+	cfg := Default()
+	cfg.Defaults.ReasoningEffort = ""
+	errs := ValidateStrict(&cfg)
+	for _, e := range errs {
+		if e.Path == "defaults.reasoning_effort" {
+			t.Errorf("empty effort should be valid, got error: %s", e.Message)
+		}
+	}
+}
+
+func TestIsOfficialDeepSeekV4Model(t *testing.T) {
+	if !IsOfficialDeepSeekV4Model("deepseek-v4-flash") {
+		t.Error("expected flash to be official")
+	}
+	if !IsOfficialDeepSeekV4Model("deepseek-v4-pro") {
+		t.Error("expected pro to be official")
+	}
+	if IsOfficialDeepSeekV4Model("deepseek-chat") {
+		t.Error("chat should not be official")
+	}
+	if IsOfficialDeepSeekV4Model("gpt-4") {
+		t.Error("gpt-4 should not be official")
+	}
+}
+
+func TestIsLegacyDeepSeekAlias(t *testing.T) {
+	if !IsLegacyDeepSeekAlias("deepseek-chat") {
+		t.Error("expected chat to be legacy")
+	}
+	if !IsLegacyDeepSeekAlias("deepseek-reasoner") {
+		t.Error("expected reasoner to be legacy")
+	}
+	if IsLegacyDeepSeekAlias("deepseek-v4-flash") {
+		t.Error("flash should not be legacy")
+	}
+	if IsLegacyDeepSeekAlias("gpt-4") {
+		t.Error("gpt-4 should not be legacy")
+	}
+}
+
+func TestOverlayAPIUserID(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[api]
+user_id = "acct-42"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.API.UserID != "acct-42" {
+		t.Errorf("user_id = %q, want %q", cfg.API.UserID, "acct-42")
+	}
+}
+
+func TestDefaultAPIUserIDEmpty(t *testing.T) {
+	cfg := Default()
+	if cfg.API.UserID != "" {
+		t.Errorf("default user_id = %q, want empty", cfg.API.UserID)
+	}
+}
+
 func TestOverlayAutoReasoning(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.toml"

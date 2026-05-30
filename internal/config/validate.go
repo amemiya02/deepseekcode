@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/hooks"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 // ValidationError describes a single config validation problem.
@@ -46,6 +47,16 @@ var knownProviderTypes = map[string]bool{
 // empty slice when the config is sound.
 func ValidateStrict(c *Config) []ValidationError {
 	var errs []ValidationError
+
+	// Reasoning effort must be a valid DeepSeek value when set.
+	if c.Defaults.ReasoningEffort != "" {
+		if _, ok := llm.ParseReasoningEffort(c.Defaults.ReasoningEffort); !ok {
+			errs = append(errs, ValidationError{
+				Path:    "defaults.reasoning_effort",
+				Message: "invalid effort " + quote(c.Defaults.ReasoningEffort) + "; valid: low, medium, high, max",
+			})
+		}
+	}
 
 	// API timeouts must be positive.
 	if c.API.FirstTokenTimeoutMs <= 0 {

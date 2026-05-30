@@ -270,13 +270,14 @@ type modelOption struct {
 
 // availableModels returns the picker rows for /models. Pricing is
 // hard-coded here (mirrors internal/llm/cache_metrics.go) so the
-// picker is informative even offline.
+// picker is informative even offline. Official V4 models appear first;
+// legacy aliases are listed below with the retirement date.
 func availableModels() []modelOption {
 	return []modelOption{
 		{ID: "deepseek-v4-flash", Short: "flash", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · default"},
 		{ID: "deepseek-v4-pro", Short: "pro", Note: "1M ctx · ¥3/¥0.025 in · ¥6 out · stronger"},
-		{ID: "deepseek-chat", Short: "chat", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · alias → flash"},
-		{ID: "deepseek-reasoner", Short: "reasoner", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · alias → flash (thinking)"},
+		{ID: "deepseek-chat", Short: "chat", Note: "legacy until 2026-07-24 · alias → flash"},
+		{ID: "deepseek-reasoner", Short: "reasoner", Note: "legacy until 2026-07-24 · alias → flash"},
 	}
 }
 

@@ -30,6 +30,15 @@ type Request struct {
 	// ThinkingEnabled() / nil to set; omitempty drops nil so older aliases
 	// see no field at all.
 	Thinking *ThinkingOptions `json:"thinking,omitempty"`
+
+	// ReasoningEffort caps DeepSeek V4's reasoning depth when thinking is
+	// enabled. Allowed values: "low", "medium", "high", "max". Empty means
+	// the field is omitted from the wire request (the API defaults to max).
+	ReasoningEffort ReasoningEffort `json:"reasoning_effort,omitempty"`
+
+	// UserID is an optional DeepSeek field for abuse monitoring and
+	// enterprise attribution. Empty means omitted from the wire request.
+	UserID string `json:"user_id,omitempty"`
 }
 
 // ThinkingOptions matches DeepSeek V4's reasoning-mode envelope.
@@ -124,29 +133,33 @@ func (r Request) MarshalCacheStable() ([]byte, error) {
 	}
 
 	out := struct {
-		Model          string           `json:"model"`
-		Messages       []wireMessage    `json:"messages"`
-		Stream         bool             `json:"stream"`
-		StreamOptions  *StreamOptions   `json:"stream_options,omitempty"`
-		Tools          []Tool           `json:"tools,omitempty"`
-		ToolChoice     string           `json:"tool_choice,omitempty"`
-		Temperature    *float64         `json:"temperature,omitempty"`
-		TopP           *float64         `json:"top_p,omitempty"`
-		MaxTokens      int              `json:"max_tokens,omitempty"`
-		ResponseFormat *ResponseFmt     `json:"response_format,omitempty"`
-		Thinking       *ThinkingOptions `json:"thinking,omitempty"`
+		Model           string           `json:"model"`
+		Messages        []wireMessage    `json:"messages"`
+		Stream          bool             `json:"stream"`
+		StreamOptions   *StreamOptions   `json:"stream_options,omitempty"`
+		Tools           []Tool           `json:"tools,omitempty"`
+		ToolChoice      string           `json:"tool_choice,omitempty"`
+		Temperature     *float64         `json:"temperature,omitempty"`
+		TopP            *float64         `json:"top_p,omitempty"`
+		MaxTokens       int              `json:"max_tokens,omitempty"`
+		ResponseFormat  *ResponseFmt     `json:"response_format,omitempty"`
+		Thinking        *ThinkingOptions `json:"thinking,omitempty"`
+		ReasoningEffort ReasoningEffort  `json:"reasoning_effort,omitempty"`
+		UserID          string           `json:"user_id,omitempty"`
 	}{
-		Model:          r.Model,
-		Messages:       wireMsgs,
-		Stream:         r.Stream,
-		StreamOptions:  r.StreamOptions,
-		Tools:          tools,
-		ToolChoice:     r.ToolChoice,
-		Temperature:    r.Temperature,
-		TopP:           r.TopP,
-		MaxTokens:      r.MaxTokens,
-		ResponseFormat: r.ResponseFormat,
-		Thinking:       r.Thinking,
+		Model:           r.Model,
+		Messages:        wireMsgs,
+		Stream:          r.Stream,
+		StreamOptions:   r.StreamOptions,
+		Tools:           tools,
+		ToolChoice:      r.ToolChoice,
+		Temperature:     r.Temperature,
+		TopP:            r.TopP,
+		MaxTokens:       r.MaxTokens,
+		ResponseFormat:  r.ResponseFormat,
+		Thinking:        r.Thinking,
+		ReasoningEffort: r.ReasoningEffort,
+		UserID:          r.UserID,
 	}
 	return json.Marshal(out)
 }

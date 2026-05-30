@@ -18,6 +18,15 @@ func TestOpenAICompatCapabilities(t *testing.T) {
 	if caps.Thinking || caps.PrefixCache || !caps.JSONMode {
 		t.Fatalf("capabilities = %#v, want thinking/prefix false and json true", caps)
 	}
+	if caps.FIM {
+		t.Error("FIM should be false for OpenAI-compat")
+	}
+	if caps.ReasoningEfforts != nil {
+		t.Errorf("ReasoningEfforts should be nil for OpenAI-compat, got %v", caps.ReasoningEfforts)
+	}
+	if caps.ChatPrefixCompletion {
+		t.Error("ChatPrefixCompletion should be false for OpenAI-compat")
+	}
 }
 
 func TestOpenAICompatStreamDropsThinking(t *testing.T) {

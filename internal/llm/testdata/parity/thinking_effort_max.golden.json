@@ -1,0 +1,1 @@
+{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"complex task"}],"stream":true,"thinking":{"type":"enabled"},"reasoning_effort":"max"}

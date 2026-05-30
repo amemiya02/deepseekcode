@@ -263,3 +263,20 @@ func TestScavengeToolCalls_ToolCallFields(t *testing.T) {
 		t.Error("Function.Arguments should not be empty")
 	}
 }
+
+// TestParityScenario_tool_call_in_reasoning_scavenge pins that the
+// repair system scavenges a valid tool call from reasoning text when
+// the content field is empty or contains no tool calls.
+func TestParityScenario_tool_call_in_reasoning_scavenge(t *testing.T) {
+	reasoning := `I need to read the file. {"name":"read_file","arguments":{"path":"main.go"}}`
+	allowed := map[string]struct{}{"read_file": {}}
+
+	result := ScavengeToolCalls(reasoning, "", allowed, ScavengeOptions{})
+
+	if len(result.Calls) != 1 {
+		t.Fatalf("expected 1 call scavenged from reasoning, got %d", len(result.Calls))
+	}
+	if result.Calls[0].Function.Name != "read_file" {
+		t.Errorf("expected read_file, got %s", result.Calls[0].Function.Name)
+	}
+}

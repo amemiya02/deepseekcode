@@ -175,8 +175,8 @@ func TestMarshalCacheStable_WithSanitize_ReasoningContentPresent(t *testing.T) {
 			Role             string `json:"role"`
 			ReasoningContent string `json:"reasoning_content"`
 			ToolCalls        []struct {
-				ID   string `json:"id"`
-				Type string `json:"type"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
 				Function struct {
 					Name      string `json:"name"`
 					Arguments string `json:"arguments"`

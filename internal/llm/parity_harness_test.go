@@ -39,6 +39,9 @@ func ParityScenarios() []ParityScenario {
 		{"schema_canonical", buildSchemaCanonicalRequest},
 		{"thinking_roundtrip", buildThinkingRoundtripRequest},
 		{"tool_roundtrip", buildToolRoundtripRequest},
+		{"thinking_effort_max", buildThinkingEffortMaxRequest},
+		{"thinking_tool_call_placeholder", buildThinkingToolCallPlaceholderRequest},
+		{"cache_stable_user_id_omitted", buildCacheStableUserIDOmittedRequest},
 	}
 }
 
@@ -130,6 +133,52 @@ func buildToolRoundtripRequest() Request {
 			}},
 		},
 	}
+}
+
+// buildThinkingEffortMaxRequest pins the wire shape when both thinking
+// and reasoning_effort are set: thinking must serialize as a struct and
+// reasoning_effort as a string value.
+func buildThinkingEffortMaxRequest() Request {
+	return Request{
+		Model:           "deepseek-v4-flash",
+		Stream:          true,
+		Thinking:        ThinkingEnabled(true),
+		ReasoningEffort: ReasoningEffortMax,
+		Messages: []Message{
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "complex task"}}},
+		},
+	}
+}
+
+// buildThinkingToolCallPlaceholderRequest pins the SanitizeForDeepSeek
+// behavior: an assistant message with tool calls but no thinking block
+// must have a placeholder reasoning_content prepended when thinking is
+// enabled.
+func buildThinkingToolCallPlaceholderRequest() Request {
+	return Request{
+		Model:    "deepseek-v4-flash",
+		Stream:   true,
+		Thinking: ThinkingEnabled(true),
+		Messages: []Message{
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "read file"}}},
+			{Role: "assistant", Blocks: []ContentBlock{
+				TextBlock{Text: "reading"},
+				ToolUseBlock{ID: "call_001", Name: "read_file", Input: json.RawMessage(`{"path":"main.go"}`)},
+			}},
+			{Role: "tool", Blocks: []ContentBlock{
+				ToolResultBlock{ToolUseID: "call_001", Content: "package main"},
+			}},
+		},
+	}
+}
+
+// buildCacheStableUserIDOmittedRequest pins that an empty UserID is
+// omitted from the wire bytes — the default representative request must
+// not contain a user_id field.
+func buildCacheStableUserIDOmittedRequest() Request {
+	req := buildRepresentativeRequest()
+	req.UserID = "" // explicitly empty
+	return req
 }
 
 // parityManifest mirrors the JSON shape of testdata/parity/manifest.json.

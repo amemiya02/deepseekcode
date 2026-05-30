@@ -136,9 +136,22 @@ func checkProviderCapabilities(cfg config.Config) checkResult {
 		return checkResult{"capabilities", "fail", err.Error()}
 	}
 	caps := prov.Capabilities()
-	return checkResult{"capabilities", "ok",
-		fmt.Sprintf("thinking=%v prefix_cache=%v json_mode=%v max_ctx=%d",
-			caps.Thinking, caps.PrefixCache, caps.JSONMode, caps.MaxContextTokens)}
+	efforts := ""
+	for i, e := range caps.ReasoningEfforts {
+		if i > 0 {
+			efforts += ","
+		}
+		efforts += string(e)
+	}
+	detail := fmt.Sprintf("thinking=%v prefix_cache=%v json_mode=%v max_ctx=%d",
+		caps.Thinking, caps.PrefixCache, caps.JSONMode, caps.MaxContextTokens)
+	if caps.MaxOutputTokens > 0 {
+		detail += fmt.Sprintf(" max_output=%d", caps.MaxOutputTokens)
+	}
+	if efforts != "" {
+		detail += " effort=" + efforts
+	}
+	return checkResult{"capabilities", "ok", detail}
 }
 
 func checkSandbox(cfg config.Config) checkResult {

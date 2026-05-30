@@ -6,6 +6,25 @@ const ModelFlash = "deepseek-v4-flash"
 // ModelPro is the escalation/validator model.
 const ModelPro = "deepseek-v4-pro"
 
+// legacyAliases are DeepSeek model IDs scheduled for retirement on 2026-07-24.
+// They are still accepted but not shown as primary picker rows.
+var legacyAliases = map[string]bool{
+	"deepseek-chat":     true,
+	"deepseek-reasoner": true,
+}
+
+// IsOfficialDeepSeekV4Model reports whether model is one of the two
+// official DeepSeek V4 models (flash or pro).
+func IsOfficialDeepSeekV4Model(model string) bool {
+	return model == ModelFlash || model == ModelPro
+}
+
+// IsLegacyDeepSeekAlias reports whether model is a legacy alias
+// scheduled for retirement on 2026-07-24.
+func IsLegacyDeepSeekAlias(model string) bool {
+	return legacyAliases[model]
+}
+
 // Default returns a Config populated with v0.1 defaults.
 // Callers then layer user/project config + CLI flags on top.
 func Default() Config {
@@ -16,11 +35,12 @@ func Default() Config {
 			ChunkStallTimeoutMs: 20000,
 		},
 		Defaults: DefaultsConfig{
-			Model:          ModelFlash,
-			Thinking:       true,
-			Theme:          "dark",
-			VimKeybindings: true,
-			AutoReasoning:  false,
+			Model:           ModelFlash,
+			Thinking:        true,
+			ReasoningEffort: "max",
+			Theme:           "dark",
+			VimKeybindings:  true,
+			AutoReasoning:   false,
 		},
 		Tools: ToolsConfig{
 			MaxReadBytes:  5 * 1024 * 1024, // 5 MiB

@@ -18,23 +18,23 @@ var epochSeq atomic.Int64
 // pending changes that are visible in receipts but not model-visible
 // until an explicit epoch switch.
 type PrefixEpoch struct {
-	EpochID           string
-	AgentProfileID    string
-	Model             string
-	ReasoningEffort   string
-	StaticSystem      string
-	FewShots          []llm.Message
-	ToolSpecs         []llm.Tool
+	EpochID         string
+	AgentProfileID  string
+	Model           string
+	ReasoningEffort string
+	StaticSystem    string
+	FewShots        []llm.Message
+	ToolSpecs       []llm.Tool
 	// Capability is the latent identity (profile/skills/MCP) frozen with this
 	// epoch. It drives pending-change detection but is NOT in StaticPrefixHash.
-	Capability        CapabilitySet
-	CreatedAt         time.Time
-	CreatedReason     string
-	ComponentHashes   map[string]string
+	Capability      CapabilitySet
+	CreatedAt       time.Time
+	CreatedReason   string
+	ComponentHashes map[string]string
 	// StaticPrefixHash is the Prefix Fingerprint: the canonical hash of the
 	// model-visible bytes (system + tools) — the DeepSeek cache key. Latent
 	// capability state is intentionally excluded (see docs/adr/0001).
-	StaticPrefixHash  string
+	StaticPrefixHash string
 
 	// FrozenTools and FrozenSystem capture the tool list and system
 	// prompt at the moment FreezeEpoch is called. When the epoch is

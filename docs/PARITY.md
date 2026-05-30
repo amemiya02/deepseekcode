@@ -16,6 +16,18 @@ UPDATE_GOLDEN=1 go test -run TestParityGolden ./internal/llm/
 | schema_canonical | 工具 schema 含乱序键且嵌套子对象，钉住 schema 的递归键排序 |
 | thinking_roundtrip | assistant 含 `ThinkingBlock`，钉住 `reasoning_content` 往返与 thinking 结构体 |
 | tool_roundtrip | assistant 的 `ToolUseBlock` + tool 角色的 `ToolResultBlock`，钉住 `tool_calls` 与 `role:"tool"` |
+| thinking_effort_max | thinking + reasoning_effort:max 同时设置，钉住两者共存的 wire 形态 |
+| thinking_tool_call_placeholder | thinking 启用时 assistant 含 tool_calls 但无 thinking block，钉住 `SanitizeForDeepSeek` 插入占位 reasoning_content |
+| cache_stable_user_id_omitted | user_id 为空时必须从 wire 字节中省略，钉住默认请求不含 user_id |
+
+### Agent-level parity scenarios
+
+以下场景在 `internal/agent` 和 `internal/repair` 的 mock 回路中验证，不产生 golden 文件，
+不参与 `TestParityConsistency` 的四向一致性检查（它们不在 `ParityScenarios()` 中）：
+
+- **finish_stop_with_tool_calls** — finish_reason=stop 但 tool_calls 非空时，loop 必须执行 tool call 而非停止。验证位置：`internal/agent/loop_mock_test.go`。
+- **tool_call_in_reasoning_scavenge** — repair 系统从 reasoning 文本中 scavenges 有效 tool call。验证位置：`internal/repair/scavenge_test.go`。
+- **truncated_tool_args_repair** — 截断或畸形的 JSON tool 参数不导致 panic，repair 系统修复或产生可见错误。验证位置：`internal/agent/loop_mock_test.go`。
 
 ## 有意为之的浅覆盖（Intentionally shallow）
 

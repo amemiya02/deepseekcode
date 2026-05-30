@@ -12,10 +12,10 @@ type ReceiptKind string
 
 const (
 	ReceiptModelFinal ReceiptKind = "model_final" // model usage and prefix hash
-	ReceiptRepair     ReceiptKind = "repair"       // repair report from tool-call pipeline
-	ReceiptPermission ReceiptKind = "permission"   // permission decision
-	ReceiptCompaction ReceiptKind = "compaction"   // compaction event
-	ReceiptEpoch      ReceiptKind = "epoch"        // epoch lifecycle event
+	ReceiptRepair     ReceiptKind = "repair"      // repair report from tool-call pipeline
+	ReceiptPermission ReceiptKind = "permission"  // permission decision
+	ReceiptCompaction ReceiptKind = "compaction"  // compaction event
+	ReceiptEpoch      ReceiptKind = "epoch"       // epoch lifecycle event
 )
 
 // TranscriptReceipt is an append-only entry in the transcript log.

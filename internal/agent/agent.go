@@ -107,6 +107,15 @@ type Agent struct {
 	// with the last user message text to decide thinking on/off.
 	AutoReasoning bool
 
+	// ReasoningEffort is the configured DeepSeek V4 reasoning effort
+	// level (low, medium, high, max). Carried into every main-loop
+	// request when thinking is enabled. Empty means omit from wire.
+	ReasoningEffort llm.ReasoningEffort
+
+	// UserID is an optional DeepSeek field for abuse monitoring and
+	// enterprise attribution. Empty means omitted from wire.
+	UserID string
+
 	prefixMon *llm.PrefixMonitor
 	epochMgr  *EpochManager
 
@@ -833,12 +842,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	}
 
 	req := llm.Request{
-		Model:       a.Model,
-		Messages:    a.fullMessages(),
-		Tools:       a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
-		Thinking:    llm.ThinkingEnabled(thinking),
-		Temperature: a.Temperature,
-		TopP:        a.TopP,
+		Model:           a.Model,
+		Messages:        a.fullMessages(),
+		Tools:           a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
+		Thinking:        llm.ThinkingEnabled(thinking),
+		ReasoningEffort: a.effectiveReasoningEffort(thinking),
+		UserID:          a.UserID,
+		Temperature:     a.Temperature,
+		TopP:            a.TopP,
 	}
 
 	staticSys := a.staticSystem()
@@ -1741,6 +1752,20 @@ func (a *Agent) lastUserText() string {
 		}
 	}
 	return ""
+}
+
+// effectiveReasoningEffort returns the effort to send on the wire.
+// When thinking is disabled, returns empty (field omitted). When
+// thinking is enabled, returns the configured effort if valid,
+// otherwise defaults to max.
+func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
+	if !thinking {
+		return ""
+	}
+	if a.ReasoningEffort.Valid() {
+		return a.ReasoningEffort
+	}
+	return llm.ReasoningEffortMax
 }
 
 // publishRepairEvent publishes an EventRepair and persists a repair receipt

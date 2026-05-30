@@ -26,6 +26,7 @@ chunk_stall_timeout_ms = 20000
 [defaults]
 model = "deepseek-v4-flash"
 thinking = true
+reasoning_effort = "max"        # low | medium | high | max
 theme = "dark"                  # dark | light
 vim_keybindings = true
 
@@ -102,6 +103,7 @@ max_write_bytes = 5_242_880  # 5 MiB
 -ask-all              prompt for every tool, ignoring allowlist
 -no-duet              disable the Two-Model Duet (Pro Validator)
 -model <id>           override main-loop model for this session
+-effort <level>       override reasoning effort (low|medium|high|max)
 -new                  force new session, even if a recent one exists
 -c                    continue last session in cwd
 -r <id>               resume session by ID
@@ -117,6 +119,7 @@ Run inside the TUI:
 /clear       clear scrollback
 /quit        exit
 /models      list / switch the main-loop model (also: /models <id>)
+/effort      show / set DeepSeek reasoning effort (also: /effort <level>)
 /tape        open the Reasoning Tape fullscreen view
 /sessions    list this project's sessions, switch to one
 /undo        revert the last edit step (also: /undo N)
@@ -138,6 +141,7 @@ Run inside the TUI:
 |---|---|---|---|
 | `key` | string | `""` | API key; falls back to `DEEPSEEK_API_KEY` env var |
 | `base_url` | string | `"https://api.deepseek.com"` | API endpoint |
+| `user_id` | string | `""` | Optional DeepSeek user_id for abuse monitoring / enterprise attribution |
 | `first_token_timeout_ms` | int | `45000` | Timeout for first token (reasoner cold start) |
 | `chunk_stall_timeout_ms` | int | `20000` | Timeout between streaming chunks |
 
@@ -147,6 +151,7 @@ Run inside the TUI:
 |---|---|---|---|
 | `model` | string | `"deepseek-v4-flash"` | Main-loop model |
 | `thinking` | bool | `true` | Enable reasoning/thinking mode |
+| `reasoning_effort` | string | `"max"` | DeepSeek reasoning effort: `low`, `medium`, `high`, `max` |
 | `theme` | string | `"dark"` | TUI theme |
 | `vim_keybindings` | bool | `true` | Enable Vim key bindings |
 | `auto_reasoning` | bool | `false` | Per-turn thinking selection based on message keywords (opt-in) |

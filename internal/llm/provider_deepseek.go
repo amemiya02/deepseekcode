@@ -20,7 +20,23 @@ func (p DeepSeekProvider) Capabilities() Capabilities {
 		PrefixCache:      true,
 		JSONMode:         true,
 		MaxContextTokens: 1_000_000,
-		SupportsModels:   []string{"deepseek-v4", "deepseek-v4-flash", "deepseek-v4-pro"},
+		MaxOutputTokens:  384_000,
+		ReasoningEfforts: []ReasoningEffort{
+			ReasoningEffortLow,
+			ReasoningEffortMedium,
+			ReasoningEffortHigh,
+			ReasoningEffortMax,
+		},
+		ChatPrefixCompletion:   true,
+		FIM:                    true,
+		FIMRequiresThinkingOff: true,
+		SupportsModels: []string{
+			"deepseek-v4-flash",
+			"deepseek-v4-pro",
+			// Legacy aliases — accepted until 2026-07-24 retirement.
+			"deepseek-chat",
+			"deepseek-reasoner",
+		},
 	}
 }
 

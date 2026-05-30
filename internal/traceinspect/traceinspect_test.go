@@ -74,6 +74,85 @@ func TestInspectSurfacesLifecycleAndProjectedCost(t *testing.T) {
 	}
 }
 
+// TestInspectCacheEvidenceStablePrefix verifies that a stable-prefix run
+// reports exactly 1 unique prefix hash and 1 expected cache miss.
+func TestInspectCacheEvidenceStablePrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"abc123","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":10,"cost_cny":0.001}`,
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"abc123","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":950,"cache_miss_tokens":50,"output_tokens":10,"cost_cny":0.0002}`,
+		`{"type":"agent.done","epoch_id":"e1","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if rep.UniquePrefixHashes != 1 {
+		t.Errorf("UniquePrefixHashes = %d, want 1", rep.UniquePrefixHashes)
+	}
+	if rep.ExpectedCacheMisses != 1 {
+		t.Errorf("ExpectedCacheMisses = %d, want 1", rep.ExpectedCacheMisses)
+	}
+	out := RenderText(rep)
+	if !strings.Contains(out, "prefixes 1") {
+		t.Errorf("RenderText missing 'prefixes 1':\n%s", out)
+	}
+	if !strings.Contains(out, "expected_miss 1") {
+		t.Errorf("RenderText missing 'expected_miss 1':\n%s", out)
+	}
+}
+
+// TestInspectCacheEvidenceDriftedPrefix verifies that a drifted-prefix run
+// reports 2+ unique prefix hashes.
+func TestInspectCacheEvidenceDriftedPrefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"abc123","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":10,"cost_cny":0.001}`,
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"def456","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":0,"cache_miss_tokens":1000,"output_tokens":10,"cost_cny":0.001}`,
+		`{"type":"agent.done","epoch_id":"e1","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if rep.UniquePrefixHashes != 2 {
+		t.Errorf("UniquePrefixHashes = %d, want 2", rep.UniquePrefixHashes)
+	}
+	out := RenderText(rep)
+	if !strings.Contains(out, "prefixes 2") {
+		t.Errorf("RenderText missing 'prefixes 2':\n%s", out)
+	}
+}
+
+// TestInspectCacheSavings verifies that cache savings are computed from
+// the usage hit/miss token split.
+func TestInspectCacheSavings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"abc","agent_role":"root"}`,
+		`{"type":"usage","epoch_id":"e1","model":"deepseek-v4-flash","cache_hit_tokens":48700000,"cache_miss_tokens":190000,"output_tokens":100,"cost_cny":0.01}`,
+		`{"type":"agent.done","epoch_id":"e1","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if rep.CacheSavingsCNY <= 0 {
+		t.Errorf("CacheSavingsCNY = %.4f, want > 0", rep.CacheSavingsCNY)
+	}
+	out := RenderText(rep)
+	if !strings.Contains(out, "saved CNY") {
+		t.Errorf("RenderText missing 'saved CNY':\n%s", out)
+	}
+}
+
 // TestInspectRegradesGoldenFixtures is the offline re-grade: the inspector
 // reproduces a summary for every committed golden fixture without re-running
 // the loop or burning tokens (T6.4). A fixture that fails to parse is itself a

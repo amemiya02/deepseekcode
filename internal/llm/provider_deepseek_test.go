@@ -20,6 +20,24 @@ func TestDeepSeekProviderCapabilities(t *testing.T) {
 	if !caps.Thinking || !caps.PrefixCache || !caps.JSONMode {
 		t.Fatalf("capabilities = %#v, want thinking/prefix/json true", caps)
 	}
+	if caps.MaxContextTokens != 1_000_000 {
+		t.Errorf("MaxContextTokens = %d, want 1000000", caps.MaxContextTokens)
+	}
+	if caps.MaxOutputTokens != 384_000 {
+		t.Errorf("MaxOutputTokens = %d, want 384000", caps.MaxOutputTokens)
+	}
+	if len(caps.ReasoningEfforts) != 4 {
+		t.Errorf("ReasoningEfforts len = %d, want 4", len(caps.ReasoningEfforts))
+	}
+	if !caps.FIM {
+		t.Error("FIM should be true for DeepSeek")
+	}
+	if !caps.FIMRequiresThinkingOff {
+		t.Error("FIMRequiresThinkingOff should be true for DeepSeek")
+	}
+	if !caps.ChatPrefixCompletion {
+		t.Error("ChatPrefixCompletion should be true for DeepSeek")
+	}
 	if prov.BaseClient() == nil {
 		t.Fatal("BaseClient() is nil")
 	}

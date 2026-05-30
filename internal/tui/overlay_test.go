@@ -24,6 +24,21 @@ func TestAvailableModelsIncludesChatAndReasoner(t *testing.T) {
 	}
 }
 
+// TestAvailableModelsOfficialFirst verifies that official V4 models appear
+// before legacy aliases in the picker.
+func TestAvailableModelsOfficialFirst(t *testing.T) {
+	models := availableModels()
+	if len(models) < 2 {
+		t.Fatal("need at least 2 models")
+	}
+	if models[0].ID != "deepseek-v4-flash" {
+		t.Errorf("first model = %q, want deepseek-v4-flash", models[0].ID)
+	}
+	if models[1].ID != "deepseek-v4-pro" {
+		t.Errorf("second model = %q, want deepseek-v4-pro", models[1].ID)
+	}
+}
+
 // TestAvailableModelsArePricedAndNamed guards the bug class that produced the
 // missing-models defect: the picker drifting out of sync with the pricing and
 // display tables. Every model offered for selection must (1) have a pricing

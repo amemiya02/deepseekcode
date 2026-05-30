@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/traceschema"
 )
 
@@ -36,6 +37,21 @@ type Report struct {
 	RootEpochs      int
 	SubagentEpochs  int
 
+	// UniquePrefixHashes counts distinct static_prefix_hash values seen
+	// across prefix.snapshot records. A stable run has exactly 1; drift
+	// produces 2+.
+	UniquePrefixHashes int
+
+	// ExpectedCacheMisses counts prefix.snapshot records where the epoch
+	// was newly created (first snapshot for that epoch), indicating an
+	// expected cache miss for the first turn of that epoch.
+	ExpectedCacheMisses int
+
+	// CacheSavingsCNY is the difference between what the run would have
+	// cost at full cache-miss pricing and what it actually cost, computed
+	// from the usage records' cache hit/miss token split.
+	CacheSavingsCNY float64
+
 	// T6.4: lifecycle records the gate inspects. A clean summary that omits
 	// these would mask exactly the events the Cache Reliability gate fails on.
 	CompactionCount    int
@@ -60,6 +76,8 @@ func InspectFile(path string) (Report, error) {
 
 	rep := Report{Path: path}
 	epochs := map[string]*EpochSummary{}
+	seenEpochs := map[string]bool{}   // first prefix.snapshot per epoch = expected miss
+	uniqueHashes := map[string]bool{} // distinct static_prefix_hash values
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
@@ -91,6 +109,14 @@ func InspectFile(path string) (Report, error) {
 			}
 		}
 		switch r.Type {
+		case "prefix.snapshot":
+			if r.StaticPrefixHash != "" {
+				uniqueHashes[r.StaticPrefixHash] = true
+			}
+			if r.EpochID != "" && !seenEpochs[r.EpochID] {
+				seenEpochs[r.EpochID] = true
+				rep.ExpectedCacheMisses++
+			}
 		case "usage":
 			rep.TotalUsageTurns++
 			if r.CacheHitTokens != nil {
@@ -104,6 +130,18 @@ func InspectFile(path string) (Report, error) {
 			}
 			if r.CostCNY != nil {
 				rep.CostCNY += *r.CostCNY
+			}
+			// Compute cache savings from the hit/miss token split.
+			// We reconstruct a minimal Usage to reuse the pricing math.
+			if r.CacheHitTokens != nil && r.CacheMissTokens != nil {
+				u := llm.Usage{
+					PromptCacheHitTokens:  *r.CacheHitTokens,
+					PromptCacheMissTokens: *r.CacheMissTokens,
+				}
+				if r.OutputTokens != nil {
+					u.CompletionTokens = *r.OutputTokens
+				}
+				rep.CacheSavingsCNY += llm.CacheSavings(r.Model, u)
 			}
 			if e := epochs[r.EpochID]; e != nil {
 				e.UsageTurns++
@@ -129,6 +167,8 @@ func InspectFile(path string) (Report, error) {
 		return Report{}, err
 	}
 
+	rep.UniquePrefixHashes = len(uniqueHashes)
+
 	totalInput := rep.CacheHitTokens + rep.CacheMissTokens
 	if totalInput > 0 {
 		rep.CacheHitRate = float64(rep.CacheHitTokens) / float64(totalInput)
@@ -152,6 +192,8 @@ func RenderText(rep Report) string {
 	fmt.Fprintf(&b, "trace %s\n", rep.Path)
 	fmt.Fprintf(&b, "usage turns %d | cache %.1f%% | in hit/miss %d/%d | out %d | cost ¥%.6f\n",
 		rep.TotalUsageTurns, rep.CacheHitRate*100, rep.CacheHitTokens, rep.CacheMissTokens, rep.OutputTokens, rep.CostCNY)
+	fmt.Fprintf(&b, "cache %.1f%% | hit %d | miss %d | saved CNY %.2f | prefixes %d | expected_miss %d\n",
+		rep.CacheHitRate*100, rep.CacheHitTokens, rep.CacheMissTokens, rep.CacheSavingsCNY, rep.UniquePrefixHashes, rep.ExpectedCacheMisses)
 	fmt.Fprintf(&b, "epochs root %d | subagents %d\n", rep.RootEpochs, rep.SubagentEpochs)
 	fmt.Fprintf(&b, "lifecycle: compaction %d | drift.blocked %d | pending %d\n",
 		rep.CompactionCount, rep.DriftBlockedCount, rep.PendingChangeCount)

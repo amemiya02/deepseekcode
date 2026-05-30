@@ -120,6 +120,113 @@ func TestLoopThinkingSerializesAsStruct(t *testing.T) {
 	})
 }
 
+func TestLoopReasoningEffortAppearsWhenThinkingEnabled(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{Text: "ok"})
+	defer srv.Close()
+	a := newMockLoopAgent(t, srv)
+	a.Thinking = true
+	a.AutoReasoning = false
+	a.ReasoningEffort = llm.ReasoningEffortMax
+	if _, err := a.Run(context.Background(), "x"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	body := string(srv.LastRequest())
+	if !strings.Contains(body, `"reasoning_effort":"max"`) {
+		t.Errorf("reasoning_effort:max missing from request; body=%s", body)
+	}
+}
+
+func TestLoopReasoningEffortOmittedWhenThinkingDisabled(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{Text: "ok"})
+	defer srv.Close()
+	a := newMockLoopAgent(t, srv)
+	a.Thinking = false
+	a.AutoReasoning = false
+	a.ReasoningEffort = llm.ReasoningEffortMax // set but thinking is off
+	if _, err := a.Run(context.Background(), "x"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	body := string(srv.LastRequest())
+	if strings.Contains(body, `"reasoning_effort"`) {
+		t.Errorf("reasoning_effort should be omitted when thinking disabled; body=%s", body)
+	}
+}
+
+func TestLoopReasoningEffortDefaultsMaxWhenThinkingEnabled(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{Text: "ok"})
+	defer srv.Close()
+	a := newMockLoopAgent(t, srv)
+	a.Thinking = true
+	a.AutoReasoning = false
+	// ReasoningEffort left as zero value (empty) — effectiveReasoningEffort
+	// should fall back to max when thinking is enabled.
+	if _, err := a.Run(context.Background(), "x"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	body := string(srv.LastRequest())
+	if !strings.Contains(body, `"reasoning_effort":"max"`) {
+		t.Errorf("reasoning_effort should default to max when thinking enabled; body=%s", body)
+	}
+}
+
+// TestParityScenario_finish_stop_with_tool_calls pins the agent-loop
+// behavior: when finish_reason is "stop" but tool_calls is non-empty,
+// the loop must execute the tool call instead of stopping. This is the
+// agent-level counterpart to the wire-format parity scenario.
+func TestParityScenario_finish_stop_with_tool_calls(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{
+			Reasoning: "I'll echo it",
+			ToolCalls: []llmtest.ToolCall{{ID: "call_1", Name: "echo", Args: `{"text":"hi"}`}},
+			Finish:    "stop",
+		},
+		llmtest.Turn{Text: "done"},
+	)
+	defer srv.Close()
+
+	var calls int32
+	a := newMockLoopAgent(t, srv)
+	a.Tools.Register(loopEchoTool{calls: &calls})
+
+	reason, err := a.Run(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("echo executed %d times, want 1", n)
+	}
+}
+
+// TestParityScenario_truncated_tool_args_repair pins that malformed or
+// truncated JSON tool arguments do not crash the loop — the repair
+// system either fixes the args or produces a model-visible error.
+func TestParityScenario_truncated_tool_args_repair(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{
+			ToolCalls: []llmtest.ToolCall{{ID: "call_1", Name: "echo", Args: `{"text":"hi"`}}, // missing closing }
+			Finish:    "stop",
+		},
+		llmtest.Turn{Text: "done"},
+	)
+	defer srv.Close()
+
+	var calls int32
+	a := newMockLoopAgent(t, srv)
+	a.Tools.Register(loopEchoTool{calls: &calls})
+
+	// Must not panic or hang — the loop should complete.
+	reason, err := a.Run(context.Background(), "echo hi")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+}
+
 // TestLoopFirstTokenTimeout pins that a first-token stall that persists across
 // the one bounded re-issue (T1.4) surfaces as a first-token timeout the loop
 // reports (not a silent hang). The first stall is re-issued; the second is

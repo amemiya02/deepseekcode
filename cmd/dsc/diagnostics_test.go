@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/config"
 )
 
 // TestAgentDefsResult exercises the doctor agent-def diagnostic: it surfaces a
@@ -59,6 +61,34 @@ func TestAgentDefsResultClean(t *testing.T) {
 	}
 	if !strings.Contains(res.Detail, "1 loaded") {
 		t.Errorf("detail = %q, want '1 loaded'", res.Detail)
+	}
+}
+
+// Rework Task-007: checkProviderCapabilities for the DeepSeek provider must
+// surface max_output, effort values, and max_ctx in the detail string.
+func TestCheckProviderCapabilitiesDeepSeek(t *testing.T) {
+	cfg := config.Config{
+		Defaults: config.DefaultsConfig{Model: "deepseek-v4-flash"},
+		Providers: map[string]config.ProviderConfigTOML{
+			"deepseek": {
+				Type:    "deepseek",
+				BaseURL: "https://api.deepseek.com",
+				APIKey:  "sk-test",
+			},
+		},
+	}
+	res := checkProviderCapabilities(cfg)
+	if res.Status != "ok" {
+		t.Fatalf("status = %q, want ok; detail=%q", res.Status, res.Detail)
+	}
+	for _, want := range []string{
+		"max_output=384000",
+		"effort=low,medium,high,max",
+		"max_ctx=1000000",
+	} {
+		if !strings.Contains(res.Detail, want) {
+			t.Errorf("detail %q should contain %q", res.Detail, want)
+		}
 	}
 }
 

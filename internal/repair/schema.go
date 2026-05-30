@@ -7,10 +7,10 @@ import (
 
 // SchemaAnalysis holds the results of schema complexity analysis.
 type SchemaAnalysis struct {
-	MaxDepth            int
-	LeafCount           int
+	MaxDepth             int
+	LeafCount            int
 	HasNestedArrayObject bool
-	ShouldAdapt         bool
+	ShouldAdapt          bool
 }
 
 // AnalyzeSchema analyzes a JSON schema for complexity indicators.

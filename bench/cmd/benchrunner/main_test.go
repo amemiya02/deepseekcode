@@ -860,7 +860,7 @@ func TestGoldenTraceGates(t *testing.T) {
 			name: "pass complete subagent",
 			file: "pass-complete-subagent.jsonl",
 			metrics: MetricsSpec{
-				RequireCacheGate:        true,
+				RequireCacheGate:         true,
 				RequireSubagentIsolation: true,
 			},
 			wantOK: true,
@@ -869,7 +869,7 @@ func TestGoldenTraceGates(t *testing.T) {
 			name: "fail split subagent",
 			file: "fail-split-subagent.jsonl",
 			metrics: MetricsSpec{
-				RequireCacheGate:        true,
+				RequireCacheGate:         true,
 				RequireSubagentIsolation: true,
 			},
 			wantOK: false,
@@ -878,7 +878,7 @@ func TestGoldenTraceGates(t *testing.T) {
 			name: "fail compaction moved prefix",
 			file: "fail-compaction-moved-prefix.jsonl",
 			metrics: MetricsSpec{
-				RequireCacheGate:       true,
+				RequireCacheGate:        true,
 				RequireCompactionRecord: true,
 			},
 			wantOK: false,

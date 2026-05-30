@@ -724,7 +724,7 @@ shows `flash · 14 steps · cache 87% · ¥0.04`.
 | Channel | How |
 |---------|-----|
 | Homebrew (own tap) | `brew install <user>/deepseekcode/deepseekcode` |
-| `curl | sh` | `curl -fsSL https://deepseekcode.dev/install.sh | sh` |
+| `curl | sh` | `curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh` |
 | Go install | `go install github.com/<user>/deepseekcode/cmd/dsc@latest` |
 | GitHub Releases | Prebuilt: darwin-arm64, darwin-amd64, linux-amd64, linux-arm64, windows-amd64 |
 
@@ -822,7 +822,7 @@ deepseekcode/
 │   └── workflows/
 │       ├── ci.yml               # test + build matrix
 │       └── release.yml          # goreleaser → GH Releases + brew tap
-├── install.sh                   # served from deepseekcode.dev
+├── install.sh                   # served from GitHub raw
 ├── .goreleaser.yaml
 ├── go.mod
 ├── go.sum

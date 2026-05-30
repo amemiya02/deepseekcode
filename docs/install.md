@@ -15,19 +15,19 @@ brew install amemiya02/deepseekcode/deepseekcode
 ## curl | sh (any Unix)
 
 ```sh
-curl -fsSL https://deepseekcode.dev/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
 ```
 
 Pins to a specific version:
 
 ```sh
-curl -fsSL https://deepseekcode.dev/install.sh | DSC_VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | DSC_VERSION=v0.1.0 sh
 ```
 
 Custom install prefix (default `~/.local/bin`):
 
 ```sh
-curl -fsSL https://deepseekcode.dev/install.sh | PREFIX=/usr/local sh
+curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | PREFIX=/usr/local sh
 ```
 
 ## Go install

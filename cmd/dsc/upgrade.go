@@ -68,8 +68,8 @@ func upgradeCommand(m version.Method, tag string) (*exec.Cmd, string) {
 		c := exec.Command("brew", "upgrade", "deepseekcode")
 		return c, "brew upgrade deepseekcode"
 	case version.MethodCurl:
-		c := exec.Command("sh", "-c", "curl -fsSL https://deepseekcode.dev/install.sh | sh")
-		return c, "curl -fsSL https://deepseekcode.dev/install.sh | sh"
+		c := exec.Command("sh", "-c", "curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh")
+		return c, "curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh"
 	case version.MethodGoInstall:
 		mod := "github.com/amemiya02/deepseekcode/cmd/dsc@latest"
 		c := exec.Command("go", "install", mod)
@@ -92,7 +92,7 @@ func decideUpgrade(current, latest string, m version.Method) (msg, command strin
 	case version.MethodBrew:
 		command = "brew upgrade deepseekcode"
 	case version.MethodCurl:
-		command = "curl -fsSL https://deepseekcode.dev/install.sh | sh"
+		command = "curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh"
 	case version.MethodGoInstall:
 		command = "go install github.com/amemiya02/deepseekcode/cmd/dsc@latest"
 	default:

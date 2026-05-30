@@ -56,15 +56,24 @@ changelog:
       - '^ci:'
       - '^style:'
 
-# Homebrew tap. After your first release, create a github.com/<you>/homebrew-deepseekcode
-# repo and set GORELEASER_GITHUB_TOKEN. Until then, leave this commented out.
-# brews:
-#   - name: deepseekcode
-#     repository:
-#       owner: amemiya02
-#       name: homebrew-deepseekcode
-#     homepage: https://github.com/amemiya02/deepseekcode
-#     description: Terminal-native coding agent for DeepSeek models.
-#     license: MIT
-#     test: |
-#       system "#{bin}/dsc -version"
+# Homebrew tap. Requires GORELEASER_GITHUB_TOKEN secret with repo scope.
+brews:
+  - name: deepseekcode
+    repository:
+      owner: amemiya02
+      name: homebrew-deepseekcode
+    homepage: https://github.com/amemiya02/deepseekcode
+    description: Terminal-native coding agent for DeepSeek models.
+    license: MIT
+    test: |
+      system "#{bin}/dsc -version"
+
+# Scoop bucket for Windows. Requires GORELEASER_GITHUB_TOKEN secret with repo scope.
+scoops:
+  - name: deepseekcode
+    repository:
+      owner: amemiya02
+      name: deepseekcode-scoop
+    homepage: https://github.com/amemiya02/deepseekcode
+    description: Terminal-native coding agent for DeepSeek models.
+    license: MIT

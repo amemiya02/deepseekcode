@@ -60,15 +60,34 @@ generic chat wrapper.
 
 ## Install
 
-Prerequisites:
+### macOS / Linux (one-liner)
 
-- Go version matching `go.mod` or newer.
-- A DeepSeek API key, or another configured provider key.
-- Git is optional, but enables git-aware prompt context and git tools.
-- Language servers are optional; `dsc` connects to detected servers when
-  they are present.
+```sh
+curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
+```
 
-Build from source:
+Installs `dsc` to `~/.local/bin`. Override with `PREFIX=/usr/local sh` or pin a version with `DSC_VERSION=v0.3.0 sh`.
+
+### macOS (Homebrew)
+
+```sh
+brew install amemiya02/deepseekcode/deepseekcode
+```
+
+### Windows (Scoop)
+
+```sh
+scoop bucket add deepseekcode https://github.com/amemiya02/deepseekcode-scoop
+scoop install deepseekcode
+```
+
+### Go
+
+```sh
+go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
+```
+
+### Build from source
 
 ```sh
 git clone https://github.com/amemiya02/deepseekcode
@@ -77,17 +96,13 @@ make build
 ./bin/dsc -version
 ```
 
-Install into your Go binary directory:
+Prerequisites:
 
-```sh
-make install
-```
-
-Or install directly with Go:
-
-```sh
-go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
-```
+- Go version matching `go.mod` or newer.
+- A DeepSeek API key, or another configured provider key.
+- Git is optional, but enables git-aware prompt context and git tools.
+- Language servers are optional; `dsc` connects to detected servers when
+  they are present.
 
 ## Quick Start
 

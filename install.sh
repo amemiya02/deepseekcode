@@ -3,8 +3,8 @@
 # (or $PREFIX/bin when PREFIX is set). Idempotent.
 #
 # Usage:
-#   curl -fsSL https://deepseekcode.dev/install.sh | sh
-#   curl -fsSL https://deepseekcode.dev/install.sh | DSC_VERSION=v0.1.0 sh
+#   curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | DSC_VERSION=v0.1.0 sh
 
 set -eu
 

@@ -21,7 +21,7 @@ func TestDecideUpgrade(t *testing.T) {
 		{
 			"v0.1.0", "v0.2.0", version.MethodCurl,
 			"update available v0.1.0 → v0.2.0",
-			"curl -fsSL https://deepseekcode.dev/install.sh | sh",
+			"curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh",
 		},
 		{
 			"v0.1.0", "v0.2.0", version.MethodGoInstall,

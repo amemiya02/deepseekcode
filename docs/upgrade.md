@@ -23,7 +23,7 @@ The binary detects how it was installed by inspecting its own path:
 | Method | Detection | Upgrade command |
 |--------|-----------|-----------------|
 | Homebrew | path contains `Cellar/` or `homebrew` | `brew upgrade deepseekcode` |
-| curl \| sh | binary under `~/.local/bin` | `curl -fsSL https://deepseekcode.dev/install.sh \| sh` |
+| curl \| sh | binary under `~/.local/bin` | `curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh \| sh` |
 | go install | binary under `$GOPATH/bin` | `go install github.com/amemiya02/deepseekcode/cmd/dsc@latest` |
 | manual | anything else | download from GitHub Releases |
 

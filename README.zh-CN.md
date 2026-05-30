@@ -52,14 +52,34 @@ DeepSeek 暴露了推理内容、前缀缓存指标、长上下文和成本特�
 
 ## 安装
 
-前置条件：
+### macOS / Linux（一键安装）
 
-- 与 `go.mod` 匹配或更新的 Go 版本。
-- DeepSeek API key，或其他已配置 provider 的 key。
-- Git 是可选依赖；安装后可启用 git-aware prompt context 和 git 工具。
-- Language server 是可选依赖；存在时 `dsc` 会自动连接检测到的 server。
+```sh
+curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
+```
 
-从源码构建：
+默认安装到 `~/.local/bin`。可通过 `PREFIX=/usr/local sh` 覆盖安装路径，或通过 `DSC_VERSION=v0.3.0 sh` 指定版本。
+
+### macOS（Homebrew）
+
+```sh
+brew install amemiya02/deepseekcode/deepseekcode
+```
+
+### Windows（Scoop）
+
+```sh
+scoop bucket add deepseekcode https://github.com/amemiya02/deepseekcode-scoop
+scoop install deepseekcode
+```
+
+### Go
+
+```sh
+go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
+```
+
+### 从源码构建
 
 ```sh
 git clone https://github.com/amemiya02/deepseekcode
@@ -68,17 +88,12 @@ make build
 ./bin/dsc -version
 ```
 
-安装到 Go binary 目录：
+前置条件：
 
-```sh
-make install
-```
-
-也可以直接用 Go 安装：
-
-```sh
-go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
-```
+- 与 `go.mod` 匹配或更新的 Go 版本。
+- DeepSeek API key，或其他已配置 provider 的 key。
+- Git 是可选依赖；安装后可启用 git-aware prompt context 和 git 工具。
+- Language server 是可选依赖；存在时 `dsc` 会自动连接检测到的 server。
 
 ## 快速开始
 

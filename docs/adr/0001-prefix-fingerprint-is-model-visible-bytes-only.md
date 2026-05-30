@@ -14,9 +14,8 @@ that `EpochManager` watches to decide when to mint a new epoch. See
 
 ## Considered options
 
-- **6-component combined hash** (the original design in
-  `../optimization-plan-cache-epoch.md` → "Core Concept: PrefixEpoch" and
-  decision #2): hash `system : tools : skill_dir : mcp_schema : agent_profile :
+- **6-component combined hash** (the original design): hash
+  `system : tools : skill_dir : mcp_schema : agent_profile :
   few_shots`. **Rejected** — it double-counts (`skill_dir` is rendered into
   `system`; MCP tools are inside `tools` when their tier is active), its
   `mcp_schema` component is the only key-order-*sensitive* hash (raw

@@ -90,6 +90,11 @@ func tokenHex(c color.Color) string {
 	return cf.Hex()
 }
 
+// renderMarkdownFn is the markdown rendering function. It is a package-level
+// variable so tests can swap in a mock to count calls or inject behavior.
+// Production code uses renderMarkdown; tests may reassign this.
+var renderMarkdownFn = renderMarkdown
+
 // renderMarkdown turns markdown text into ANSI-styled output that fits
 // the given column width. Falls back to the raw text on any error so a
 // markdown bug never blanks the UI.
@@ -125,6 +130,123 @@ func getRenderer(t Theme, fills bool, width int) *glamour.TermRenderer {
 	}
 	mdCache[key] = r
 	return r
+}
+
+// streamingMarkdown incrementally renders an in-progress markdown stream.
+// It caches the Glamour render of the largest "safe" prefix of the source
+// text and re-renders only the remainder per call. A safe prefix ends at
+// the last "\n\n" (blank line) that is NOT inside an open fenced code
+// block — i.e. the count of "```" occurrences before that boundary is
+// even. Zero value is ready to use.
+type streamingMarkdown struct {
+	// stablePrefix is the source text of the cached safe prefix.
+	stablePrefix string
+	// renderedPrefix is the Glamour render of stablePrefix.
+	renderedPrefix string
+	// key tracks (theme, fills, width) to detect config drift.
+	key streamKey
+	// hits counts cache reuses (for testing).
+	hits int
+}
+
+type streamKey struct {
+	theme string
+	fills bool
+	width int
+}
+
+// render returns ANSI-styled markdown for the full text, reusing the cached
+// safe-prefix render and rendering only the tail. It falls back to a full
+// renderMarkdown when: the (theme,fills,width) key changed, no safe boundary
+// exists, or the cache is empty.
+func (m *streamingMarkdown) render(text string, t Theme, fills bool, width int) string {
+	if width <= 0 {
+		return text
+	}
+	k := streamKey{theme: t.Name, fills: fills, width: width}
+
+	// Key mismatch or empty text: full render, reset cache.
+	if text == "" || m.key != k || m.stablePrefix == "" {
+		if text == "" {
+			return ""
+		}
+		out := renderMarkdownFn(text, t, fills, width)
+		// Try to cache a safe prefix for next time.
+		if boundary := safeBoundary(text); boundary > 0 {
+			m.stablePrefix = text[:boundary]
+			m.renderedPrefix = renderMarkdownFn(m.stablePrefix, t, fills, width)
+			m.key = k
+		}
+		return out
+	}
+
+	// The cached prefix is still a prefix of the current text: reuse the
+	// cached rendered prefix and only re-render the changed tail.
+	if len(text) > len(m.stablePrefix) && text[:len(m.stablePrefix)] == m.stablePrefix {
+		tail := text[len(m.stablePrefix):]
+		renderedTail := renderMarkdownFn(tail, t, fills, width)
+		m.hits++
+		// Update stablePrefix to the new boundary for the next call,
+		// but do NOT re-render the expanded prefix now — that would
+		// violate the "only render changed tail" contract. The cached
+		// renderedPrefix stays as-is; it will be refreshed on the next
+		// full render (e.g. at finalize/reset).
+		if newBoundary := safeBoundary(text); newBoundary > len(m.stablePrefix) {
+			m.stablePrefix = text[:newBoundary]
+		}
+		return stitchRenderedMarkdown(m.renderedPrefix, renderedTail)
+	}
+
+	// Prefix changed (shouldn't happen for append-only streams, but guard).
+	out := renderMarkdownFn(text, t, fills, width)
+	if boundary := safeBoundary(text); boundary > 0 {
+		m.stablePrefix = text[:boundary]
+		m.renderedPrefix = renderMarkdownFn(m.stablePrefix, t, fills, width)
+		m.key = k
+	}
+	return out
+}
+
+// reset clears the cache (called on stream finalize).
+func (m *streamingMarkdown) reset() {
+	m.stablePrefix = ""
+	m.renderedPrefix = ""
+	m.key = streamKey{}
+	m.hits = 0
+}
+
+// stitchRenderedMarkdown joins a cached rendered prefix with a freshly
+// rendered tail, preserving Glamour's paragraph separator. The prefix
+// was rendered from source ending at "\n\n"; renderMarkdown strips ALL
+// trailing newlines, so the prefix loses the paragraph separator. The
+// raw Glamour output for a source ending at "\n\n" is "...padded\n\n";
+// after stripping both newlines, we need to re-add one "\n" to restore
+// the paragraph break. The tail starts with Glamour's leading "\n" +
+// padded text, so the result is prefix + "\n" + "\n" + padded tail —
+// matching the full render's blank separator line.
+func stitchRenderedMarkdown(renderedPrefix, renderedTail string) string {
+	if renderedPrefix == "" {
+		return renderedTail
+	}
+	return renderedPrefix + "\n" + renderedTail
+}
+
+// safeBoundary finds the byte offset of the end of the last "\n\n" in text
+// whose preceding "```" count is even (not inside an open fenced code block).
+// Returns 0 if no safe boundary exists.
+func safeBoundary(text string) int {
+	// Scan for "\n\n" boundaries from the end, checking fence parity.
+	lastBoundary := 0
+	for i := 0; i < len(text)-1; i++ {
+		if text[i] == '\n' && text[i+1] == '\n' {
+			prefix := text[:i]
+			fenceCount := strings.Count(prefix, "```")
+			if fenceCount%2 == 0 {
+				lastBoundary = i + 2 // include both newlines
+			}
+		}
+	}
+	return lastBoundary
 }
 
 // wrapWords wraps plain text at the given column, breaking on

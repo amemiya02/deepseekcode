@@ -1,5 +1,5 @@
-// fileindex.go backs the `@` file-mention menu (design-tui-interaction.md §6.1,
-// G4). It is the file source for the completions popup: a depth-limited walk of
+// fileindex.go backs the `@` file-mention menu. It is the file source for the
+// completions popup: a depth-limited walk of
 // the working directory producing repo-relative paths, skipping the usual noise
 // dirs (.git, node_modules, vendor) and any dot-directory, capped so a giant
 // tree can never blow up memory or the render path.

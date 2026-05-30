@@ -50,9 +50,13 @@ type CompactionResult struct {
 const perMessageOverhead = 5
 
 // defaultCharsPerToken is the cold-start chars-per-token prior — the divisor
-// today's char/4 heuristic uses. EstimateTokens == EstimateTokensCalibrated at
-// this ratio, so behaviour is byte-identical until the first provider usage
-// frame calibrates a per-session ratio (T4.1, Agent.calibrateCharsPerToken).
+// today's UTF-8 byte ÷ 4 heuristic uses. Go len(string) is byte length, so
+// CJK characters (3 bytes each) naturally count ~3/4 token per char. This is
+// intentional: no tokenizer dependency, and the byte count approximates the
+// wire token count well enough for compaction triggering and budget projection.
+// EstimateTokens == EstimateTokensCalibrated at this ratio, so behaviour is
+// byte-identical until the first provider usage frame calibrates a per-session
+// ratio (T4.1, Agent.calibrateCharsPerToken).
 const defaultCharsPerToken = 4.0
 
 // estimateChars sums the raw model-visible character count of the message
@@ -99,9 +103,9 @@ func EstimateTokensCalibrated(messages []llm.Message, charsPerToken float64) int
 	return n*perMessageOverhead + int(float64(chars)/charsPerToken)
 }
 
-// EstimateTokens returns the cold-start (char/4) token estimate. It is the
-// uncalibrated wrapper over EstimateTokensCalibrated; callers holding a learned
-// per-session ratio should use the calibrated form directly.
+// EstimateTokens returns the cold-start (UTF-8 byte ÷ 4) token estimate. It
+// is the uncalibrated wrapper over EstimateTokensCalibrated; callers holding a
+// learned per-session ratio should use the calibrated form directly.
 func EstimateTokens(messages []llm.Message) int {
 	return EstimateTokensCalibrated(messages, defaultCharsPerToken)
 }

@@ -30,6 +30,11 @@ type statusState struct {
 	// renders as a subtle "queued N" segment only when non-zero, so an idle
 	// session (the common case, and every existing golden) is unaffected.
 	queued int
+
+	// Capability counters for the status-line capability segment.
+	mcpTools int  // total tools across connected MCP servers; 0 hides the sub-part
+	lspReady bool // at least one LSP server attached
+	skills   int  // loaded skill count; 0 hides the sub-part
 }
 
 // render returns the one-line status string. When in Normal (scroll)
@@ -115,6 +120,16 @@ func (s statusState) render(t Theme) string {
 	// prompts wait behind the active run so it never strobes an idle line.
 	if s.queued > 0 {
 		line1 += dot + label.Render(fmt.Sprintf("queued %d", s.queued))
+	}
+	// Capability segment: mcp/lsp/skills — only non-zero/true parts shown.
+	if s.mcpTools > 0 {
+		line1 += dot + label.Render(fmt.Sprintf("mcp %d", s.mcpTools))
+	}
+	if s.lspReady {
+		line1 += dot + label.Render("lsp ✓")
+	}
+	if s.skills > 0 {
+		line1 += dot + label.Render(fmt.Sprintf("skills %d", s.skills))
 	}
 
 	// Transient-state chips. "compacted N" is an episodic event, so it reads

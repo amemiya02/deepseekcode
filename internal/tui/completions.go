@@ -1,5 +1,5 @@
-// completions.go is the inline popup that backs the `/` and `@` menus
-// (design-tui-interaction.md §4.2, §4.4). It is a small, self-contained list
+// completions.go is the inline popup that backs the `/` and `@` menus.
+// It is a small, self-contained list
 // component the input owns: not a full-screen overlay but a bordered card
 // spliced into View()'s parts slice directly above the input box.
 //

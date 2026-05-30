@@ -159,7 +159,7 @@ func (i chatItem) render(t Theme, width int) string {
 		// headings get proper ANSI styling AND line wrapping respects the
 		// terminal width (account for the gutter so long lines don't overflow).
 		body := renderMarkdown(i.text, t, t.fillsEnabled(), width-len(t.Gutter()))
-		return indent(body, t.Gutter()) + "\n"
+		return renderAssistantBody(t, body) + "\n"
 	case itemReasoning:
 		barColor := t.FgSubtle // dim bar for the latent thinking channel
 		if i.folded {
@@ -375,6 +375,14 @@ func isNoticeTool(tool string) bool {
 	default:
 		return false
 	}
+}
+
+// renderAssistantBody wraps an already-rendered markdown body in the
+// assistant item's gutter/style chrome. Shared by the finalized path
+// (items.go) and the streaming path (scrollback.go) so both produce
+// identical chrome.
+func renderAssistantBody(t Theme, mdBody string) string {
+	return indent(mdBody, t.Gutter())
 }
 
 func indent(s, prefix string) string {

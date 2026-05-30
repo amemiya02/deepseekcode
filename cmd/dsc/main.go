@@ -594,6 +594,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,
 		HistoryPath:           projectHistoryPath(home, cwd),
+		Language:              cfg.UI.Language,
+		LSPReady:              len(lspReg.Servers()) > 0,
 	})
 	return app.Run()
 }
@@ -830,7 +832,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	fmt.Fprintf(os.Stderr, "\n[stop: %s", reason)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, " err=%v", err)
+		fmt.Fprintf(os.Stderr, " err=%v", llm.LocalizeError(err, llm.ResolveLang(cfg.UI.Language)))
 	}
 	fmt.Fprintln(os.Stderr, "]")
 	return nil

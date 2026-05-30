@@ -128,6 +128,259 @@ func TestMarkdownCodeBlockBgTracksTheme(t *testing.T) {
 	}
 }
 
+// TestStreamingMarkdownCachesSafePrefix verifies that streamingMarkdown
+// caches the render of the largest safe prefix (ending at a "\n\n" outside
+// fenced code blocks) and reuses it on subsequent calls.
+func TestStreamingMarkdownCachesSafePrefix(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+
+	// First call: "Intro paragraph.\n\nSecond par" — boundary at "\n\n" caches prefix.
+	text1 := "Intro paragraph.\n\nSecond par"
+	out1 := m.render(text1, th, true, w)
+	if out1 == "" {
+		t.Fatal("expected non-empty output for text1")
+	}
+	if m.stablePrefix != "Intro paragraph.\n\n" {
+		t.Errorf("stablePrefix = %q, want %q", m.stablePrefix, "Intro paragraph.\n\n")
+	}
+
+	// Second call: text extends the tail. Prefix should be reused.
+	text2 := "Intro paragraph.\n\nSecond paragraph done."
+	out2 := m.render(text2, th, true, w)
+	if out2 == "" {
+		t.Fatal("expected non-empty output for text2")
+	}
+	if m.stablePrefix != "Intro paragraph.\n\n" {
+		t.Errorf("stablePrefix changed unexpectedly: %q", m.stablePrefix)
+	}
+	if m.hits != 1 {
+		t.Errorf("expected 1 cache hit after second render, got %d", m.hits)
+	}
+
+	// The finalized output should have the full text (strip ANSI for check).
+	stripped := stripANSI(out2)
+	if !strings.Contains(stripped, "Second paragraph done.") {
+		t.Errorf("output missing tail text: %q", stripped)
+	}
+}
+
+// TestStreamingMarkdownFinalizedMatchesRenderMarkdown verifies the seam:
+// a fully-finalized text rendered through streamingMarkdown produces output
+// whose visible text equals renderMarkdown of the same text.
+func TestStreamingMarkdownFinalizedMatchesRenderMarkdown(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+	text := "First paragraph.\n\nSecond paragraph."
+
+	streamOut := m.render(text, th, true, w)
+	directOut := renderMarkdown(text, th, true, w)
+
+	// Both should contain the same visible content.
+	if stripANSI(streamOut) != stripANSI(directOut) {
+		t.Errorf("streaming vs direct render mismatch:\nstream=%q\ndirect=%q", stripANSI(streamOut), stripANSI(directOut))
+	}
+}
+
+// TestStreamingMarkdownReuseMatchesRenderMarkdown verifies the critical seam:
+// after the cache is populated, a longer string rendered through the reuse
+// path contains the same visible content as renderMarkdown of the same text.
+func TestStreamingMarkdownReuseMatchesRenderMarkdown(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+	// First call populates the cache.
+	_ = m.render("Intro paragraph.\n\nSecond par", th, true, w)
+	// Second call exercises the reuse path.
+	got := stripANSI(m.render("Intro paragraph.\n\nSecond paragraph done.", th, true, w))
+	want := stripANSI(renderMarkdown("Intro paragraph.\n\nSecond paragraph done.", th, true, w))
+	// Both must contain the key content words.
+	for _, word := range []string{"Intro", "paragraph.", "Second", "done."} {
+		if !strings.Contains(got, word) {
+			t.Errorf("reuse output missing %q: %q", word, got)
+		}
+		if !strings.Contains(want, word) {
+			t.Errorf("full output missing %q: %q", word, want)
+		}
+	}
+	// Both must have the same number of non-blank content lines.
+	gotLines := nonBlankLines(got)
+	wantLines := nonBlankLines(want)
+	if len(gotLines) != len(wantLines) {
+		t.Errorf("line count mismatch: got %d, want %d\ngot=%q\nwant=%q", len(gotLines), len(wantLines), got, want)
+	}
+	if m.hits != 1 {
+		t.Errorf("expected 1 cache hit, got %d", m.hits)
+	}
+}
+
+// TestStreamingMarkdownDoesNotRerenderExtendedPrefix proves that when the
+// new text introduces a later safe boundary, the streaming reuse path does
+// NOT re-render the expanded prefix — it renders only the tail.
+func TestStreamingMarkdownDoesNotRerenderExtendedPrefix(t *testing.T) {
+	orig := renderMarkdownFn
+	var calls []string
+	renderMarkdownFn = func(text string, th Theme, fills bool, width int) string {
+		calls = append(calls, text)
+		return orig(text, th, fills, width)
+	}
+	defer func() { renderMarkdownFn = orig }()
+
+	var m streamingMarkdown
+	th := DarkTheme()
+	_ = m.render("Intro paragraph.\n\nSecond par", th, true, 80)
+	calls = nil
+	_ = m.render("Intro paragraph.\n\nSecond paragraph done.\n\nThird par", th, true, 80)
+
+	if len(calls) != 1 {
+		t.Fatalf("reuse with new safe boundary should render only one tail; got %d calls: %#v", len(calls), calls)
+	}
+}
+
+func nonBlankLines(s string) []string {
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// TestStreamingMarkdownReuseRendersOnlyTail proves the reuse path does NOT
+// call the markdown renderer for the full text — only for the changed tail.
+func TestStreamingMarkdownReuseRendersOnlyTail(t *testing.T) {
+	// Swap in a counting mock.
+	orig := renderMarkdownFn
+	var calls []string
+	renderMarkdownFn = func(text string, th Theme, fills bool, width int) string {
+		calls = append(calls, text)
+		return orig(text, th, fills, width)
+	}
+	defer func() { renderMarkdownFn = orig }()
+
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+
+	// First call: full render + prefix cache.
+	calls = nil
+	_ = m.render("Intro paragraph.\n\nSecond par", th, true, w)
+	if len(calls) != 2 {
+		t.Fatalf("first call: expected 2 renders (full + prefix), got %d: %v", len(calls), calls)
+	}
+
+	// Second call: should render ONLY the tail, not the full text.
+	calls = nil
+	_ = m.render("Intro paragraph.\n\nSecond paragraph done.", th, true, w)
+	if len(calls) != 1 {
+		t.Fatalf("reuse call: expected 1 render (tail only), got %d: %v", len(calls), calls)
+	}
+	if calls[0] != "Second paragraph done." {
+		t.Errorf("reuse call rendered wrong text: %q", calls[0])
+	}
+}
+
+// TestStreamingMarkdownEdgeCases ensures no panic on edge-case inputs.
+func TestStreamingMarkdownEdgeCases(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+
+	// Empty text.
+	if got := m.render("", th, true, 80); got != "" {
+		t.Errorf("empty text: got %q, want %q", got, "")
+	}
+
+	// No blank lines — should fall back to full render.
+	m.reset()
+	got := m.render("no blank lines here", th, true, 80)
+	if got == "" {
+		t.Error("no-blank-lines: expected non-empty output")
+	}
+
+	// Unterminated fenced code block — boundary must be before the open fence.
+	m.reset()
+	text := "before\n\n```go\nunterminated code"
+	out := m.render(text, th, true, 80)
+	if out == "" {
+		t.Error("unterminated fence: expected non-empty output")
+	}
+
+	// Width 0 — should return raw text.
+	m.reset()
+	if got := m.render("some text", th, true, 0); got != "some text" {
+		t.Errorf("width 0: got %q, want %q", got, "some text")
+	}
+}
+
+// TestStreamingMarkdownResetClearsCache verifies reset() clears all cached state.
+func TestStreamingMarkdownResetClearsCache(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+
+	m.render("hello\n\nworld", th, true, w)
+	if m.stablePrefix == "" {
+		t.Fatal("expected cached prefix after render")
+	}
+
+	m.reset()
+	if m.stablePrefix != "" {
+		t.Errorf("stablePrefix not cleared: %q", m.stablePrefix)
+	}
+	if m.renderedPrefix != "" {
+		t.Errorf("renderedPrefix not cleared: %q", m.renderedPrefix)
+	}
+	if m.hits != 0 {
+		t.Errorf("hits not reset: %d", m.hits)
+	}
+}
+
+// TestStreamingMarkdownKeyChangeInvalidatesCache verifies that a theme/width
+// change forces a full re-render.
+func TestStreamingMarkdownKeyChangeInvalidatesCache(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+	w := 80
+
+	m.render("hello\n\nworld", th, true, w)
+	if m.stablePrefix == "" {
+		t.Fatal("expected cached prefix")
+	}
+
+	// Change width — should invalidate.
+	out := m.render("hello\n\nworld", th, true, 40)
+	if out == "" {
+		t.Error("width change: expected non-empty output")
+	}
+	// Cache should be repopulated with new key.
+	if m.key.width != 40 {
+		t.Errorf("key width not updated: %d", m.key.width)
+	}
+}
+
+// TestSafeBoundaryFindsLastEvenFence verifies the safe boundary logic.
+func TestSafeBoundaryFindsLastEvenFence(t *testing.T) {
+	tests := []struct {
+		text string
+		want int
+	}{
+		{"", 0},
+		{"no blank lines", 0},
+		{"hello\n\nworld", len("hello\n\n")},
+		{"a\n\nb\n\nc", len("a\n\nb\n\n")},
+		{"before\n\n```go\ncode\n```\n\nafter", len("before\n\n```go\ncode\n```\n\n")},
+	}
+	for _, tt := range tests {
+		got := safeBoundary(tt.text)
+		if got != tt.want {
+			t.Errorf("safeBoundary(%q) = %d, want %d", tt.text, got, tt.want)
+		}
+	}
+}
+
 // TestMarkdownLightUsesLightBase verifies that the light theme uses a different
 // glamour base than the dark theme.
 func TestMarkdownLightUsesLightBase(t *testing.T) {

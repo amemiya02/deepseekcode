@@ -63,3 +63,39 @@ func TestStatusCacheSavingsAndNoteCoexist(t *testing.T) {
 		t.Errorf("expected ctx fill bar from populated context limit, got %q", plain)
 	}
 }
+
+// TestStatusCapabilitySegment verifies the mcp/lsp/skills capability
+// segment: non-zero/true parts are shown, zero/false parts are omitted.
+func TestStatusCapabilitySegment(t *testing.T) {
+	th := DarkTheme()
+
+	// All zero/false → no capability segment, output identical to before.
+	s0 := statusState{model: "deepseek-v4-flash", steps: 1}
+	out0 := stripANSI(s0.render(th))
+	if strings.Contains(out0, "mcp") || strings.Contains(out0, "lsp") || strings.Contains(out0, "skills") {
+		t.Errorf("all-zero capabilities should not appear: %q", out0)
+	}
+
+	// Mixed: mcp=3, lsp=true, skills=5.
+	s1 := statusState{model: "deepseek-v4-flash", steps: 1, mcpTools: 3, lspReady: true, skills: 5}
+	out1 := stripANSI(s1.render(th))
+	if !strings.Contains(out1, "mcp 3") {
+		t.Errorf("expected 'mcp 3', got %q", out1)
+	}
+	if !strings.Contains(out1, "lsp ✓") {
+		t.Errorf("expected 'lsp ✓', got %q", out1)
+	}
+	if !strings.Contains(out1, "skills 5") {
+		t.Errorf("expected 'skills 5', got %q", out1)
+	}
+
+	// skills=0 → skills part omitted, others shown.
+	s2 := statusState{model: "deepseek-v4-flash", steps: 1, mcpTools: 2, lspReady: true}
+	out2 := stripANSI(s2.render(th))
+	if strings.Contains(out2, "skills") {
+		t.Errorf("skills=0 should be omitted: %q", out2)
+	}
+	if !strings.Contains(out2, "mcp 2") {
+		t.Errorf("expected 'mcp 2', got %q", out2)
+	}
+}

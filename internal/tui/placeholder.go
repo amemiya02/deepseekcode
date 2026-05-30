@@ -1,5 +1,5 @@
-// placeholder.go drives the dynamic textarea placeholder (G10,
-// design-tui-interaction.md §3). The hint reflects state: a "Working…" caption
+// placeholder.go drives the dynamic textarea placeholder. The hint reflects
+// state: a "Working…" caption
 // while a run is active, otherwise one of a small rotation of friendly "Ready"
 // hints. The rotation is deterministic — indexed by a turn counter, never a
 // clock or random source — so golden/snapshot tests never flap.

@@ -39,7 +39,8 @@ Callback-driven ReAct loop modeled on `charmbracelet/crush`. `Agent.Run()` calls
 DeepSeek V4 models have 1M token context windows. The defaults reflect this:
 `MaxContextTokens = 1_000_000`, `AutoCompactInputTokens = 800_000`. Override
 the auto-compact threshold via `DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS` env var.
-`EstimateTokens` uses char/4 (no tokenizer dependency) — it's intentionally rough.
+`EstimateTokens` uses UTF-8 byte ÷ 4 (Go `len(string)` is byte length, so CJK
+already counts ~3 bytes/char) — no tokenizer dependency, intentionally rough.
 
 ### Prefix epoch system (`internal/agent/prefix_epoch.go`)
 

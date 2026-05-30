@@ -19,7 +19,7 @@ import (
 // credentials. They pin the DeepSeek-specific paths that are easy to break
 // and expensive to catch live: the finish-reason override, tool-call
 // pairing on replay, the thinking-as-struct wire contract, and the two-tier
-// stream timeout. (T6.3 in docs/roadmap-industrial-agent.md.)
+// stream timeout.
 
 // loopEchoTool records how many times it executed, so a test can prove the
 // loop actually dispatched a scripted tool call.

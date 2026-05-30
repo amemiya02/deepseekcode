@@ -392,8 +392,8 @@ func TestPermissionModeEatsKeys(t *testing.T) {
 
 // --- G1/G2/G3: inline completions popup + prompt history wiring -----------
 //
-// These pin the new Insert-mode precedence chain (design-tui-interaction.md
-// §5.1/§5.2/§7): the `/` menu is derived from the post-keystroke buffer,
+// These pin the new Insert-mode precedence chain: the `/` menu is derived
+// from the post-keystroke buffer,
 // ↑/↓ recall history only at the cursor's top/bottom edge, accepting a
 // completion inserts without submitting, and a real Enter still submits.
 

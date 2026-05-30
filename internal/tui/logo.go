@@ -130,6 +130,35 @@ func renderLogo(t Theme, hero, brand, version string, width int) string {
 	return b.String()
 }
 
+// renderHeaderBar returns a single-row header: brand rendered with the theme
+// gradient, left-aligned, version (if non-empty) right-aligned faint, clamped
+// to exactly `width` columns and exactly 1 line tall (never wraps).
+func renderHeaderBar(t Theme, brand, version string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	brandRendered := ApplyForegroundGrad(lipgloss.NewStyle(), brand, t.BrandDeep, t.BrandLight)
+	brandW := lipgloss.Width(brandRendered)
+
+	if version == "" {
+		// Pad to exact width so the row is always `width` columns.
+		return lipgloss.NewStyle().Width(width).Render(clipToWidth(brandRendered, width))
+	}
+
+	verRendered := t.Hint.Render(version)
+	verW := lipgloss.Width(verRendered)
+
+	// Gap between brand and version: at least 1 space.
+	gap := width - brandW - verW
+	if gap < 1 {
+		// Not enough room for both: truncate brand, drop version, pad to width.
+		return lipgloss.NewStyle().Width(width).Render(clipToWidth(brandRendered, width))
+	}
+
+	row := brandRendered + strings.Repeat(" ", gap) + verRendered
+	return clipToWidth(row, width)
+}
+
 // logoFieldColor returns the color of the diagonal ╱ field flanking the
 // wordmark. It rides the border token so the field reads as a quiet structural
 // frame that harmonizes with the painted canvas (border sits just above the

@@ -48,6 +48,9 @@ type UIConfig struct {
 	// see docs/adr/0002), so this is a "no backgrounds at all" toggle.
 	// Default false (panels render their fills).
 	TransparentBackground bool `toml:"transparent_background"`
+	// Language overrides the UI message language for API errors. "" or "auto"
+	// inspects LC_ALL/LC_MESSAGES/LANG; "en" forces English; "zh" forces Chinese.
+	Language string `toml:"language"`
 }
 
 // WebConfig configures web fetch and search tools.

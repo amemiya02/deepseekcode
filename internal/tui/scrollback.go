@@ -63,6 +63,20 @@ type Scrollback struct {
 	// produced it (flash=cyan, pro=purple). Set via SetModel on construction
 	// and on /models switches; empty defaults to the flash accent.
 	curModel string
+
+	// streamMD caches the rendered safe-prefix of the active streaming
+	// assistant text item so only the changed tail is re-glamoured per
+	// token. Reset on EndStreams so the finalized item re-renders whole.
+	streamMD streamingMarkdown
+
+	// structureSeq bumps ONLY when item identity changes (append/finalize),
+	// NOT on active-stream token deltas. Drives the finished-prefix cache.
+	structureSeq uint64
+
+	// Cached concatenation of all finished (non-active-stream) items.
+	finishedPrefix       string
+	finishedPrefixW      int
+	finishedPrefixStruct uint64
 }
 
 // SetModel records the active main-loop model so subsequently appended tool
@@ -87,6 +101,7 @@ func NewScrollback() *Scrollback {
 func (s *Scrollback) AppendUser(text string) {
 	s.EndStreams()
 	s.appendItem(chatItem{kind: itemUser, text: text, timestamp: time.Now()})
+	s.structureBump()
 }
 
 // AppendInfo adds an out-of-band notice. Closes streams: an info
@@ -94,18 +109,21 @@ func (s *Scrollback) AppendUser(text string) {
 func (s *Scrollback) AppendInfo(text string) {
 	s.EndStreams()
 	s.appendItem(chatItem{kind: itemInfo, text: text, timestamp: time.Now()})
+	s.structureBump()
 }
 
 // AppendError adds an error line and closes any in-progress stream.
 func (s *Scrollback) AppendError(text string) {
 	s.EndStreams()
 	s.appendItem(chatItem{kind: itemError, text: text, timestamp: time.Now()})
+	s.structureBump()
 }
 
 // AppendWelcome adds the startup banner. Does not touch streams (no
 // stream is in progress at startup).
 func (s *Scrollback) AppendWelcome() {
 	s.appendItem(chatItem{kind: itemWelcome})
+	s.structureBump()
 }
 
 // AppendToolCall records a tool invocation and closes any in-progress
@@ -120,6 +138,7 @@ func (s *Scrollback) AppendToolCall(callID, tool, args string) {
 		model:      s.curModel,
 		timestamp:  time.Now(),
 	})
+	s.structureBump()
 }
 
 // AppendToolResult records the matching result for callID. Walks
@@ -145,6 +164,7 @@ func (s *Scrollback) AppendToolResult(callID string, result tools.Result, dur ti
 		model:      s.curModel,
 		timestamp:  time.Now(),
 	})
+	s.structureBump()
 }
 
 // AppendHookFired adds a hook-execution line. Deny decisions are
@@ -159,6 +179,7 @@ func (s *Scrollback) AppendHookFired(hookName, event, decision, reason string, d
 		duration:     dur,
 		timestamp:    time.Now(),
 	})
+	s.structureBump()
 }
 
 // AppendRepair adds a repair receipt line. Kind is one of args_completed,
@@ -172,6 +193,7 @@ func (s *Scrollback) AppendRepair(kind, tool, message string) {
 		repairMessage: message,
 		timestamp:     time.Now(),
 	})
+	s.structureBump()
 }
 
 // AppendStepFinish closes the step's footer line with usage and
@@ -185,6 +207,7 @@ func (s *Scrollback) AppendStepFinish(stopReason string, usage llm.Usage, model 
 		model:      model,
 		timestamp:  time.Now(),
 	})
+	s.structureBump()
 }
 
 // --- streaming aggregators --------------------------------------------------
@@ -195,6 +218,7 @@ func (s *Scrollback) StartReasoning() {
 	s.thinkStart = time.Now()
 	s.appendItem(chatItem{kind: itemReasoning, folded: true, timestamp: time.Now()})
 	s.streamThinkIdx = len(s.items) - 1
+	s.structureBump()
 }
 
 // AppendReasoning extends the in-progress reasoning block. Defends
@@ -220,6 +244,7 @@ func (s *Scrollback) EndReasoning() {
 	s.items[s.streamThinkIdx].duration = time.Since(s.thinkStart)
 	s.streamThinkIdx = noStream
 	s.bump()
+	s.structureBump()
 }
 
 // AppendText extends the in-progress assistant-text block; creates
@@ -229,6 +254,7 @@ func (s *Scrollback) AppendText(delta string) (created bool, tokens int) {
 	if s.streamTextIdx == noStream {
 		s.appendItem(chatItem{kind: itemAssistantText, timestamp: time.Now()})
 		s.streamTextIdx = len(s.items) - 1
+		s.structureBump()
 		created = true
 	}
 	it := &s.items[s.streamTextIdx]
@@ -241,11 +267,21 @@ func (s *Scrollback) AppendText(delta string) (created bool, tokens int) {
 // safe to call at turn boundaries (agent done) and from every
 // one-shot appender as a defensive reset.
 func (s *Scrollback) EndStreams() {
+	changed := false
 	if s.streamTextIdx != noStream {
 		s.streamTextIdx = noStream
+		s.streamMD.reset()
+		changed = true
 	}
 	if s.streamThinkIdx != noStream {
 		s.streamThinkIdx = noStream
+		changed = true
+	}
+	if changed {
+		s.structureBump()
+		// Invalidate the (width, seq) render cache so the next Render
+		// recomputes through the finalized item path (no streaming branch).
+		s.bump()
 	}
 }
 
@@ -276,20 +312,42 @@ func (s *Scrollback) Render(t Theme, width int) string {
 		return ""
 	}
 	if width != s.renderW || s.renderSeq != s.seq || s.rendered == "" {
+		// Compute the index of the first active-stream item.
+		activeStart := len(s.items)
+		if s.streamTextIdx != noStream && s.streamTextIdx < activeStart {
+			activeStart = s.streamTextIdx
+		}
+		if s.streamThinkIdx != noStream && s.streamThinkIdx < activeStart {
+			activeStart = s.streamThinkIdx
+		}
+
+		// Reuse the cached finished prefix if width and structureSeq match.
+		var finished string
+		if width == s.finishedPrefixW && s.structureSeq == s.finishedPrefixStruct && s.finishedPrefix != "" {
+			finished = s.finishedPrefix
+		} else {
+			var b strings.Builder
+			for _, it := range s.items[:activeStart] {
+				s.renderItem(&b, it, t, width)
+			}
+			finished = b.String()
+			s.finishedPrefix = finished
+			s.finishedPrefixW = width
+			s.finishedPrefixStruct = s.structureSeq
+		}
+
+		// Render only the active-stream items fresh.
 		var b strings.Builder
-		for _, it := range s.items {
-			key := it.renderKey(width, t.Name)
-			if key != "" {
-				if rendered, ok := s.itemRenderCache.Get(key); ok {
-					b.WriteString(rendered)
-					continue
-				}
-				rendered := it.render(t, width)
-				s.itemRenderCache.Put(key, rendered)
-				b.WriteString(rendered)
+		b.WriteString(finished)
+		for idx, it := range s.items[activeStart:] {
+			realIdx := activeStart + idx
+			// Active streaming text item: use incremental markdown cache.
+			if realIdx == s.streamTextIdx && it.kind == itemAssistantText {
+				body := s.streamMD.render(it.text, t, t.fillsEnabled(), width-len(t.Gutter()))
+				b.WriteString(renderAssistantBody(t, body) + "\n")
 				continue
 			}
-			b.WriteString(it.render(t, width))
+			s.renderItem(&b, it, t, width)
 		}
 		s.rendered = b.String()
 		s.fullLines = strings.Split(s.rendered, "\n")
@@ -303,6 +361,23 @@ func (s *Scrollback) Render(t Theme, width int) string {
 		return s.rendered
 	}
 	return strings.Join(applyVisualHighlightLines(s.fullLines, s.vis), "\n")
+}
+
+// renderItem writes a single item to b, using the per-item render cache
+// for tool-call/tool-result items.
+func (s *Scrollback) renderItem(b *strings.Builder, it chatItem, t Theme, width int) {
+	key := it.renderKey(width, t.Name)
+	if key != "" {
+		if rendered, ok := s.itemRenderCache.Get(key); ok {
+			b.WriteString(rendered)
+			return
+		}
+		rendered := it.render(t, width)
+		s.itemRenderCache.Put(key, rendered)
+		b.WriteString(rendered)
+		return
+	}
+	b.WriteString(it.render(t, width))
 }
 
 // FullLines returns the line split from the last Render call. Returns
@@ -487,6 +562,11 @@ func (s *Scrollback) appendItem(it chatItem) {
 }
 
 func (s *Scrollback) bump() { s.seq++ }
+
+// structureBump increments structureSeq, signaling that the set of
+// finished items changed (append or finalize). NOT called on per-token
+// deltas — those only bump seq.
+func (s *Scrollback) structureBump() { s.structureSeq++ }
 
 func clampLine(line, total int) int {
 	if line < 0 {

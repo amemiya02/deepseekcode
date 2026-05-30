@@ -1,4 +1,4 @@
-// queue_paste.go owns two P2 input affordances (design-tui-interaction.md §3):
+// queue_paste.go owns two P2 input affordances:
 //
 //   - G11 prompt queueing: a prompt submitted while a run is active is appended
 //     to a.queued instead of starting a second run; the active run's Done path

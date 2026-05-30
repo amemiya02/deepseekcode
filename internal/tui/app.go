@@ -23,6 +23,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/skills"
 	"github.com/amemiya02/deepseekcode/internal/tools"
+	"github.com/amemiya02/deepseekcode/internal/version"
 )
 
 // App is the root Bubble Tea Model.
@@ -99,7 +100,7 @@ type App struct {
 	quitArmed  bool
 	quitSeq    int
 
-	// P2 polish input affordances (design-tui-interaction.md §3).
+	// P2 polish input affordances.
 	//
 	// uiRunning is the UI-goroutine's view of "a run is active": set when
 	// runStartMsg lands and cleared on agent.EventDone. It is distinct from
@@ -141,6 +142,9 @@ type App struct {
 	// call. The redraw tick refreshes only when the live seq has drifted,
 	// replacing the older "dirty bool" pattern.
 	lastRenderSeq uint64
+
+	// errLang is the resolved language for API error messages ("en" or "zh").
+	errLang string
 }
 
 // sessionIntegration bundles the optional persistence hooks. All four
@@ -197,6 +201,12 @@ type Config struct {
 	// top of whatever HistoryPath loads — e.g. a resumed session's prior user
 	// prompts. Deduped against the file by the ring's push rules.
 	HistorySeed []string
+
+	// Language overrides the error message language. "" uses auto-detect.
+	Language string
+
+	// LSPReady reports whether at least one LSP server is attached.
+	LSPReady bool
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
@@ -262,6 +272,7 @@ func New(cfg Config) *App {
 			activeAgent:     "coding-default",
 		},
 	}
+	app.errLang = llm.ResolveLang(cfg.Language)
 	// Thread the agent's real context window and first-token timeout into the
 	// status HUD / cold-start caption. Both are nil-safe so tests that build
 	// an App without an Agent (or a provider Client) still construct cleanly.
@@ -270,6 +281,14 @@ func New(cfg Config) *App {
 		if cfg.Agent.Client != nil {
 			app.chrome.SetFirstTokenTimeout(cfg.Agent.Client.FirstTokenTimeout)
 		}
+		// Capability counters for the status-line segment.
+		if cfg.Agent.MCPRegistry != nil {
+			app.status.mcpTools = len(cfg.Agent.MCPRegistry.Tools())
+		}
+		if cfg.Agent.Skills != nil {
+			app.status.skills = len(cfg.Agent.Skills.List())
+		}
+		app.status.lspReady = cfg.LSPReady
 	}
 	// Seed the scrollback's model context so tool cards get the right per-model
 	// accent bar from the first turn (kept in sync on /models switches).
@@ -630,7 +649,7 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		// this turn because Run defers the emit. Reset chrome here so
 		// the "writing…" caption can't linger past trailing deltas.
 		if e.Err != nil {
-			a.scrollback.AppendError(e.Err.Error())
+			a.scrollback.AppendError(llm.LocalizeError(e.Err, a.errLang))
 		}
 		a.scrollback.EndStreams()
 		a.chrome.Reset()
@@ -734,17 +753,18 @@ func (a *App) View() tea.View {
 
 	status := a.status.render(a.theme)
 	divider := a.theme.Hint.Render(strings.Repeat("─", a.width))
+	header := renderHeaderBar(a.theme, "deepseekcode", version.Display(), a.width)
 
 	// Permission card replaces the input box: while it is up, the
 	// modal is the active surface and the textarea is irrelevant.
 	// Skip the input-box / hint rows entirely so the card sits flush
 	// above the status line.
 	if permView != "" {
-		parts := []string{body, chrome, permView, divider, status}
+		parts := []string{header, body, chrome, permView, divider, status}
 		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 	if questionView != "" {
-		parts := []string{body, chrome, questionView, divider, status}
+		parts := []string{header, body, chrome, questionView, divider, status}
 		return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 	}
 
@@ -795,7 +815,7 @@ func (a *App) View() tea.View {
 	// reserved a.popupLines rows for it, so nothing overflows the screen. The
 	// transient toast (G8/§6.5) sits one row below the status bar, above both
 	// the popup and the input, colored by kind.
-	parts := []string{body, chrome, divider, status}
+	parts := []string{header, body, chrome, divider, status}
 	if toast := a.renderToast(); toast != "" {
 		parts = append(parts, toast)
 	}
@@ -877,6 +897,7 @@ func (a *App) layout() {
 		statusH  = 1
 		chromeH  = 1
 		dividerH = 1
+		headerH  = 1 // brand header strip
 	)
 	// Use the textarea's actual height, not a hardcoded 3 — the
 	// textarea grows when the user types multi-line content, and a
@@ -913,10 +934,10 @@ func (a *App) layout() {
 	// from the now-clamped Lines(). Without this clamp a tall match set on a short
 	// terminal would overflow the View stack and shove the input box off-screen.
 	const minBodyH = 5
-	popupBudget := a.height - chromeH - statusH - dividerH - inputH - hintH - permH - toastH - minBodyH
+	popupBudget := a.height - headerH - chromeH - statusH - dividerH - inputH - hintH - permH - toastH - minBodyH
 	a.completions.SetMaxRows(popupBudget - 2) // budget is card lines; -2 for the borders
 	a.popupLines = a.completions.Lines()
-	bodyH := a.height - chromeH - statusH - dividerH - inputH - hintH - permH - a.popupLines - toastH
+	bodyH := a.height - headerH - chromeH - statusH - dividerH - inputH - hintH - permH - a.popupLines - toastH
 	if bodyH < minBodyH {
 		bodyH = minBodyH
 	}
@@ -1035,7 +1056,7 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 // handleInsertKey handles keys in Insert (typing) mode. The precedence
-// chain (design-tui-interaction.md §7) is: the completions popup, when
+// chain is: the completions popup, when
 // open, owns ↑/↓ (navigate), ⏎/Tab (accept, no submit) and Esc (close);
 // otherwise ↑/↓ recall history at the top/bottom cursor edge, Esc leaves
 // to Normal mode, ⏎ submits, and ctrl+r/t toggle reasoning folds.

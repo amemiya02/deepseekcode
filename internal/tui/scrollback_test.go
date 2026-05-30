@@ -220,6 +220,115 @@ func TestExpandLastResultMatchesRenderThreshold(t *testing.T) {
 	}
 }
 
+// TestFinishedPrefixReuseOnTokenDelta verifies that appending a token
+// delta (AppendText) reuses the finishedPrefix, while appending a new
+// structural item (AppendToolCall) forces a rebuild.
+func TestFinishedPrefixReuseOnTokenDelta(t *testing.T) {
+	s := NewScrollback()
+	s.AppendUser("hello")
+	s.AppendText("streaming")
+	_ = s.Render(DarkTheme(), 80)
+
+	// Record the structureSeq after item creation (which does bump).
+	structBefore := s.structureSeq
+
+	// Token delta: should NOT bump structureSeq.
+	s.AppendText(" more")
+	_ = s.Render(DarkTheme(), 80)
+	if s.structureSeq != structBefore {
+		t.Errorf("AppendText delta should not bump structureSeq: before=%d after=%d", structBefore, s.structureSeq)
+	}
+
+	// Structural change: should bump structureSeq.
+	s.AppendToolCall("c1", "bash", "{}")
+	_ = s.Render(DarkTheme(), 80)
+	if s.structureSeq <= structBefore {
+		t.Errorf("AppendToolCall should bump structureSeq: before=%d after=%d", structBefore, s.structureSeq)
+	}
+}
+
+// TestEndStreamsBumpsSeq verifies that EndStreams invalidates the (width, seq)
+// render cache by bumping seq, so the next Render recomputes through the
+// finalized item path (no streaming branch).
+func TestEndStreamsBumpsSeq(t *testing.T) {
+	s := NewScrollback()
+	s.AppendText("streaming text")
+	seqBefore := s.Seq()
+	s.EndStreams()
+	if s.Seq() <= seqBefore {
+		t.Errorf("EndStreams must bump seq: before=%d after=%d", seqBefore, s.Seq())
+	}
+}
+
+// TestAppendTextCreationBumpsStructureSeq distinguishes first-token
+// creation (item identity change → bump) from later token deltas (no bump).
+func TestAppendTextCreationBumpsStructureSeq(t *testing.T) {
+	s := NewScrollback()
+	before := s.structureSeq
+	created, _ := s.AppendText("first")
+	if !created {
+		t.Fatal("first AppendText should report created=true")
+	}
+	if s.structureSeq != before+1 {
+		t.Fatalf("AppendText creation must bump structureSeq: before=%d after=%d", before, s.structureSeq)
+	}
+	// Subsequent delta must NOT bump.
+	before = s.structureSeq
+	s.AppendText(" second")
+	if s.structureSeq != before {
+		t.Fatalf("AppendText delta must not bump structureSeq: before=%d after=%d", before, s.structureSeq)
+	}
+}
+
+// TestRenderOutputIdenticalToConcat verifies that Render output is
+// identical to a from-scratch concat of all item renders (no caching
+// artifact changes the output).
+func TestRenderOutputIdenticalToConcat(t *testing.T) {
+	s := NewScrollback()
+	s.AppendUser("user text")
+	s.AppendToolCall("c1", "bash", "{}")
+	s.AppendToolResult("c1", tools.Result{Content: "output"}, 0)
+	s.AppendText("assistant text")
+	th := DarkTheme()
+	w := 80
+
+	got := s.Render(th, w)
+
+	// Build expected from scratch.
+	var b strings.Builder
+	for _, it := range s.Items() {
+		b.WriteString(it.render(th, w))
+	}
+	want := b.String()
+
+	if got != want {
+		t.Errorf("Render output differs from concat:\ngot=%q\nwant=%q", got, want)
+	}
+}
+
+// TestFinishedPrefixCacheInvalidationByStructureSeq verifies that the
+// finished prefix cache is invalidated when structureSeq changes.
+func TestFinishedPrefixCacheInvalidationByStructureSeq(t *testing.T) {
+	s := NewScrollback()
+	s.AppendUser("hello")
+	s.AppendText("streaming")
+	_ = s.Render(DarkTheme(), 80)
+
+	// The finishedPrefix should contain the user item.
+	if s.finishedPrefix == "" {
+		t.Fatal("expected non-empty finishedPrefix after first render")
+	}
+
+	// Append a structural item — should invalidate cache.
+	s.AppendInfo("notice")
+	_ = s.Render(DarkTheme(), 80)
+
+	// The finishedPrefix should now include the info item.
+	if !strings.Contains(s.finishedPrefix, "notice") {
+		t.Errorf("finishedPrefix should include info item after structural change: %q", s.finishedPrefix)
+	}
+}
+
 func TestInvalidateRenderCacheKeepsItems(t *testing.T) {
 	s := NewScrollback()
 	s.AppendText("hello world")

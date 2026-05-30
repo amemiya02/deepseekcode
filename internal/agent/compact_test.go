@@ -10,6 +10,34 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
+// TestEstimateTokensCountsUTF8Bytes pins the behavior that EstimateTokens
+// counts UTF-8 bytes (Go len(string) is byte length), not rune count. CJK
+// characters are 3 bytes each, so they contribute ~3/4 token per char —
+// higher than ASCII's ~1/4. This test would FAIL if estimateChars switched
+// to utf8.RuneCountInString.
+func TestEstimateTokensCountsUTF8Bytes(t *testing.T) {
+	// "你好" = 6 UTF-8 bytes → 6/4 = 1 (int floor) + overhead 5 = 6
+	cjk := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
+		llm.TextBlock{Text: "你好"},
+	}}}
+	if got := EstimateTokens(cjk); got != perMessageOverhead+6/4 {
+		t.Errorf("CJK: got %d, want %d", got, perMessageOverhead+6/4)
+	}
+
+	// "hi" = 2 bytes → 2/4 = 0 + overhead 5 = 5
+	ascii := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
+		llm.TextBlock{Text: "hi"},
+	}}}
+	if got := EstimateTokens(ascii); got != perMessageOverhead+2/4 {
+		t.Errorf("ASCII: got %d, want %d", got, perMessageOverhead+2/4)
+	}
+
+	// CJK estimates higher than equal-rune-count ASCII — proves byte-awareness.
+	if EstimateTokens(cjk) <= EstimateTokens(ascii) {
+		t.Errorf("CJK (6 bytes) should estimate higher than ASCII (2 bytes)")
+	}
+}
+
 func TestEstimateTokens(t *testing.T) {
 	cases := []struct {
 		name string

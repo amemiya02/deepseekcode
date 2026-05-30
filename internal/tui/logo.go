@@ -78,29 +78,23 @@ func wordmarkRows(word string) [3]string {
 	return [3]string{rows[0].String(), rows[1].String(), rows[2].String()}
 }
 
-// renderLogo composes the full wide-mode banner: a meta row (brand +
-// version) and the gradient wordmark, flanked by diagonal fields.
+// renderLogo composes the wide-mode banner: the gradient wordmark, flanked by
+// diagonal fields. The persistent header owns brand + version, so the welcome
+// logo does not repeat them.
 // width is the terminal width; the caller guarantees it is wide enough
 // (narrow terminals use the single-line fallback in welcome.go).
 func renderLogo(t Theme, hero, brand, version string, width int) string {
+	_ = brand
+	_ = version
 	rows := wordmarkRows(hero)
 	heroW := lipgloss.Width(rows[0])
 
 	field := lipgloss.NewStyle().Foreground(logoFieldColor(t))
 
-	// Meta row: brand on the left, version right-aligned to hero width.
-	brandTxt := t.StatusModel.Render(brand)
-	verTxt := t.Hint.Render(version)
-	gap := heroW - lipgloss.Width(brand) - lipgloss.Width(version)
-	if gap < 1 {
-		gap = 1
-	}
-	metaRow := brandTxt + strings.Repeat(" ", gap) + verTxt
-
-	// Center stack: meta row + 3 gradient wordmark rows (4 rows tall).
-	center := []string{metaRow}
+	// Center stack: 3 gradient wordmark rows.
+	center := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		center = append(center, ApplyForegroundGrad(lipgloss.NewStyle(), rows[i], t.BrandDeep, t.BrandLight))
+		center[i] = ApplyForegroundGrad(lipgloss.NewStyle(), rows[i], t.BrandDeep, t.BrandLight)
 	}
 
 	const leftW = 6
@@ -110,11 +104,10 @@ func renderLogo(t Theme, hero, brand, version string, width int) string {
 		rightW = 0
 	}
 
-	// Every center row (meta + 3 wordmark rows) is exactly heroW wide:
-	// the meta row is padded to heroW, and the gradient preserves width.
-	// So no per-row padding is needed before the right field.
+	// Every center row is exactly heroW wide (the gradient preserves width), so
+	// no per-row padding is needed before the right field.
 	var b strings.Builder
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		// Right field steps down one cell per row for a slanted edge.
 		rw := rightW - i
 		if rw < 0 {

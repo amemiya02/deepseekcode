@@ -39,9 +39,12 @@ func TestRenderLogo(t *testing.T) {
 	if !strings.Contains(plain, "╱") {
 		t.Error("expected diagonal field")
 	}
-	// 4 rows (meta + 3 wordmark rows), each newline-terminated.
-	if n := strings.Count(out, "\n"); n != 4 {
-		t.Errorf("expected 4 lines, got %d", n)
+	if strings.Contains(plain, "deepseekcode") || strings.Contains(plain, "v0.1") {
+		t.Error("welcome logo should not repeat brand + version from header")
+	}
+	// 3 gradient wordmark rows, each newline-terminated.
+	if n := strings.Count(out, "\n"); n != 3 {
+		t.Errorf("expected 3 lines, got %d", n)
 	}
 	// No rendered line may exceed the requested width.
 	for _, line := range strings.Split(strings.TrimRight(plain, "\n"), "\n") {

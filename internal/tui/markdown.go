@@ -181,19 +181,14 @@ func (m *streamingMarkdown) render(text string, t Theme, fills bool, width int) 
 	}
 
 	// The cached prefix is still a prefix of the current text: reuse the
-	// cached rendered prefix and only re-render the changed tail.
+	// cached rendered prefix and only re-render the changed tail. Do NOT
+	// advance stablePrefix here — it must stay consistent with
+	// renderedPrefix. The boundary is refreshed on the next full render
+	// (first call, key mismatch, or after reset/finalize).
 	if len(text) > len(m.stablePrefix) && text[:len(m.stablePrefix)] == m.stablePrefix {
 		tail := text[len(m.stablePrefix):]
 		renderedTail := renderMarkdownFn(tail, t, fills, width)
 		m.hits++
-		// Update stablePrefix to the new boundary for the next call,
-		// but do NOT re-render the expanded prefix now — that would
-		// violate the "only render changed tail" contract. The cached
-		// renderedPrefix stays as-is; it will be refreshed on the next
-		// full render (e.g. at finalize/reset).
-		if newBoundary := safeBoundary(text); newBoundary > len(m.stablePrefix) {
-			m.stablePrefix = text[:newBoundary]
-		}
 		return stitchRenderedMarkdown(m.renderedPrefix, renderedTail)
 	}
 

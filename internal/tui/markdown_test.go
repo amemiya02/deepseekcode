@@ -239,6 +239,25 @@ func TestStreamingMarkdownDoesNotRerenderExtendedPrefix(t *testing.T) {
 	}
 }
 
+// TestStreamingMarkdownDoesNotDropExtendedPrefixContent proves that after a
+// render that would introduce a new safe boundary, the output still contains
+// all previously streamed content (middle paragraph is not dropped).
+func TestStreamingMarkdownDoesNotDropExtendedPrefixContent(t *testing.T) {
+	var m streamingMarkdown
+	th := DarkTheme()
+
+	_ = m.render("Intro paragraph.\n\nSecond par", th, true, 80)
+	_ = m.render("Intro paragraph.\n\nSecond paragraph done.\n\nThird par", th, true, 80)
+	got := stripANSI(m.render("Intro paragraph.\n\nSecond paragraph done.\n\nThird paragraph done.", th, true, 80))
+
+	if !strings.Contains(got, "Second paragraph done.") {
+		t.Fatalf("streaming output dropped middle paragraph: %q", got)
+	}
+	if !strings.Contains(got, "Third paragraph done.") {
+		t.Fatalf("streaming output missing latest paragraph: %q", got)
+	}
+}
+
 func nonBlankLines(s string) []string {
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {

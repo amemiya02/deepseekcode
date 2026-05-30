@@ -14,15 +14,15 @@ func TestWelcome(t *testing.T) {
 			t.Fatal("expected ANSI color sequences in wide output")
 		}
 		plain := stripANSI(out)
-		// Should contain the diagonal field, letterform glyphs, brand, tagline.
+		// Should contain the diagonal field, letterform glyphs, and tagline.
 		if !strings.Contains(plain, "╱") {
 			t.Fatal("expected diagonal field character in output")
 		}
 		if !strings.Contains(plain, "█") {
 			t.Fatal("expected letterform block character in output")
 		}
-		if !strings.Contains(plain, "deepseekcode") {
-			t.Fatal("expected brand in meta row")
+		if strings.Contains(plain, "deepseekcode") {
+			t.Fatal("wide welcome logo should not repeat brand from header")
 		}
 		if !strings.Contains(plain, "Terminal coding agent") {
 			t.Fatal("expected tagline in output")

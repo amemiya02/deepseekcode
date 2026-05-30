@@ -466,9 +466,16 @@ func (s *Scrollback) Clear() {
 	s.items = nil
 	s.streamTextIdx = noStream
 	s.streamThinkIdx = noStream
+	s.streamMD.reset()
 	s.vis = visualState{}
 	s.itemRenderCache = NewRenderCache(128)
 	diffCache = NewRenderCache(64)
+	// Emptying every item is a structural change to the finished-item set.
+	// structureBump() invalidates the finished-prefix cache that Render keys
+	// on structureSeq; bump() invalidates the (width, seq) line cache. Without
+	// the structureBump, Render replays the cached pre-clear prefix and the
+	// viewport never repaints — i.e. /clear appears to do nothing.
+	s.structureBump()
 	s.bump()
 }
 

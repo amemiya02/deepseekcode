@@ -621,6 +621,34 @@ func TestAcceptWithQuerySplicesAtAnchor(t *testing.T) {
 	}
 }
 
+// TestExactSlashCompletionEnterSubmits: once a slash command is typed exactly,
+// Enter should execute it rather than requiring a second press to submit the
+// already-complete line. Partial queries still accept first (covered above).
+func TestExactSlashCompletionEnterSubmits(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	for _, r := range "/theme" {
+		a = drive(t, a, press(r))
+	}
+	if !a.completions.Active() {
+		t.Fatal("expected the / menu open after typing /theme")
+	}
+	sel, ok := a.completions.Selected()
+	if !ok || sel.insert != "/theme" {
+		t.Fatalf("/theme should select /theme, got %+v ok=%v", sel, ok)
+	}
+
+	a = drive(t, a, keyEnter())
+	if a.completions.Active() {
+		t.Fatal("exact command submit should close the popup")
+	}
+	if got := a.input.Value(); got != "" {
+		t.Fatalf("exact command submit should clear input, got %q", got)
+	}
+	if a.overlay.Mode() != modeThemes {
+		t.Fatalf("expected /theme to open theme picker, got mode %d", a.overlay.Mode())
+	}
+}
+
 // TestAtTriggerStubDoesNotTrapInput: typing '@' at a word boundary opens the @
 // file-mention menu (G4). Before the background walk's fileIndexMsg lands it
 // shows the single non-insertable "(indexing files…)" placeholder; Enter on

@@ -37,6 +37,7 @@ func builtinCommands() []slashCmd {
 		{Name: "clear", Summary: "clear scrollback", Kind: builtinCmd},
 		{Name: "quit", Aliases: []string{"exit", "q"}, Summary: "exit", Kind: builtinCmd},
 		{Name: "models", Summary: "list / switch the main-loop model", Kind: builtinCmd},
+		{Name: "theme", Summary: "switch the color theme", Kind: builtinCmd},
 		{Name: "tape", Summary: "open the reasoning tape", Kind: builtinCmd},
 		{Name: "sessions", Summary: "list this project's sessions", Kind: builtinCmd},
 		{Name: "export", Aliases: []string{"scrollback"}, Summary: "open full scrollback in $PAGER", Kind: builtinCmd},

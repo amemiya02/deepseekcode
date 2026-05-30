@@ -1053,7 +1053,13 @@ func (a *App) handleInsertKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		case "down":
 			a.completions.Down()
 			return nil, true
-		case "enter", "tab":
+		case "enter":
+			if a.exactSlashCompletionReady() {
+				return a.submitInput()
+			}
+			a.acceptCompletion()
+			return nil, true
+		case "tab":
 			a.acceptCompletion()
 			return nil, true
 		case "esc":
@@ -1105,40 +1111,60 @@ func (a *App) handleInsertKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		if km.Mod&tea.ModAlt != 0 || hasShiftEnter(km) {
 			return nil, false
 		}
-		// Expand any collapsed-paste chips (G12) back to their full text BEFORE
-		// trimming/recording so the submitted prompt and the history entry carry
-		// the real paste, not the "[pasted N lines]" placeholder.
-		text := strings.TrimSpace(a.expandPaste(a.input.Value()))
-		if text == "" {
-			return nil, true
-		}
-		// Record the prompt for recall BEFORE Reset wipes the buffer, then
-		// persist it off the UI goroutine (§10/§11: the file writer must not
-		// race Update). history.Add resets the browsing cursor.
-		histCmd := a.recordHistory(text)
-		a.input.Reset()
-		a.resetPasteState()
-		a.completions.Close()
-		a.syncPopupLayout()
-		if strings.HasPrefix(text, "/") {
-			return tea.Batch(a.handleSlash(text), histCmd), true
-		}
-		// Prompt queueing (G11): if a run is already active, queue the prompt
-		// instead of starting a second concurrent run. The Done path drains it.
-		// Slash commands are exempted above — they are local UI actions, not
-		// agent turns, so they run immediately even mid-run.
-		if a.uiRunning {
-			return tea.Batch(a.enqueuePrompt(text), histCmd), true
-		}
-		a.scrollback.AppendUser(text)
-		a.refreshView()
-		return tea.Batch(a.submitPromptCmd(text), histCmd), true
+		return a.submitInput()
 	}
 
 	// Any other printable key starts a fresh draft: reset the history browse
 	// cursor so a later ↑ recalls from newest rather than clobbering the edit.
 	a.history.Reset()
 	return nil, false
+}
+
+// exactSlashCompletionReady reports whether Enter should submit instead of
+// accepting a completion: the popup is on '/', the selected row exactly matches
+// the whole trimmed input, and the row is insertable. Partial queries like
+// "/mod" still accept "/models" first; a fully typed "/models" or "/theme"
+// executes immediately.
+func (a *App) exactSlashCompletionReady() bool {
+	if !a.completions.Active() || a.completions.Trigger() != '/' {
+		return false
+	}
+	sel, ok := a.completions.Selected()
+	if !ok || sel.insert == "" {
+		return false
+	}
+	return strings.TrimSpace(a.input.Value()) == sel.insert
+}
+
+func (a *App) submitInput() (tea.Cmd, bool) {
+	// Expand any collapsed-paste chips (G12) back to their full text BEFORE
+	// trimming/recording so the submitted prompt and the history entry carry
+	// the real paste, not the "[pasted N lines]" placeholder.
+	text := strings.TrimSpace(a.expandPaste(a.input.Value()))
+	if text == "" {
+		return nil, true
+	}
+	// Record the prompt for recall BEFORE Reset wipes the buffer, then
+	// persist it off the UI goroutine (§10/§11: the file writer must not
+	// race Update). history.Add resets the browsing cursor.
+	histCmd := a.recordHistory(text)
+	a.input.Reset()
+	a.resetPasteState()
+	a.completions.Close()
+	a.syncPopupLayout()
+	if strings.HasPrefix(text, "/") {
+		return tea.Batch(a.handleSlash(text), histCmd), true
+	}
+	// Prompt queueing (G11): if a run is already active, queue the prompt
+	// instead of starting a second concurrent run. The Done path drains it.
+	// Slash commands are exempted above — they are local UI actions, not
+	// agent turns, so they run immediately even mid-run.
+	if a.uiRunning {
+		return tea.Batch(a.enqueuePrompt(text), histCmd), true
+	}
+	a.scrollback.AppendUser(text)
+	a.refreshView()
+	return tea.Batch(a.submitPromptCmd(text), histCmd), true
 }
 
 // recordHistory adds text to the recall ring and returns a tea.Cmd that

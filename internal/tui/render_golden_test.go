@@ -90,7 +90,10 @@ func TestRenderGoldenPerWidth(t *testing.T) {
 				if err != nil {
 					t.Fatalf("read golden (regenerate with UPDATE_GOLDEN=1 go test ./internal/tui/ -run TestRenderGoldenPerWidth): %v", err)
 				}
-				if got != string(want) {
+				// Normalize CRLF → LF so golden files checked out with
+				// core.autocrlf=true (Windows CI) still compare correctly.
+				wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+				if got != wantStr {
 					t.Errorf("golden drift for %s:\n--- want ---\n%s\n--- got ---\n%s", name, string(want), got)
 				}
 			})

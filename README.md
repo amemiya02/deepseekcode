@@ -3,7 +3,7 @@
 [![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
 [![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
-[![Baseline](https://img.shields.io/badge/baseline-v0.3.1-blue)](#versioning)
+[![Baseline](https://img.shields.io/badge/baseline-v0.3.2-blue)](#versioning)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md)
@@ -13,8 +13,6 @@ OpenAI-compatible chat-completions endpoints. It ships as a single Go
 binary named `dsc`, with a Bubble Tea TUI, one-shot CLI mode, structured
 tools, SQLite-backed sessions, cache-aware request serialization, and a
 permission model designed for day-to-day repository work.
-
-Current documented baseline: **v0.3.1**.
 
 ## Why deepseekcode
 

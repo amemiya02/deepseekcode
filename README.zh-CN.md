@@ -3,7 +3,7 @@
 [![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
 [![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
-[![Baseline](https://img.shields.io/badge/baseline-v0.3.1-blue)](#版本管理)
+[![Baseline](https://img.shields.io/badge/baseline-v0.3.2-blue)](#版本管理)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md)
@@ -12,8 +12,6 @@
 chat-completions 端点的终端原生编码 Agent。它以单个 Go 二进制 `dsc`
 分发，包含 Bubble Tea TUI、一次性 CLI 模式、结构化工具、SQLite 会话、
 缓存友好的请求序列化，以及适合日常仓库工作的权限模型。
-
-当前文档基线版本：**v0.3.1**。
 
 ## 为什么选择 deepseekcode
 

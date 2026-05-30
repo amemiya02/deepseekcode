@@ -13,12 +13,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -585,8 +588,27 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		Commands:              customCmds,
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,
+		HistoryPath:           projectHistoryPath(home, cwd),
 	})
 	return app.Run()
+}
+
+// projectHistoryPath returns the per-project prompt-history ring file (G2):
+// ~/.deepseek/history/<hash>.txt, where <hash> is a short hex SHA-256 of the
+// ABSOLUTE cwd so each repo gets its own recall ring. The directory is NOT
+// created here — appendPromptHistory mkdirs it lazily on the first submit.
+// An empty home disables persistence (returns "").
+func projectHistoryPath(home, cwd string) string {
+	if home == "" {
+		return ""
+	}
+	abs := cwd
+	if a, err := filepath.Abs(cwd); err == nil {
+		abs = a
+	}
+	sum := sha256.Sum256([]byte(abs))
+	hash := hex.EncodeToString(sum[:])[:16]
+	return filepath.Join(home, ".deepseek", "history", hash+".txt")
 }
 
 type modeFlags struct {

@@ -117,8 +117,8 @@ func TestApplyToolTiersFromEnv(t *testing.T) {
 // tierTestTool is a minimal tools.Tool used only for tier-count assertions.
 type tierTestTool struct{ name string }
 
-func (t *tierTestTool) Name() string             { return t.name }
-func (t *tierTestTool) Description() string      { return "test stub" }
+func (t *tierTestTool) Name() string        { return t.name }
+func (t *tierTestTool) Description() string { return "test stub" }
 func (t *tierTestTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object"}`)
 }

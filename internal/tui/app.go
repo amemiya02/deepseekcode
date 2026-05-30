@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/skills"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -68,11 +68,58 @@ type App struct {
 	status    statusState
 	stepTotal int
 
-	// Slash-command Tab completion state. Non-nil while the user is
-	// cycling through prefix-matching commands.
-	completion      []string // matching command names
-	completionIdx   int      // current index in completion
-	completionInput string   // original input before first Tab
+	// Inline completion popup (the `/` and `@` menus, G1/G3) and the
+	// readline prompt history (G2). completions is derived from the input
+	// buffer by syncCompletions on every insert-mode keystroke; history is
+	// the cross-session recall ring loaded from / appended to historyPath.
+	// popupLines is the number of terminal rows the popup currently occupies,
+	// which layout() subtracts from the viewport height so the popup never
+	// pushes the input off-screen.
+	completions completions
+	history     *promptHistory
+	popupLines  int
+	historyPath string
+
+	// `@` file-mention index (G4/§6.1). fileIndex is the cached repo-relative
+	// path list backing the @ menu; it is built off the UI goroutine by
+	// indexFilesCmd and delivered via fileIndexMsg, so fileIndexReady gates
+	// whether the @ popup shows real rows or the single "(indexing files…)"
+	// placeholder. Built eagerly at startup from Init.
+	fileIndex      []string
+	fileIndexReady bool
+
+	// Transient toast (G8/§6.5) and idle ^C double-tap quit guard (G9/§6.6).
+	// toastState is the single one-line notice slot rendered between status and
+	// the input box; quitArmed is set by the first idle ^C and cleared either by
+	// a confirming second ^C (which quits) or the disarm tick. quitSeq pairs the
+	// arm with its disarm tick so a re-arm can't be cancelled by a stale tick.
+	toastState toastState
+	quitArmed  bool
+	quitSeq    int
+
+	// P2 polish input affordances (design-tui-interaction.md §3).
+	//
+	// uiRunning is the UI-goroutine's view of "a run is active": set when
+	// runStartMsg lands and cleared on agent.EventDone. It is distinct from
+	// a.running (flipped inside the agent goroutine, which can lag) so the submit
+	// path can decide queue-vs-run synchronously without racing the worker.
+	//
+	// G10 (dynamic placeholder): placeholderTurn indexes the idle-hint rotation
+	// (readyHints); it advances once per completed turn so each fresh idle prompt
+	// shows the next deterministic hint — never a clock/random source.
+	//
+	// G11 (prompt queueing): queued holds prompts submitted while a run was
+	// active, FIFO; the Done path drains the head into a new run.
+	//
+	// G12 (large-paste collapse): pasteStore maps a one-line "[pasted N lines]"
+	// chip (shown in the input) to the full pasted text; the chip is expanded
+	// back to its content at submit. pasteSeq keeps chip tokens unique per
+	// session so two pastes never alias the same store entry.
+	uiRunning       bool
+	placeholderTurn int
+	queued          []string
+	pasteStore      map[string]string
+	pasteSeq        int
 
 	// Session / snapshot integration. nil when ephemeral. The four
 	// callbacks travel together so we pack them in one struct field
@@ -135,13 +182,25 @@ type Config struct {
 
 	// Commands are user-defined slash commands loaded from .deepseek/command/*.md.
 	Commands map[string]commands.Command
+
+	// HistoryPath is the per-project prompt-history ring file (G2). The caller
+	// (cmd/dsc) owns the path construction so the TUI stays filesystem-light.
+	// Empty disables persistence: history lives only for the session and no
+	// file is read or written.
+	HistoryPath string
+
+	// HistorySeed folds extra recall entries (oldest → newest) into the ring on
+	// top of whatever HistoryPath loads — e.g. a resumed session's prior user
+	// prompts. Deduped against the file by the ring's push rules.
+	HistorySeed []string
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
 // tea.NewProgram and call .Run().
 func New(cfg Config) *App {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything…  (⏎ send · ⇧⏎ newline · ^D quit · /help)"
+	// Placeholder is set dynamically by refreshPlaceholder (G10) once the App is
+	// built — it reflects idle vs. working state and rotates idle hints.
 	ta.Prompt = "› "
 	ta.SetWidth(80)
 	ta.SetHeight(3)
@@ -202,6 +261,23 @@ func New(cfg Config) *App {
 	// Seed the scrollback's model context so tool cards get the right per-model
 	// accent bar from the first turn (kept in sync on /models switches).
 	app.scrollback.SetModel(cfg.Model)
+
+	// Build the prompt-history ring (G2): the cross-session file first, then
+	// any per-session seed folded in (oldest → newest, deduped by push rules).
+	// loadPromptHistory tolerates a missing / empty path, so this is safe even
+	// in ephemeral mode where HistoryPath is "".
+	const historyCap = 500
+	seed := loadPromptHistory(cfg.HistoryPath, historyCap)
+	if len(cfg.HistorySeed) > 0 {
+		seed = append(seed, cfg.HistorySeed...)
+	}
+	app.history = newPromptHistory(seed, historyCap)
+	app.historyPath = cfg.HistoryPath
+
+	// Seed the dynamic placeholder (G10) from the idle state so the very first
+	// frame shows a "Ready" hint rather than the library default. It then flips
+	// to "Working…" on runStartMsg and back (advancing the rotation) at Done.
+	app.refreshPlaceholder()
 	return app
 }
 
@@ -276,7 +352,15 @@ func (a *App) Init() tea.Cmd {
 	for _, n := range a.startupNotices {
 		a.scrollback.AppendInfo(n)
 	}
-	return textarea.Blink
+	// Build the `@` file-mention index up front (G4/§6.1) so the first '@' the
+	// user types already has candidates. The walk runs off the UI goroutine in
+	// indexFilesCmd; until its fileIndexMsg lands the @ popup shows a single
+	// "(indexing files…)" row. Skip the Cmd when cwd isn't a readable dir.
+	cmds := []tea.Cmd{textarea.Blink}
+	if readableDir(a.cwd) {
+		cmds = append(cmds, indexFilesCmd(a.cwd))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update folds incoming messages into the model.
@@ -302,6 +386,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = m.Width
 		a.height = m.Height
 		a.layout()
+	case tea.PasteMsg:
+		// Large-paste collapse (G12). A bracketed paste over the line threshold
+		// is held in full and replaced in the input by a one-line chip; when
+		// handlePaste reports it collapsed the paste, we DON'T forward the raw
+		// PasteMsg to the textarea (which would re-insert the wall of text).
+		// Smaller pastes fall through to the textarea unchanged.
+		if a.handlePaste(m.Content) {
+			a.syncCompletions()
+			return a, nil
+		}
 	case tea.KeyPressMsg:
 		// Intercept special keys (overlay nav, ctrl+c, Enter, slash, etc).
 		// If not intercepted, fall through so the textarea sees the key.
@@ -319,6 +413,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fired immediately after submitPromptCmd; the agent goroutine
 		// is up but no callback has arrived yet. Spin up the chrome
 		// indicator so the user sees activity during the cold-start gap.
+		// Mark the UI-side running flag and flip the placeholder to "Working…"
+		// (G10) here rather than waiting on the worker goroutine's a.running.
+		a.uiRunning = true
+		a.refreshPlaceholder()
 		a.chrome.BeginThinking()
 		cmds = append(cmds, a.ensureTick())
 	case slashExpandedMsg:
@@ -332,6 +430,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spawnResultMsg:
 		a.scrollback.AppendInfo(m.summary)
 		a.refreshView()
+	case clearToastMsg:
+		// Deferred toast expiry (G8/§6.5). Guard on seq so a stale tick from a
+		// toast that has since been superseded can't wipe the current one.
+		a.clearToastIf(m.seq)
+	case disarmQuitMsg:
+		// Deferred disarm of the idle ^C double-tap (G9/§6.6). Guard on seq so a
+		// re-arm (a fresh first ^C) isn't disarmed by the previous arm's tick.
+		if a.quitSeq == m.seq {
+			a.quitArmed = false
+		}
+	case fileIndexMsg:
+		// The background `@` file walk completed (G4/§6.1). Cache the paths and
+		// mark the index ready. If an @ popup is already open showing the
+		// "(indexing files…)" placeholder, re-derive it now so the real rows
+		// appear without another keystroke.
+		a.fileIndex = m.paths
+		a.fileIndexReady = true
+		if a.completions.Active() && a.completions.Trigger() == '@' {
+			// syncCompletions only rebuilds the candidate set when the trigger or
+			// anchor moved; close first so it re-opens with the now-ready file
+			// rows instead of keeping the stale "(indexing files…)" placeholder.
+			a.completions.Close()
+			a.syncCompletions()
+		}
 	case redrawMsg:
 		// Coalesced re-render. Streaming deltas don't refresh on
 		// arrival; instead they bump scrollback.Seq() and we check
@@ -378,6 +500,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.mode == modeInsert {
 			a.input, c = a.input.Update(msg)
 			cmds = append(cmds, c)
+			// Re-derive the inline `/`/`@` popup from the post-keystroke buffer
+			// (§5.1/§6). Only for actual key presses in Insert mode: the popup
+			// is a function of the text + caret, and only typing moves those.
+			if _, ok := msg.(tea.KeyPressMsg); ok {
+				a.syncCompletions()
+			}
 		}
 	}
 	a.vp, c = a.vp.Update(msg)
@@ -494,6 +622,17 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.scrollback.EndStreams()
 		a.chrome.Reset()
 		a.refreshView()
+		// This run is finished UI-side. Advance the idle-hint rotation (G10) and
+		// drain the next queued prompt (G11): if one is waiting, submitting it
+		// flips uiRunning back on via the runStartMsg it returns; otherwise the
+		// placeholder settles on the next "Ready" hint.
+		a.placeholderTurn++
+		if drain := a.drainQueue(); drain != nil {
+			cmds = append(cmds, drain)
+		} else {
+			a.uiRunning = false
+		}
+		a.refreshPlaceholder()
 	case agent.EventBackgroundJobStart:
 		a.status.runningJobs++
 		a.refreshView()
@@ -634,11 +773,23 @@ func (a *App) View() tea.View {
 		)
 	default:
 		hint = a.theme.Hint.Render(
-			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help" + a.completionHint(),
+			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help",
 		)
 	}
 
-	parts := []string{body, chrome, divider, status, inputBox, hint}
+	// Splice the completions popup (G1/§4.4) directly above the input box so it
+	// reads as a card floating just over the prompt. layout() has already
+	// reserved a.popupLines rows for it, so nothing overflows the screen. The
+	// transient toast (G8/§6.5) sits one row below the status bar, above both
+	// the popup and the input, colored by kind.
+	parts := []string{body, chrome, divider, status}
+	if toast := a.renderToast(); toast != "" {
+		parts = append(parts, toast)
+	}
+	if pop := a.completions.View(a.theme, a.width); pop != "" {
+		parts = append(parts, pop)
+	}
+	parts = append(parts, inputBox, hint)
 	return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
 }
 
@@ -676,9 +827,13 @@ func (a *App) renderOverlay() string {
 	case modeTape:
 		body = renderTape(a.theme, a.scrollback.Items(), a.overlay.Cursor(), a.width, a.height-2)
 	case modeModels:
-		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.Cursor(), a.model, a.width, a.height-2)
+		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.model, a.width, a.height-2)
 	case modeSessions:
-		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.Cursor(), a.session.id, a.width, a.height-2)
+		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.session.id, a.width, a.height-2)
+	case modePalette:
+		body = renderPalette(a.theme, a.overlay.Palette(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, a.height-2)
+	case modeHelp:
+		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.Cursor(), a.width, a.height-2)
 	}
 	hint := a.theme.Hint.Render("  j/k move · ⏎ select · esc back · q quit")
 	return body + "\n" + hint
@@ -720,9 +875,27 @@ func (a *App) layout() {
 		inputH = 0
 		hintH = 0
 	}
-	bodyH := a.height - chromeH - statusH - dividerH - inputH - hintH - permH
-	if bodyH < 5 {
-		bodyH = 5
+	// A live toast (G8/§6.5) takes one extra row between status and the input;
+	// reserve it so it never pushes the input off-screen.
+	toastH := 0
+	if a.toastState.active && a.toastState.text != "" {
+		toastH = 1
+	}
+	// Reserve the completions popup's rows (G1/§4.4) so it grows upward from the
+	// prompt without pushing the input off-screen. popupLines == 0 reproduces
+	// exactly the pre-popup geometry. The popup is the only flexible band, so
+	// layout is its single authority: cap its visible rows at whatever vertical
+	// space is left once the fixed rows (chrome/divider/status/input/hint/perm/
+	// toast) and the minimum body floor are accounted for, then derive popupLines
+	// from the now-clamped Lines(). Without this clamp a tall match set on a short
+	// terminal would overflow the View stack and shove the input box off-screen.
+	const minBodyH = 5
+	popupBudget := a.height - chromeH - statusH - dividerH - inputH - hintH - permH - toastH - minBodyH
+	a.completions.SetMaxRows(popupBudget - 2) // budget is card lines; -2 for the borders
+	a.popupLines = a.completions.Lines()
+	bodyH := a.height - chromeH - statusH - dividerH - inputH - hintH - permH - a.popupLines - toastH
+	if bodyH < minBodyH {
+		bodyH = minBodyH
 	}
 	a.vp.SetWidth(a.width)
 	a.vp.SetHeight(bodyH)
@@ -758,10 +931,25 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		return a.handleOverlayKey(km), true
 	}
 
+	// An armed idle-quit (G9/§6.6) is cancelled by ANY key other than ^C: the
+	// user changed their mind, so disarm and dismiss the "press ^C again" prompt
+	// immediately rather than leaving it primed until the disarm tick. Bumping
+	// quitSeq makes the pending disarm tick a no-op. We then fall through so the
+	// key still performs its normal action this cycle.
+	if a.quitArmed && km.String() != "ctrl+c" {
+		a.quitArmed = false
+		a.quitSeq++
+		a.dismissToast()
+	}
+
 	// Global keys that work in any mode.
 	switch km.String() {
 	case "ctrl+c":
-		// First ctrl+c cancels a run; otherwise it quits.
+		// While a run is active, ctrl+c cancels it immediately (unchanged
+		// behavior). When idle, ctrl+c is a guarded quit (G9/§6.6): the first
+		// press arms quit and shows a toast, a second press within the window
+		// quits, and a disarm tick drops the arm so a lone stray ^C never kills
+		// an idle session.
 		a.runMu.Lock()
 		running := a.running
 		cancel := a.runCancel
@@ -769,13 +957,43 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		if running && cancel != nil {
 			// Mark the stop as user-requested before cancelling so the run
 			// reports StopUserRequested rather than ambient StopContextCancel.
+			// Drop any stale idle-quit arm so the next idle ^C re-arms cleanly
+			// instead of quitting on a leftover flag.
+			a.quitArmed = false
 			a.agent.RequestStop()
 			cancel()
-			return nil, true
+			// Cancel is an explicit "stop" (G11): drop any queued follow-ups
+			// rather than auto-running them once the cancelled run reaches Done —
+			// the user pressed ^C to halt, not to advance the queue. clearQueue
+			// returns a toast Cmd reporting the drop (nil when nothing queued).
+			return a.clearQueue(), true
 		}
-		return tea.Quit, true
+		if a.quitArmed {
+			return tea.Quit, true
+		}
+		a.quitArmed = true
+		a.quitSeq++
+		seq := a.quitSeq
+		toastCmd := a.toast(BadgeWarn, "press ^C again to quit")
+		disarm := tea.Tick(quitArmWindow, func(time.Time) tea.Msg {
+			return disarmQuitMsg{seq: seq}
+		})
+		return tea.Batch(toastCmd, disarm), true
 	case "ctrl+d":
 		return tea.Quit, true
+	case "ctrl+p":
+		// Command palette (G5) — from both Insert and Normal mode. ctrl+p is
+		// otherwise unbound; this never collides with the reasoning folds on
+		// ctrl+r/ctrl+t. Per the precedence chain (§7) the inline completions
+		// popup outranks the palette: while the / or @ menu is up, ctrl+p is
+		// inert so it can't yank focus out from under an active completion.
+		if a.completions.Active() {
+			return nil, true
+		}
+		return a.openPalette(), true
+	case "ctrl+g":
+		// Help overlay (G7) — from any mode.
+		return a.openHelp(), true
 	}
 
 	// Mode-specific dispatch.
@@ -793,29 +1011,70 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 }
 
-// handleInsertKey handles keys in Insert (typing) mode.
-// Only intercepts Enter (submit), Ctrl+R/T (toggle reasoning), Tab
-// (slash completion), and Esc (enter Normal mode). Everything else
-// falls through to the textarea.
+// handleInsertKey handles keys in Insert (typing) mode. The precedence
+// chain (design-tui-interaction.md §7) is: the completions popup, when
+// open, owns ↑/↓ (navigate), ⏎/Tab (accept, no submit) and Esc (close);
+// otherwise ↑/↓ recall history at the top/bottom cursor edge, Esc leaves
+// to Normal mode, ⏎ submits, and ctrl+r/t toggle reasoning folds.
+// Everything else falls through to the textarea. The popup itself is
+// (re)derived from the post-keystroke buffer by syncCompletions, called at
+// the end of Update — handleInsertKey only consumes its current state.
 func (a *App) handleInsertKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
+	// Popup-open precedence: while the menu is up it steals navigation,
+	// accept, and dismiss keys before history or the textarea see them.
+	if a.completions.Active() {
+		switch km.String() {
+		case "up":
+			a.completions.Up()
+			return nil, true
+		case "down":
+			a.completions.Down()
+			return nil, true
+		case "enter", "tab":
+			a.acceptCompletion()
+			return nil, true
+		case "esc":
+			a.completions.Close()
+			a.syncPopupLayout()
+			return nil, true
+		}
+	}
+
 	switch km.String() {
 	case "ctrl+r":
 		a.toggleLastReasoning()
-		a.clearCompletion()
 		return nil, true
 	case "ctrl+t":
 		a.toggleAllReasoning()
-		a.clearCompletion()
 		return nil, true
 	case "esc":
-		a.clearCompletion()
 		_ = a.setMode(modeNormal)
 		return nil, true
-	case "tab":
-		if a.cycleCompletion() {
+	case "up":
+		// History recall only at the top edge; otherwise the textarea moves
+		// the cursor up within a multi-line draft.
+		if a.input.Line() == 0 {
+			if v, ok := a.history.Prev(a.input.Value()); ok {
+				a.input.SetValue(v)
+				// Keep the popup an exact mirror of the buffer: a recalled
+				// entry that begins with / or @ re-opens the menu; anything
+				// else closes it. The intercepted path skips Update's trailing
+				// sync, so derive it here.
+				a.syncCompletions()
+			}
 			return nil, true
 		}
-		return nil, false // no completion active → let Tab through
+		return nil, false
+	case "down":
+		// Symmetric: history step-newer only at the bottom edge.
+		if a.input.Line() == a.input.LineCount()-1 {
+			if v, ok := a.history.Next(); ok {
+				a.input.SetValue(v)
+				a.syncCompletions()
+			}
+			return nil, true
+		}
+		return nil, false
 	}
 
 	if km.String() == "enter" {
@@ -823,74 +1082,257 @@ func (a *App) handleInsertKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		if km.Mod&tea.ModAlt != 0 || hasShiftEnter(km) {
 			return nil, false
 		}
-		text := strings.TrimSpace(a.input.Value())
-		a.clearCompletion()
+		// Expand any collapsed-paste chips (G12) back to their full text BEFORE
+		// trimming/recording so the submitted prompt and the history entry carry
+		// the real paste, not the "[pasted N lines]" placeholder.
+		text := strings.TrimSpace(a.expandPaste(a.input.Value()))
 		if text == "" {
 			return nil, true
 		}
+		// Record the prompt for recall BEFORE Reset wipes the buffer, then
+		// persist it off the UI goroutine (§10/§11: the file writer must not
+		// race Update). history.Add resets the browsing cursor.
+		histCmd := a.recordHistory(text)
 		a.input.Reset()
+		a.resetPasteState()
+		a.completions.Close()
+		a.syncPopupLayout()
 		if strings.HasPrefix(text, "/") {
-			return a.handleSlash(text), true
+			return tea.Batch(a.handleSlash(text), histCmd), true
+		}
+		// Prompt queueing (G11): if a run is already active, queue the prompt
+		// instead of starting a second concurrent run. The Done path drains it.
+		// Slash commands are exempted above — they are local UI actions, not
+		// agent turns, so they run immediately even mid-run.
+		if a.uiRunning {
+			return tea.Batch(a.enqueuePrompt(text), histCmd), true
 		}
 		a.scrollback.AppendUser(text)
 		a.refreshView()
-		return a.submitPromptCmd(text), true
+		return tea.Batch(a.submitPromptCmd(text), histCmd), true
 	}
 
-	// Any other key clears completion state (user is typing).
-	a.clearCompletion()
+	// Any other printable key starts a fresh draft: reset the history browse
+	// cursor so a later ↑ recalls from newest rather than clobbering the edit.
+	a.history.Reset()
 	return nil, false
 }
 
-// cycleCompletion advances slash-command Tab completion. Returns true
-// if completion is active (and the input was updated).
-func (a *App) cycleCompletion() bool {
-	if len(a.customCmds) == 0 {
-		return false
+// recordHistory adds text to the recall ring and returns a tea.Cmd that
+// appends it to the on-disk ring file, or nil when persistence is disabled
+// (empty path). The file write runs in the returned Cmd so it stays off the
+// UI goroutine (§10/§11) — go test -race must see no write racing Update.
+func (a *App) recordHistory(text string) tea.Cmd {
+	a.history.Add(text)
+	if a.historyPath == "" {
+		return nil
 	}
-	if len(a.completion) == 0 {
-		// First Tab: compute candidates from current input.
-		input := a.input.Value()
-		if !strings.HasPrefix(input, "/") {
-			return false
-		}
-		prefix := input // includes the "/"
-		for name := range a.customCmds {
-			candidate := "/" + name
-			if strings.HasPrefix(candidate, prefix) {
-				a.completion = append(a.completion, candidate)
-			}
-		}
-		if len(a.completion) == 0 {
-			return false
-		}
-		// Sort for deterministic cycling.
-		sort.Strings(a.completion)
-		a.completionInput = input
-		a.completionIdx = 0
-	} else {
-		a.completionIdx = (a.completionIdx + 1) % len(a.completion)
+	path := a.historyPath
+	return func() tea.Msg {
+		_ = appendPromptHistory(path, text)
+		return nil
 	}
-	a.input.SetValue(a.completion[a.completionIdx])
-	return true
 }
 
-// clearCompletion resets Tab completion state.
-func (a *App) clearCompletion() {
-	if len(a.completion) == 0 {
+// acceptCompletion splices the selected candidate into the input, replacing
+// the text from the popup's anchor (the trigger char) up to the cursor, and
+// leaves the caret at the end of the insertion. It does NOT submit (§4.2/§7):
+// a second ⏎ runs the now-complete line. The popup is closed and the layout
+// reserve recomputed afterward.
+func (a *App) acceptCompletion() {
+	sel, ok := a.completions.Selected()
+	if !ok || sel.insert == "" {
+		// No real candidate (empty match set) or a non-insertable placeholder row
+		// such as the @ menu's "(indexing files…)": just close without splicing,
+		// leaving the user's typed text (the trigger + query) intact.
+		a.completions.Close()
+		a.syncPopupLayout()
 		return
 	}
-	a.completion = nil
-	a.completionIdx = 0
-	a.completionInput = ""
+	val := a.input.Value()
+	anchor := a.completions.AnchorStart()
+	cursor := a.cursorByteOffset()
+	if anchor < 0 || anchor > len(val) || cursor < anchor || cursor > len(val) {
+		// Defensive: a stale anchor (buffer mutated out from under us) — just
+		// close without splicing rather than corrupting the input.
+		a.completions.Close()
+		a.syncPopupLayout()
+		return
+	}
+	next := val[:anchor] + sel.insert + val[cursor:]
+	a.input.SetValue(next)
+	// Park the caret right after the inserted text. We can't use a bare
+	// SetCursorColumn: it counts within the *current* row only, so on a
+	// multi-line draft (the prefix spans rows) it would land on the wrong row.
+	// setCursorByteOffset derives the (row, col) for the prefix+insert boundary
+	// and navigates there, so the single-line and multi-line cases both land
+	// exactly between the insert and any trailing text.
+	a.setCursorByteOffset(anchor + len(sel.insert))
+	a.completions.Close()
+	a.syncPopupLayout()
 }
 
-// completionHint returns a hint string for active completion, or "".
-func (a *App) completionHint() string {
-	if len(a.completion) <= 1 {
-		return ""
+// setCursorByteOffset positions the textarea caret at byte offset off within
+// the current Value(). It converts the offset to a (row, col) pair — the row is
+// the count of newlines before off, the column is the rune width of the text
+// after the last newline — then walks the caret to that row and sets the
+// column. Defensively clamps off into range so a stale offset can't panic.
+func (a *App) setCursorByteOffset(off int) {
+	val := a.input.Value()
+	if off < 0 {
+		off = 0
 	}
-	return fmt.Sprintf("  Tab: %d more matches", len(a.completion)-1)
+	if off > len(val) {
+		off = len(val)
+	}
+	before := val[:off]
+	targetRow := strings.Count(before, "\n")
+	lineStart := strings.LastIndexByte(before, '\n') + 1 // 0 when no newline
+	targetCol := len([]rune(before[lineStart:]))
+	// After SetValue the caret sits at end-of-buffer (the last row); walk it to
+	// the target row. The loops are no-ops at the edges, so either direction is
+	// safe regardless of where the caret currently is.
+	for a.input.Line() > targetRow {
+		a.input.CursorUp()
+	}
+	for a.input.Line() < targetRow {
+		a.input.CursorDown()
+	}
+	a.input.SetCursorColumn(targetCol)
+}
+
+// cursorByteOffset returns the byte offset of the textarea caret within
+// Value(). Value() joins the per-row rune slices with '\n', so the offset is
+// the bytes of every prior row (each plus one newline) followed by the bytes
+// of the runes left of the caret on the cursor row. It clamps defensively so
+// a transient row/column out of range can never index out of bounds.
+func (a *App) cursorByteOffset() int {
+	rows := strings.Split(a.input.Value(), "\n")
+	row := a.input.Line()
+	col := a.input.Column()
+	if row < 0 {
+		row = 0
+	}
+	if row >= len(rows) {
+		row = len(rows) - 1
+	}
+	off := 0
+	for i := 0; i < row; i++ {
+		off += len(rows[i]) + 1 // +1 for the joining newline
+	}
+	rr := []rune(rows[row])
+	if col > len(rr) {
+		col = len(rr)
+	}
+	if col < 0 {
+		col = 0
+	}
+	off += len(string(rr[:col]))
+	return off
+}
+
+// syncCompletions (re)derives the inline popup from the post-keystroke input
+// buffer (§5.1). It finds the token immediately left of the caret that begins
+// with a trigger ('/' or '@') at a word boundary (input start or after
+// whitespace) with no whitespace between the trigger and the caret. When such
+// a token exists the popup is opened (or kept open) for that trigger with the
+// right candidate set and filtered by the text after the trigger; otherwise it
+// is closed. It then recomputes the layout reserve so the viewport makes room.
+func (a *App) syncCompletions() {
+	val := a.input.Value()
+	cursor := a.cursorByteOffset()
+	if cursor > len(val) {
+		cursor = len(val)
+	}
+	left := val[:cursor]
+
+	trigger, anchor, ok := triggerToken(left)
+	if !ok {
+		if a.completions.Active() {
+			a.completions.Close()
+		}
+		a.syncPopupLayout()
+		return
+	}
+
+	// (Re)open for this trigger when it changed or the popup is closed; the
+	// candidate set is fixed per trigger, so we only rebuild it on (re)open and
+	// just re-filter otherwise.
+	if !a.completions.Active() || a.completions.Trigger() != trigger || a.completions.AnchorStart() != anchor {
+		a.completions.Open(trigger, a.completionItems(trigger), anchor)
+	}
+	a.completions.SetQuery(left[anchor+1:]) // text after the trigger rune
+	a.syncPopupLayout()
+}
+
+// completionItems returns the candidate rows for a trigger. '/' merges
+// built-ins, custom commands, and discoverable skills via allCommands; '@'
+// returns the cached repo-relative file paths (G4/§6.1), or a single
+// "(indexing files…)" placeholder until the background walk's fileIndexMsg
+// lands. The skill list is read nil-safely: a.agent and a.agent.Skills can
+// both be nil in tests and in ephemeral mode.
+func (a *App) completionItems(trigger rune) []complItem {
+	if trigger == '@' {
+		if !a.fileIndexReady {
+			return fileIndexingItems()
+		}
+		return fileCompletionItems(a.fileIndex)
+	}
+	if trigger != '/' {
+		return nil
+	}
+	var skillList []skills.Skill
+	if a.agent != nil && a.agent.Skills != nil {
+		skillList = a.agent.Skills.List()
+	}
+	cmds := allCommands(a.customCmds, skillList)
+	items := make([]complItem, 0, len(cmds))
+	for _, c := range cmds {
+		label := "/" + c.Name
+		if c.Kind == skillCmd {
+			label += " (skill)"
+		}
+		items = append(items, complItem{
+			insert: "/" + c.Name,
+			label:  label,
+			detail: c.Summary,
+			kind:   c.Kind,
+		})
+	}
+	return items
+}
+
+// syncPopupLayout re-lays-out so the viewport shrinks or grows to make room for
+// the popup. Called whenever the popup opens, closes, or refilters. layout() is
+// the single authority for the popup's reserved height: it caps the popup's
+// rows against the terminal height (so a tall match set on a short terminal
+// can't shove the input off-screen) and then sets a.popupLines from the clamped
+// Lines(), so there is nothing to recompute here.
+func (a *App) syncPopupLayout() {
+	a.layout()
+}
+
+// triggerToken scans the text to the left of the caret for an inline-menu
+// trigger ('/' or '@') that begins a token at a word boundary (the input
+// start, or immediately after whitespace) with no whitespace between the
+// trigger and the caret. It returns the trigger rune, its byte offset in
+// left, and whether one was found. A trigger mid-word (e.g. the '/' in a
+// path "a/b") is inert, matching §4.2's edge cases.
+func triggerToken(left string) (rune, int, bool) {
+	// Walk back from the caret to the start of the current whitespace-delimited
+	// token. The token's first byte decides whether a menu should be open.
+	start := strings.LastIndexAny(left, " \t\n")
+	tokenStart := start + 1 // 0 when no whitespace precedes the token
+	if tokenStart >= len(left) {
+		return 0, 0, false // caret sits right after whitespace: no token
+	}
+	switch left[tokenStart] {
+	case '/':
+		return '/', tokenStart, true
+	case '@':
+		return '@', tokenStart, true
+	}
+	return 0, 0, false
 }
 
 // handleNormalKey handles keys in Normal (scroll) mode.
@@ -946,15 +1388,15 @@ func (a *App) handleNormalKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 		// Yank the most recent assistant text to the system clipboard.
 		// On terminals without OSC 52 support this silently no-ops; we
 		// still emit the info line so the user has feedback either way.
-		text := a.scrollback.LastAssistantText()
-		if text == "" {
-			a.scrollback.AppendInfo("nothing to yank (no assistant text yet)")
-			a.refreshView()
-			return nil, true
-		}
-		a.scrollback.AppendInfo(fmt.Sprintf("yanked %d bytes to clipboard (OSC 52)", len(text)))
-		a.refreshView()
-		return yankToClipboardCmd(text), true
+		// Shared with the palette's "yank" verb via yankLastAssistant.
+		return a.yankLastAssistant(), true
+	case "?":
+		// Help overlay (G7), Normal mode only. In Insert mode `?` stays a
+		// literal character (handleInsertKey never maps it), so typing prose
+		// is unaffected — this branch is reached only when the input is
+		// blurred. Intercept BEFORE the printable fallthrough below so `?`
+		// opens help instead of auto-switching to Insert.
+		return a.openHelp(), true
 	case "esc":
 		// Already in Normal mode; no-op.
 		return nil, true
@@ -1016,16 +1458,17 @@ func (a *App) handleSlash(line string) tea.Cmd {
 	case "/quit", "/exit", "/q":
 		return tea.Quit
 	case "/help", "/?":
-		a.scrollback.AppendInfo(helpText())
-		a.refreshView()
+		// Open the structured, scrollable help overlay (G7) instead of dumping
+		// a static block into the scrollback. Its content is generated from the
+		// shared command registry + a static keybinding table so it can't drift.
+		return a.openHelp()
 	case "/clear":
 		a.scrollback.Clear()
 		a.refreshView()
 	case "/models":
 		// Direct switch: /models <id>
 		if len(fields) >= 2 {
-			a.applyModelSwitch(fields[1])
-			return nil
+			return a.applyModelSwitch(fields[1])
 		}
 		a.overlay.OpenModels(a.model)
 	case "/tape":
@@ -1070,32 +1513,62 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		running := a.running
 		a.runMu.Unlock()
 		if running || a.agent.HasActiveBackgroundWork() {
-			a.scrollback.AppendInfo("/reload-skills unavailable while the agent or a background job is running — wait until it's idle, then retry")
-			a.refreshView()
-			return nil
+			return a.toast(BadgeWarn, "/reload-skills unavailable while the agent or a background job is running — retry when idle")
 		}
 		home, _ := os.UserHomeDir()
+		// A reload failure is a durable error worth scrolling back to; the
+		// success summary is ephemeral, so it rides a toast (G8/§6.5).
 		if res, err := a.agent.ReloadSkills(a.cwd, home); err != nil {
 			a.scrollback.AppendError("reload-skills: " + err.Error())
+			a.refreshView()
+			return nil
 		} else {
-			a.scrollback.AppendInfo(formatReloadResult(res))
+			return a.toast(BadgeOk, formatReloadResult(res))
 		}
-		a.refreshView()
 	case "/compact":
 		// Force a compaction now, regardless of the auto threshold.
 		// Runs off the UI goroutine so a slow ReplaceWithCompaction
 		// transaction can't freeze the input loop.
 		go a.agent.ForceCompact(context.Background())
-		a.scrollback.AppendInfo("compaction requested")
-		a.refreshView()
+		return a.toast(BadgeInfo, "compaction requested")
 	default:
 		if cmd := a.lookupCustomCommand(line); cmd != nil {
 			return cmd
 		}
-		a.scrollback.AppendInfo("unknown command: " + cmd + " (/help for list)")
-		a.refreshView()
+		// A bare /<skill-name> that is neither a builtin nor a custom command
+		// is a guided skill invocation (§4.1): prefill the input with a
+		// directive and leave the cursor at the end so the user finishes the
+		// sentence. Skills aren't directly user-invocable — this makes them
+		// discoverable from / without a hidden behavior change.
+		if a.prefillSkillDirective(strings.TrimPrefix(cmd, "/")) {
+			return nil
+		}
+		// An unknown command is an ephemeral mistake, not durable content — so
+		// it surfaces as a toast (G8/§6.5) rather than polluting the scrollback.
+		return a.toast(BadgeWarn, "unknown command: "+cmd+" (/help for list)")
 	}
 	return nil
+}
+
+// prefillSkillDirective handles a bare /<name> that names a known skill but is
+// not a builtin/custom command (§4.1/§10). It sets the input to a guided
+// directive and parks the caret at the end, staying in Insert mode so the user
+// can complete the prompt and submit. Returns false when name is not a skill
+// (nil-safe on a.agent / a.agent.Skills) so the caller can fall back to the
+// unknown-command path.
+func (a *App) prefillSkillDirective(name string) bool {
+	if a.agent == nil || a.agent.Skills == nil {
+		return false
+	}
+	if _, ok := a.agent.Skills.Body(name); !ok {
+		return false
+	}
+	directive := "use the \"" + name + "\" skill for this: "
+	a.input.SetValue(directive)
+	a.input.SetCursorColumn(len([]rune(directive)))
+	a.completions.Close()
+	a.syncPopupLayout()
+	return true
 }
 
 // lookupCustomCommand checks if the slash line matches a user-defined
@@ -1174,30 +1647,6 @@ func shellRunner(ctx context.Context, cmd string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(string(out), "\n"), nil
-}
-
-func helpText() string {
-	return strings.Join([]string{
-		"keys:",
-		"  ⏎          send prompt",
-		"  ⇧⏎ / ⌥⏎    insert newline in the input",
-		"  ^C         cancel current run (or quit if idle)",
-		"  ^D         quit",
-		"  ^R         toggle most recent thinking block",
-		"  ^T         toggle all thinking blocks",
-		"  pgup/pgdn  scroll",
-		"slash commands:",
-		"  /help      this help",
-		"  /clear     clear scrollback",
-		"  /quit      exit",
-		"  /models    list / switch the main-loop model",
-		"  /tape      open the reasoning tape",
-		"  /sessions  list this project's sessions",
-		"  /export    open full scrollback in $PAGER for native mouse copy",
-		"  /undo      revert the last edit step",
-		"  /compact   force-compact the running message list",
-		"  /reload-skills  re-scan skills mid-session (mints a new cache epoch)",
-	}, "\n")
 }
 
 // handlePermissionKey processes a single keystroke while the permission
@@ -1306,8 +1755,16 @@ func (a *App) toggleAllReasoning() {
 	a.refreshView()
 }
 
-// handleOverlayKey processes keys in tape/models/sessions overlay mode.
+// handleOverlayKey processes keys in the fullscreen overlays. The filterable
+// overlays (/models, /sessions, palette) route printable characters into the
+// shared filter and use ↑/↓ (not j/k, which are now filter input) for
+// navigation; esc clears a non-empty filter before it closes. modeTape and
+// modeHelp keep j/k navigation and a plain esc/q close.
 func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
+	if a.overlay.Filterable() {
+		return a.handleFilterableOverlayKey(km)
+	}
+
 	switch km.String() {
 	case "esc", "q":
 		a.overlay.Close()
@@ -1319,29 +1776,201 @@ func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 	case "k", "up":
 		a.overlay.MoveUp()
 	case "enter":
-		switch a.overlay.Mode() {
-		case modeModels:
-			if id := a.overlay.SelectedModelID(); id != "" {
-				a.applyModelSwitch(id)
-			}
-		case modeSessions:
-			// Session switching is a wave-6 polish — for v0.1 it just
-			// records intent and asks the user to restart with -r <id>.
-			if id := a.overlay.SelectedSessionID(); id != "" {
-				a.scrollback.AppendInfo("to switch sessions, restart with: dsc -r " + id)
-				a.refreshView()
-			}
+		// modeTape / modeHelp have no enter action today; modeHelp closes.
+		if a.overlay.Mode() == modeHelp {
+			a.overlay.Close()
 		}
-		a.overlay.Close()
 	}
 	return nil
 }
 
+// handleFilterableOverlayKey drives the filterable overlays (/models,
+// /sessions, palette): ↑/↓ navigate the narrowed set, ⏎ selects/executes, a
+// printable rune extends the filter, backspace trims it, and esc clears a
+// non-empty filter before a second esc closes.
+func (a *App) handleFilterableOverlayKey(km tea.KeyPressMsg) tea.Cmd {
+	switch km.String() {
+	case "ctrl+c":
+		return tea.Quit
+	case "esc":
+		if a.overlay.FilterClear() {
+			return nil // first esc clears the filter; a second one closes
+		}
+		a.overlay.Close()
+		return nil
+	case "up":
+		a.overlay.MoveUp()
+		return nil
+	case "down":
+		a.overlay.MoveDown()
+		return nil
+	case "backspace":
+		a.overlay.FilterBackspace()
+		return nil
+	case "enter":
+		return a.acceptOverlaySelection()
+	}
+	if isPrintableKey(km) {
+		a.overlay.FilterType(rune(km.String()[0]))
+		return nil
+	}
+	return nil
+}
+
+// acceptOverlaySelection commits the cursor row of a filterable overlay: a
+// model switch, a session-switch hint, or a palette action. It closes the
+// overlay first so a palette verb that opens another overlay (e.g. /models)
+// lands cleanly.
+func (a *App) acceptOverlaySelection() tea.Cmd {
+	switch a.overlay.Mode() {
+	case modeModels:
+		id := a.overlay.SelectedModelID()
+		a.overlay.Close()
+		if id != "" {
+			return a.applyModelSwitch(id)
+		}
+	case modeSessions:
+		// Session switching is a wave-6 polish — for v0.1 it just records
+		// intent and asks the user to restart with -r <id>.
+		id := a.overlay.SelectedSessionID()
+		a.overlay.Close()
+		if id != "" {
+			a.scrollback.AppendInfo("to switch sessions, restart with: dsc -r " + id)
+			a.refreshView()
+		}
+	case modePalette:
+		act, ok := a.overlay.SelectedAction()
+		a.overlay.Close()
+		if ok {
+			return a.runPaletteAction(act.id)
+		}
+	}
+	return nil
+}
+
+// helpCommandRows is the command half of the help overlay (G7), drawn from the
+// same allCommands merge that feeds the / menu so the two can never drift.
+// nil-safe on a.agent / a.agent.Skills (test fixtures, ephemeral mode).
+func (a *App) helpCommandRows() []slashCmd {
+	var skillList []skills.Skill
+	if a.agent != nil && a.agent.Skills != nil {
+		skillList = a.agent.Skills.List()
+	}
+	return allCommands(a.customCmds, skillList)
+}
+
+// openHelp puts up the help overlay (G7), blurring the input so its keys don't
+// leak to the textarea. Returns the focus Cmd from the mode switch.
+func (a *App) openHelp() tea.Cmd {
+	cmd := a.setMode(modeNormal)
+	a.overlay.OpenHelp()
+	return cmd
+}
+
+// openPalette puts up the command palette (G5) over every action: the merged
+// slash commands plus the non-slash verbs. It switches to Normal mode so the
+// textarea is blurred while the modal owns the keys.
+func (a *App) openPalette() tea.Cmd {
+	cmd := a.setMode(modeNormal)
+	a.overlay.OpenPalette(a.paletteActions())
+	return cmd
+}
+
+// paletteActions builds the palette row set (G5): every merged slash command
+// (built-ins + custom + skills) rendered as a "/name" verb, plus the extra
+// verbs that have no slash today (toggle thinking, open help, yank). The
+// slash-backed rows route through handleSlash on accept; the extra verbs call
+// the same handler their key would. Built so the palette is a superset of the
+// / menu and never drifts from it.
+func (a *App) paletteActions() []paletteAction {
+	cmds := a.helpCommandRows()
+	out := make([]paletteAction, 0, len(cmds)+3)
+	for _, c := range cmds {
+		tag := ""
+		switch c.Kind {
+		case skillCmd:
+			tag = " (skill)"
+		case customCmd:
+			tag = " (custom)"
+		}
+		out = append(out, paletteAction{
+			id:     "/" + c.Name,
+			label:  "/" + c.Name + tag,
+			detail: c.Summary,
+		})
+	}
+	// Non-slash verbs: these have a key today but no slash command, so the
+	// palette is their discoverable home. id values are distinct from any
+	// "/name" so runPaletteAction routes them to the same handler the key does.
+	out = append(out,
+		paletteAction{id: "toggle-thinking", label: "toggle thinking", detail: "flip per-turn reasoning on/off"},
+		paletteAction{id: "open-help", label: "open help", detail: "show the keybinding + command overlay"},
+		paletteAction{id: "yank-last", label: "yank last assistant text", detail: "copy the last reply to the clipboard (OSC 52)"},
+	)
+	return out
+}
+
+// runPaletteAction executes a chosen palette row by its stable id. Slash-backed
+// ids ("/name") route through handleSlash exactly as if typed; the non-slash
+// verbs call the same handler their key would. Returns the tea.Cmd the action
+// produces, if any.
+func (a *App) runPaletteAction(id string) tea.Cmd {
+	switch id {
+	case "toggle-thinking":
+		a.toggleThinking()
+		return nil
+	case "open-help":
+		return a.openHelp()
+	case "yank-last":
+		return a.yankLastAssistant()
+	}
+	if strings.HasPrefix(id, "/") {
+		return a.handleSlash(id)
+	}
+	return nil
+}
+
+// toggleThinking flips the per-turn reasoning flag used by the agent on the
+// next turn (the palette's "toggle thinking" verb, G5). Keeps the App field
+// and the agent field in lockstep and surfaces a notice so the change is
+// visible. nil-safe on a.agent (test fixtures).
+func (a *App) toggleThinking() {
+	a.thinking = !a.thinking
+	if a.agent != nil {
+		a.agent.Thinking = a.thinking
+	}
+	state := "off"
+	if a.thinking {
+		state = "on"
+	}
+	a.scrollback.AppendInfo("thinking → " + state)
+	a.refreshView()
+}
+
+// yankLastAssistant copies the most recent assistant text to the system
+// clipboard (the palette's "yank" verb and Normal-mode `y`). The yank outcome
+// is an ephemeral notice, so it rides a toast (G8/§6.5) instead of the
+// scrollback. Returns a tea.Cmd batching the OSC-52 clipboard write with the
+// toast's expiry tick (or just the toast tick when there is nothing to yank).
+func (a *App) yankLastAssistant() tea.Cmd {
+	text := a.scrollback.LastAssistantText()
+	if text == "" {
+		return a.toast(BadgeWarn, "nothing to yank (no assistant text yet)")
+	}
+	toastCmd := a.toast(BadgeOk, fmt.Sprintf("yanked %d bytes to clipboard (OSC 52)", len(text)))
+	return tea.Batch(yankToClipboardCmd(text), toastCmd)
+}
+
 // applyModelSwitch updates the live model used for the next turn and
-// (when persistence is wired) records it to the session row.
-func (a *App) applyModelSwitch(id string) {
+// (when persistence is wired) records it to the session row. The success
+// notice is ephemeral, so it rides a toast (G8/§6.5) rather than the
+// scrollback; the returned tea.Cmd schedules that toast's expiry (nil when no
+// toast was shown). Durable signals — an unknown-model error and a
+// persist-failure warning — stay in the scrollback so they can be scrolled
+// back to.
+func (a *App) applyModelSwitch(id string) tea.Cmd {
 	if id == "" {
-		return
+		return nil
 	}
 	known := false
 	for _, m := range availableModels() {
@@ -1353,7 +1982,7 @@ func (a *App) applyModelSwitch(id string) {
 	if !known {
 		a.scrollback.AppendError("unknown model: " + id)
 		a.refreshView()
-		return
+		return nil
 	}
 	a.model = id
 	a.status.model = id
@@ -1363,11 +1992,10 @@ func (a *App) applyModelSwitch(id string) {
 		if err := a.session.setModel(id); err != nil {
 			a.scrollback.AppendInfo("model switched (warning: persist failed: " + err.Error() + ")")
 			a.refreshView()
-			return
+			return nil
 		}
 	}
-	a.scrollback.AppendInfo("active model → " + id)
-	a.refreshView()
+	return a.toast(BadgeBrand, "model → "+id)
 }
 
 // applyUndo reverts the last n snapshot steps.

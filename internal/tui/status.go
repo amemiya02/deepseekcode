@@ -26,6 +26,10 @@ type statusState struct {
 	mode            appMode
 	activeAgent     string
 	runningJobs     int
+	// queued is the number of prompts waiting behind the active run (G11). It
+	// renders as a subtle "queued N" segment only when non-zero, so an idle
+	// session (the common case, and every existing golden) is unaffected.
+	queued int
 }
 
 // render returns the one-line status string. When in Normal (scroll)
@@ -106,6 +110,11 @@ func (s statusState) render(t Theme) string {
 	}
 	if s.runningJobs > 0 {
 		line1 += dot + label.Render(fmt.Sprintf("jobs %d", s.runningJobs))
+	}
+	// Queued-prompt count (G11): subtle, label-brightness, present only while
+	// prompts wait behind the active run so it never strobes an idle line.
+	if s.queued > 0 {
+		line1 += dot + label.Render(fmt.Sprintf("queued %d", s.queued))
 	}
 
 	// Transient-state chips. "compacted N" is an episodic event, so it reads

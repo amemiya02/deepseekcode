@@ -831,21 +831,28 @@ func (a *App) modeChip() string {
 // renderOverlay renders the active fullscreen overlay (tape, models,
 // sessions). The bottom hint line + status still show for context.
 func (a *App) renderOverlay() string {
-	var body string
+	// The painted footer takes the last row; the surface fills the rest. body +
+	// footer therefore renders exactly a.height rows, all painted (no black gap).
+	h := a.height - 1
+	var body, footerText string
 	switch a.overlay.Mode() {
 	case modeTape:
-		body = renderTape(a.theme, a.scrollback.Items(), a.overlay.Cursor(), a.width, a.height-2)
+		body = renderTape(a.theme, a.scrollback.Items(), a.overlay.Cursor(), a.width, h)
+		footerText = "j/k move · esc back · q quit"
 	case modeModels:
-		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.model, a.width, a.height-2)
+		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.model, a.width, h)
+		footerText = "j/k move · ⏎ switch · esc back · q quit"
 	case modeSessions:
-		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.session.id, a.width, a.height-2)
+		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.session.id, a.width, h)
+		footerText = "j/k move · ⏎ switch · esc back · q quit"
 	case modePalette:
-		body = renderPalette(a.theme, a.overlay.Palette(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, a.height-2)
+		body = renderPalette(a.theme, a.overlay.Palette(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
+		footerText = "j/k move · ⏎ run · esc back · q quit"
 	case modeHelp:
-		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.Cursor(), a.width, a.height-2)
+		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.Cursor(), a.width, h)
+		footerText = "j/k scroll · esc/q close"
 	}
-	hint := a.theme.Hint.Render("  j/k move · ⏎ select · esc back · q quit")
-	return body + "\n" + hint
+	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
 
 // layout recomputes viewport / input geometry on window resize.

@@ -237,7 +237,7 @@ func renderTape(t Theme, items []chatItem, cursor int, width, height int) string
 	if cursor >= len(tape) {
 		cursor = len(tape) - 1
 	}
-	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	rowW := width - 4 // 2-cell gutter each side (wrapPane indents the body by 2)
 	if rowW < 20 {
 		rowW = 20
 	}
@@ -319,7 +319,7 @@ func filterLine(t Theme, query string) string {
 // fuzzy-narrowed row order (indices into models); cursor is the position
 // within visible. A filter input rides above the rows (G6).
 func renderModelsPicker(t Theme, models []modelOption, visible []int, cursor int, filter, activeID string, width, height int) string {
-	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	rowW := width - 4 // 2-cell gutter each side (wrapPane indents the body by 2)
 	if rowW < 20 {
 		rowW = 20
 	}
@@ -339,7 +339,7 @@ func renderModelsPicker(t Theme, models []modelOption, visible []int, cursor int
 			// row, in addition to the ▶ marker. Plain text inside the filled
 			// style so the foreground stays legible on the accent band.
 			text := fmt.Sprintf("▶ %s %s  %s", active, m.Short, m.Note)
-			b.WriteString(selectedRow(t, text, rowW) + "\n")
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
 		} else {
 			marker := " "
 			if m.ID == activeID {
@@ -361,7 +361,7 @@ func renderSessionsPicker(t Theme, rows []sessionRow, visible []int, cursor int,
 		body := t.Hint.Render("(no sessions in this project yet)")
 		return wrapPane(t, "/sessions", "0 sessions", body, width, height)
 	}
-	rowW := width - 8 // inside border (2) + padding (4) + a small margin
+	rowW := width - 4 // 2-cell gutter each side (wrapPane indents the body by 2)
 	if rowW < 20 {
 		rowW = 20
 	}
@@ -473,10 +473,10 @@ func listWindow(cursor, n, rows int) (int, int) {
 }
 
 // listBodyHeight returns how many list rows a wrapPane body can show inside a
-// pane `height` tall: the pane chrome (border 2 + vertical padding 2 + title 1)
-// and the filter input plus its blank separator (2) come off the top.
+// surface `height` tall: the surface chrome (top margin 1 + title 1 + rule 1 +
+// blank 1) and the filter input plus its blank separator (2) come off the top.
 func listBodyHeight(height int) int {
-	h := height - 7
+	h := height - 6
 	if h < 1 {
 		h = 1
 	}
@@ -520,7 +520,7 @@ func paletteRow(t Theme, a paletteAction, selected bool, rowW int) string {
 // actions; cursor is the position within visible. The list is windowed around
 // the cursor so ↑/↓ scroll, with a scrollbar on the right when it overflows.
 func renderPalette(t Theme, actions []paletteAction, visible []int, cursor int, filter string, width, height int) string {
-	rowW := width - 8
+	rowW := width - 4 // 2-cell gutter each side (wrapPane indents the body by 2)
 	if rowW < 20 {
 		rowW = 20
 	}
@@ -627,8 +627,9 @@ func renderHelp(t Theme, commandRows []slashCmd, offset, width, height int) stri
 	for i := range lines {
 		lines[i] = truncateCells(lines[i], interiorW)
 	}
-	// Interior height: pane eats border (2) + padding (2) + the title row (1).
-	view := height - 5
+	// Interior height: the surface chrome (top margin 1 + title 1 + rule 1 +
+	// blank 1) comes off the top; the rest shows help lines.
+	view := height - 4
 	if view < 3 {
 		view = 3
 	}
@@ -650,44 +651,78 @@ func renderHelp(t Theme, commandRows []slashCmd, offset, width, height int) stri
 	return wrapPane(t, "help", header, body, width, height)
 }
 
-// selectedRow renders a picker's focused row as a filled selection band:
-// brandDeep background with onAccent foreground, padded to width so the
-// fill spans the row. When fills are disabled (transparent mode or a
-// non-truecolor terminal) it degrades to a bold brandDeep foreground with
-// no background, so the ▶ marker in the text still carries the selection.
+// selectedRow renders a picker's focused row as a filled selection band: a
+// calm deep-indigo SelBg surface carrying bright SelFg text, padded to width so
+// the fill spans the row. The band is intentionally a recessive surface (not
+// the bright brand) with high-luminance text on top — a confident, classy
+// highlight rather than the vibrating royal-blue-on-near-black slab it replaced.
+// When fills are disabled (transparent mode or a non-truecolor terminal) it
+// degrades to bold BrandLight foreground with no background, so the ▶ marker in
+// the text still carries the selection.
 func selectedRow(t Theme, text string, width int) string {
 	style := lipgloss.NewStyle().Width(width)
 	if t.Transparent() || !t.Truecolor() {
-		return style.Foreground(t.BrandDeep).Bold(true).Render(text)
+		return style.Foreground(t.BrandLight).Bold(true).Render(text)
 	}
 	return style.
-		Background(t.BrandDeep).
-		Foreground(t.OnAccent).
+		Background(t.SelBg).
+		Foreground(t.SelFg).
 		Bold(true).
 		Render(text)
 }
 
-// wrapPane decorates an overlay body as a raised in-slot pane: a bgRaised
-// surface with a rounded border in the border token, Padding(1,2), and a
-// gradient "/// <title>" accent header above the hint line. The body is
-// padded to fill the available height so the panel background reads as a
-// solid slab (degrades to fg-only when fills are disabled).
+// wrapPane renders an overlay as a full-screen, edge-to-edge surface (the
+// /models /sessions palette help /tape pickers). The overlay REPLACES the chat
+// (renderOverlay returns early from View), so its content is composed entirely
+// of our own painted strings — no glamour / viewport output — which means
+// ADR-0002's reset-bleed caveat does not apply and we can safely fill the whole
+// width×height here. We paint ONE cohesive bgBase surface: a faint top margin, a
+// gradient "/// <title>" header with its dim hint, a hairline rule, the body,
+// then bgBase padding all the way to the bottom. This replaces the old bgRaised
+// rounded card that floated on the terminal's raw black — the "navy slab on a
+// black void" the redesign set out to kill. Degrades to fg-only (no fill) when
+// backgrounds are disabled (transparent mode / non-truecolor), per ADR-0002.
 func wrapPane(t Theme, title, header, body string, width, height int) string {
-	gradHead := ApplyBoldForegroundGrad(lipgloss.NewStyle(), "/// "+title, t.BrandDeep, t.BrandLight)
-	titleBar := gradHead + "  " + t.Hint.Render(header)
+	const indent = "  "
+	surface := t.Panel(TierBase)
 
-	// Account for border (2) + vertical padding (2) so the body fills the
-	// pane's interior without overflowing the allotted height.
-	pad := height - 6 - strings.Count(body, "\n")
-	if pad > 0 {
-		body += strings.Repeat("\n", pad)
+	gradHead := ApplyBoldForegroundGrad(lipgloss.NewStyle(), "/// "+title, t.BrandDeep, t.BrandLight)
+	titleBar := indent + gradHead + "  " + t.Hint.Render(header)
+
+	ruleW := width - 2*len(indent)
+	if ruleW < 0 {
+		ruleW = 0
+	}
+	rule := indent + lipgloss.NewStyle().Foreground(t.BorderColor).Render(strings.Repeat("─", ruleW))
+
+	// A faint top margin, the header, the rule, a blank, then the body. Every
+	// body line is shifted into the same `indent` gutter so the filter line,
+	// rows, and selection band all left-align under the title (the body's own
+	// internal layout — markers, scrollbar — rides inside that gutter).
+	lines := []string{"", titleBar, rule, ""}
+	for _, bl := range strings.Split(body, "\n") {
+		lines = append(lines, indent+bl)
 	}
 
-	content := titleBar + "\n" + body
-	pane := t.Panel(TierRaised).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderColor).
-		Padding(1, 2).
-		Width(width - 2)
-	return pane.Render(content)
+	// Pad (or clamp) to EXACTLY height rows so the surface fills the band the
+	// overlay was handed and the View stack stays the right height — every blank
+	// row is painted below, so there is no unpainted gap left to leak black.
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	// Width pads every line (blanks included) to the full width with the surface
+	// background, so the whole rectangle is painted edge to edge.
+	return surface.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+// overlayFooter renders the bottom hint row of a full-screen overlay on the
+// SAME bgBase surface as wrapPane, so the footer is part of the painted slab
+// rather than a fg-only line sitting on raw black. Degrades to fg-only when
+// fills are disabled.
+func overlayFooter(t Theme, text string, width int) string {
+	return t.Panel(TierBase).Foreground(t.FgFaint).Width(width).Render("  " + text)
 }

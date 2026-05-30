@@ -61,6 +61,14 @@ type palette struct {
 	accentFlash color.Color // flash model + tool bar
 	accentPro   color.Color // pro model + tool bar
 
+	// Selection pairing — the focused row in every picker / palette / popup.
+	// Kept SEPARATE from brand so the band can be a calm, recessive surface
+	// (deep indigo, not the bright brand) carrying a high-luminance text. A
+	// full-bleed brand bar with near-black text reads as a harsh, vibrating
+	// slab; a deep band with bright text reads as a confident, classy highlight.
+	selBg color.Color // focused-row background (a deep, low-chroma indigo)
+	selFg color.Color // focused-row foreground (a bright, cool near-white)
+
 	// Background tiers (canvas → raised).
 	bgBase    color.Color // painted canvas
 	bgWell    color.Color // code/diff inset
@@ -83,28 +91,39 @@ type palette struct {
 	onAccent color.Color
 }
 
+// oceanPalette is the default dark identity — "DeepSeek Ocean". It is a
+// deliberately COOL, low-chroma scheme: one azure brand, two desaturated
+// analogous accents (cyan/violet that read as tints of the same family, not
+// competing primaries), and neutrals on a faintly blue-tinted gray axis. Full
+// chroma is reserved for tiny semantic chips (ok/warn/err). The old palette's
+// flaw was three high-saturation hues (royal blue, neon teal, hot violet) all
+// fighting at once; restraint is what makes it read as coordinated.
 var oceanPalette = palette{
-	brandDeep:   lipgloss.Color("#1D4ED8"),
-	brandLight:  lipgloss.Color("#7DD3FC"),
-	accentFlash: lipgloss.Color("#5fd7d7"),
-	accentPro:   lipgloss.Color("#c77dff"),
+	brandDeep:   lipgloss.Color("#4d7fe0"), // azure — gradients, cursor, user bar, headers
+	brandLight:  lipgloss.Color("#8fc7ff"), // light azure — gradient end, scrollbar, info
+	accentFlash: lipgloss.Color("#5cc9d6"), // muted cyan — flash model / tool bar / input border
+	accentPro:   lipgloss.Color("#a98cf0"), // muted violet — pro model / tool bar
 
-	bgBase:    lipgloss.Color("#0d1b2a"),
-	bgWell:    lipgloss.Color("#0a1622"),
-	bgSurface: lipgloss.Color("#12243a"),
-	bgRaised:  lipgloss.Color("#16314f"),
+	// Calm deep-indigo band + bright cool-white text (see palette.selBg).
+	selBg: lipgloss.Color("#2c4a7d"),
+	selFg: lipgloss.Color("#eaf1fc"),
 
-	fgBase:   lipgloss.Color("#e4e4e4"),
-	fgMuted:  lipgloss.Color("#9aa7b4"),
-	fgSubtle: lipgloss.Color("#6c7a89"),
-	fgFaint:  lipgloss.Color("#4a5663"),
+	bgBase:    lipgloss.Color("#0e151f"), // canvas — deep cool slate
+	bgWell:    lipgloss.Color("#0a0f17"), // code/diff inset — deepest
+	bgSurface: lipgloss.Color("#151d29"), // tool/reasoning panels
+	bgRaised:  lipgloss.Color("#1b2636"), // modals/selected-row surface — recedes calmly
 
-	border: lipgloss.Color("#1c3350"),
-	ok:     lipgloss.Color("#5fd75f"),
-	errc:   lipgloss.Color("#ff5f5f"),
-	warn:   lipgloss.Color("#d7d75f"),
+	fgBase:   lipgloss.Color("#e6ebf2"),
+	fgMuted:  lipgloss.Color("#a2b1c4"),
+	fgSubtle: lipgloss.Color("#717f92"),
+	fgFaint:  lipgloss.Color("#5c6b7e"), // raised vs old #4a5663 so notes read on bgRaised
 
-	onAccent: lipgloss.Color("#0d1b2a"),
+	border: lipgloss.Color("#29384f"), // a touch brighter so rounded modal edges read
+	ok:     lipgloss.Color("#5ad48a"), // softer green (was neon #5fd75f)
+	errc:   lipgloss.Color("#ef6a72"), // softer red
+	warn:   lipgloss.Color("#e0b24a"), // warm amber (was acid yellow #d7d75f)
+
+	onAccent: lipgloss.Color("#0b1119"), // dark text on filled badges
 }
 
 var lightPalette = palette{
@@ -112,6 +131,11 @@ var lightPalette = palette{
 	brandLight:  lipgloss.Color("#0087af"),
 	accentFlash: lipgloss.Color("#0087af"),
 	accentPro:   lipgloss.Color("#7c3aed"),
+
+	// On a light canvas a saturated band with white text is the expected,
+	// legible "selected" look — softened a step from the brand royal.
+	selBg: lipgloss.Color("#2563eb"),
+	selFg: lipgloss.Color("#ffffff"),
 
 	bgBase:    lipgloss.Color("#ffffff"),
 	bgWell:    lipgloss.Color("#eef1f5"),
@@ -171,6 +195,10 @@ type Theme struct {
 	BrandLight  color.Color
 	AccentFlash color.Color
 	AccentPro   color.Color
+
+	// Selection pairing — the focused-row band color + its text (see selBg).
+	SelBg color.Color
+	SelFg color.Color
 
 	BgBase    color.Color
 	BgWell    color.Color
@@ -337,6 +365,9 @@ func buildTheme(name string, p palette, d diffBands) Theme {
 		BrandLight:  p.brandLight,
 		AccentFlash: p.accentFlash,
 		AccentPro:   p.accentPro,
+
+		SelBg: p.selBg,
+		SelFg: p.selFg,
 
 		BgBase:    p.bgBase,
 		BgWell:    p.bgWell,

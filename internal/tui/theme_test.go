@@ -12,11 +12,19 @@ func TestTheme(t *testing.T) {
 		if th.Name != "dark" {
 			t.Fatalf("expected name 'dark', got %q", th.Name)
 		}
-		if th.BrandDeep != lipgloss.Color("#1D4ED8") {
-			t.Fatalf("expected BrandDeep #1D4ED8, got %v", th.BrandDeep)
+		if th.BrandDeep != lipgloss.Color("#4d7fe0") {
+			t.Fatalf("expected BrandDeep #4d7fe0, got %v", th.BrandDeep)
 		}
-		if th.BrandLight != lipgloss.Color("#7DD3FC") {
-			t.Fatalf("expected BrandLight #7DD3FC, got %v", th.BrandLight)
+		if th.BrandLight != lipgloss.Color("#8fc7ff") {
+			t.Fatalf("expected BrandLight #8fc7ff, got %v", th.BrandLight)
+		}
+		// The selection pair must be populated and distinct from the brand:
+		// the focused-row band is a recessive deep indigo, not the bright brand.
+		if th.SelBg != lipgloss.Color("#2c4a7d") {
+			t.Fatalf("expected SelBg #2c4a7d, got %v", th.SelBg)
+		}
+		if th.SelFg != lipgloss.Color("#eaf1fc") {
+			t.Fatalf("expected SelFg #eaf1fc, got %v", th.SelFg)
 		}
 	})
 

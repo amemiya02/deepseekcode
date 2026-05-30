@@ -3,6 +3,8 @@ package repair
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 func TestAnalyzeSchema_ShallowObject(t *testing.T) {
@@ -394,5 +396,75 @@ func TestAnalyzeSchema_ReadFileStyle(t *testing.T) {
 
 	if analysis.ShouldAdapt {
 		t.Error("expected ShouldAdapt=false for read_file-style shallow schema")
+	}
+}
+
+func TestAnalyzeToolSchemas(t *testing.T) {
+	complexSchema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"questions": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"question": {"type": "string"},
+						"options": {"type": "array", "items": {"type": "string"}}
+					}
+				}
+			}
+		}
+	}`)
+	simpleSchema := json.RawMessage(`{"type": "object", "properties": {"path": {"type": "string"}}}`)
+
+	tools := []llm.Tool{
+		{Function: llm.ToolFunction{Name: "simple", Parameters: simpleSchema}},
+		{Function: llm.ToolFunction{Name: "complex", Parameters: complexSchema}},
+	}
+
+	reports := AnalyzeToolSchemas(tools, 4, 80)
+	if len(reports) != 1 {
+		t.Fatalf("got %d reports, want 1", len(reports))
+	}
+	if reports[0].Tool != "complex" {
+		t.Errorf("report tool = %q, want complex", reports[0].Tool)
+	}
+	if reports[0].Kind != KindSchemaComplex {
+		t.Errorf("report kind = %q, want %q", reports[0].Kind, KindSchemaComplex)
+	}
+}
+
+func TestAnalyzeToolSchemasEmpty(t *testing.T) {
+	reports := AnalyzeToolSchemas(nil, 4, 80)
+	if len(reports) != 0 {
+		t.Errorf("got %d reports, want 0", len(reports))
+	}
+}
+
+func TestAnalyzeToolSchemasSorted(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"questions": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {"q": {"type": "string"}, "opts": {"type": "array", "items": {"type": "string"}}}
+				}
+			}
+		}
+	}`)
+
+	tools := []llm.Tool{
+		{Function: llm.ToolFunction{Name: "z_tool", Parameters: schema}},
+		{Function: llm.ToolFunction{Name: "a_tool", Parameters: schema}},
+	}
+
+	reports := AnalyzeToolSchemas(tools, 4, 80)
+	if len(reports) != 2 {
+		t.Fatalf("got %d reports, want 2", len(reports))
+	}
+	if reports[0].Tool != "a_tool" || reports[1].Tool != "z_tool" {
+		t.Errorf("reports not sorted by tool name: %s, %s", reports[0].Tool, reports[1].Tool)
 	}
 }

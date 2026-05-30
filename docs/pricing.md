@@ -36,6 +36,15 @@ dsc 直接硬编码定价表（不依赖外部 pricing API），且当前数值�
 未来若 DeepSeek 再次调价，手动更新 `internal/llm/cache_metrics.go` 中的 `Prices` map 即可。
 `TestPricesGolden` 测试会钉死当前数值，防止意外修改。
 
+## dsc doctor 新鲜度检查
+
+`dsc doctor` 会检查定价表的核对日期（`PricingCheckedDate`）：
+
+- 若距今 **≤ 30 天**：显示 `✓ pricing`，附带核对日期、天数和官方来源 URL。
+- 若距今 **> 30 天**：显示 `⚠ pricing`（warn 级别），提示定价表可能过期，建议用户前往官方页面核实。
+
+该检查完全本地执行，不发起任何网络请求。常量定义在 `internal/llm/pricing_metadata.go`。
+
 ## 未知模型与 NIM 模型
 
 - 未在 `Prices` 表中的模型，`Cost()` 返回 0。

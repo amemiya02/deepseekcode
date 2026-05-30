@@ -244,6 +244,11 @@ type Agent struct {
 	// prior is used. Touched only on the single Run/runStep goroutine (like
 	// loopFloor), so it needs no lock.
 	charsPerToken float64
+
+	// schemaComplexEmitted tracks which tools have had schema-complexity
+	// telemetry emitted in the current prefix epoch, keyed by
+	// epochID + "\x00" + toolName. Prevents repeated noise per epoch.
+	schemaComplexEmitted map[string]bool
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -254,22 +259,23 @@ type Agent struct {
 // the UI goroutine were stuck — an upstream bug we'd want to surface.
 func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model string) *Agent {
 	a := &Agent{
-		Client:           client,
-		Tools:            reg,
-		Permissions:      pol,
-		eventsCompat:     make(chan Event, 256),
-		Model:            model,
-		Thinking:         true,
-		prefixMon:        llm.NewPrefixMonitor(),
-		epochMgr:         NewEpochManager(),
-		System:           DefaultSystemPrompt,
-		MaxToolCalls:     200,
-		ActiveTiers:      []tools.ToolTier{tools.TierCore},
-		CompactionCfg:    DefaultCompactionConfig(),
-		SemanticCfg:      defaultSemanticCompactionConfig(),
-		MaxContextTokens: MaxContextTokens,
-		Jobs:             NewJobRegistry(),
-		stormBreaker:     repair.NewStormBreaker(6, 3),
+		Client:               client,
+		Tools:                reg,
+		Permissions:          pol,
+		eventsCompat:         make(chan Event, 256),
+		Model:                model,
+		Thinking:             true,
+		prefixMon:            llm.NewPrefixMonitor(),
+		epochMgr:             NewEpochManager(),
+		System:               DefaultSystemPrompt,
+		MaxToolCalls:         200,
+		ActiveTiers:          []tools.ToolTier{tools.TierCore},
+		CompactionCfg:        DefaultCompactionConfig(),
+		SemanticCfg:          defaultSemanticCompactionConfig(),
+		MaxContextTokens:     MaxContextTokens,
+		Jobs:                 NewJobRegistry(),
+		stormBreaker:         repair.NewStormBreaker(6, 3),
+		schemaComplexEmitted: make(map[string]bool),
 	}
 
 	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
@@ -898,6 +904,25 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			req.Messages = a.fullMessagesWithFrozenSystem(epoch.FrozenSystem)
 			staticSys = epoch.FrozenSystem
 		}
+	}
+
+	// Schema-complexity telemetry: emit once per tool per epoch so future
+	// schema-flattening decisions are backed by data (evidence only, never
+	// mutates the schema or blocks the request).
+	if a.schemaComplexEmitted == nil {
+		a.schemaComplexEmitted = make(map[string]bool)
+	}
+	for _, rpt := range repair.AnalyzeToolSchemas(req.Tools, 4, 80) {
+		key := epoch.EpochID + "\x00" + rpt.Tool
+		if a.schemaComplexEmitted[key] {
+			continue
+		}
+		a.schemaComplexEmitted[key] = true
+		a.publishRepairEvent(EventRepair{
+			Kind:    string(repair.KindSchemaComplex),
+			Tool:    rpt.Tool,
+			Message: rpt.Message,
+		})
 	}
 
 	expectedCacheMiss := a.epochMgr.ExpectedCacheMiss()

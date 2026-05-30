@@ -17,6 +17,18 @@ import (
 // rename breaks this reader at compile time instead of silently (T6.1).
 type record = traceschema.Record
 
+// PrefixReasonSummary counts one prefix.snapshot Reason value.
+type PrefixReasonSummary struct {
+	Reason string
+	Count  int
+}
+
+// CountSummary counts one repair kind or tool value.
+type CountSummary struct {
+	Name  string
+	Count int
+}
+
 type EpochSummary struct {
 	EpochID     string
 	Role        string
@@ -58,6 +70,15 @@ type Report struct {
 	DriftBlockedCount  int
 	PendingChangeCount int
 
+	// PrefixReasons counts non-empty Reason values from prefix.snapshot records.
+	PrefixReasons []PrefixReasonSummary
+
+	// RepairKinds counts non-empty Kind values from repair records.
+	RepairKinds []CountSummary
+
+	// RepairTools counts non-empty Tool values from repair records.
+	RepairTools []CountSummary
+
 	// Realized (sum of usage cost_cny) vs the budget gate's projected cost
 	// (sum of projected_cny on budget.* records). BudgetEvents counts how many
 	// budget records contributed a projection.
@@ -78,6 +99,9 @@ func InspectFile(path string) (Report, error) {
 	epochs := map[string]*EpochSummary{}
 	seenEpochs := map[string]bool{}   // first prefix.snapshot per epoch = expected miss
 	uniqueHashes := map[string]bool{} // distinct static_prefix_hash values
+	reasonCounts := map[string]int{}  // prefix.snapshot Reason counts
+	repairKinds := map[string]int{}   // repair Kind counts
+	repairTools := map[string]int{}   // repair Tool counts
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
@@ -116,6 +140,9 @@ func InspectFile(path string) (Report, error) {
 			if r.EpochID != "" && !seenEpochs[r.EpochID] {
 				seenEpochs[r.EpochID] = true
 				rep.ExpectedCacheMisses++
+			}
+			if r.Reason != "" {
+				reasonCounts[r.Reason]++
 			}
 		case "usage":
 			rep.TotalUsageTurns++
@@ -161,6 +188,13 @@ func InspectFile(path string) (Report, error) {
 				rep.ProjectedCNY += *r.ProjectedCNY
 				rep.BudgetEvents++
 			}
+		case "repair":
+			if r.Kind != "" {
+				repairKinds[r.Kind]++
+			}
+			if r.Tool != "" {
+				repairTools[r.Tool]++
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
@@ -168,6 +202,39 @@ func InspectFile(path string) (Report, error) {
 	}
 
 	rep.UniquePrefixHashes = len(uniqueHashes)
+
+	// Aggregate prefix reasons sorted by descending count, then ascending reason.
+	for reason, count := range reasonCounts {
+		rep.PrefixReasons = append(rep.PrefixReasons, PrefixReasonSummary{Reason: reason, Count: count})
+	}
+	sort.Slice(rep.PrefixReasons, func(i, j int) bool {
+		if rep.PrefixReasons[i].Count != rep.PrefixReasons[j].Count {
+			return rep.PrefixReasons[i].Count > rep.PrefixReasons[j].Count
+		}
+		return rep.PrefixReasons[i].Reason < rep.PrefixReasons[j].Reason
+	})
+
+	// Aggregate repair kinds sorted by descending count, then ascending name.
+	for name, count := range repairKinds {
+		rep.RepairKinds = append(rep.RepairKinds, CountSummary{Name: name, Count: count})
+	}
+	sort.Slice(rep.RepairKinds, func(i, j int) bool {
+		if rep.RepairKinds[i].Count != rep.RepairKinds[j].Count {
+			return rep.RepairKinds[i].Count > rep.RepairKinds[j].Count
+		}
+		return rep.RepairKinds[i].Name < rep.RepairKinds[j].Name
+	})
+
+	// Aggregate repair tools sorted by descending count, then ascending name.
+	for name, count := range repairTools {
+		rep.RepairTools = append(rep.RepairTools, CountSummary{Name: name, Count: count})
+	}
+	sort.Slice(rep.RepairTools, func(i, j int) bool {
+		if rep.RepairTools[i].Count != rep.RepairTools[j].Count {
+			return rep.RepairTools[i].Count > rep.RepairTools[j].Count
+		}
+		return rep.RepairTools[i].Name < rep.RepairTools[j].Name
+	})
 
 	totalInput := rep.CacheHitTokens + rep.CacheMissTokens
 	if totalInput > 0 {
@@ -195,8 +262,29 @@ func RenderText(rep Report) string {
 	fmt.Fprintf(&b, "cache %.1f%% | hit %d | miss %d | saved CNY %.2f | prefixes %d | expected_miss %d\n",
 		rep.CacheHitRate*100, rep.CacheHitTokens, rep.CacheMissTokens, rep.CacheSavingsCNY, rep.UniquePrefixHashes, rep.ExpectedCacheMisses)
 	fmt.Fprintf(&b, "epochs root %d | subagents %d\n", rep.RootEpochs, rep.SubagentEpochs)
+	if len(rep.PrefixReasons) > 0 {
+		fmt.Fprint(&b, "cache reasons:")
+		for _, pr := range rep.PrefixReasons {
+			fmt.Fprintf(&b, " %s=%d", pr.Reason, pr.Count)
+		}
+		fmt.Fprintln(&b)
+	}
 	fmt.Fprintf(&b, "lifecycle: compaction %d | drift.blocked %d | pending %d\n",
 		rep.CompactionCount, rep.DriftBlockedCount, rep.PendingChangeCount)
+	if len(rep.RepairKinds) > 0 {
+		fmt.Fprint(&b, "repairs:")
+		for _, rk := range rep.RepairKinds {
+			fmt.Fprintf(&b, " %s=%d", rk.Name, rk.Count)
+		}
+		fmt.Fprintln(&b)
+	}
+	if len(rep.RepairTools) > 0 {
+		fmt.Fprint(&b, "repair tools:")
+		for _, rt := range rep.RepairTools {
+			fmt.Fprintf(&b, " %s=%d", rt.Name, rt.Count)
+		}
+		fmt.Fprintln(&b)
+	}
 	if rep.BudgetEvents > 0 {
 		// Δ = projected (conservative all-miss) − realized (cache-discounted);
 		// a positive Δ is the cache savings the gate's projection didn't assume.

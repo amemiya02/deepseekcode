@@ -207,6 +207,11 @@ type Config struct {
 
 	// LSPReady reports whether at least one LSP server is attached.
 	LSPReady bool
+
+	// InitialUsageSummary seeds the status-line cost/cache totals from a
+	// resumed session's persisted usage. Populated from
+	// Persister.UsageSummary at launch. Zero value means no prior usage.
+	InitialUsageSummary session.UsageSummary
 }
 
 // New constructs an App. The returned App is a tea.Model; pass it to
@@ -269,7 +274,16 @@ func New(cfg Config) *App {
 			model:           cfg.Model,
 			thinking:        cfg.Thinking,
 			compactionCount: cfg.CompactionCount,
-			activeAgent:     "coding-default",
+			usage: llm.Usage{
+				PromptCacheHitTokens:  cfg.InitialUsageSummary.CacheHitTokens,
+				PromptCacheMissTokens: cfg.InitialUsageSummary.CacheMissTokens,
+				CompletionTokens:      cfg.InitialUsageSummary.OutputTokens,
+			},
+			costYuan:    cfg.InitialUsageSummary.CostYuan,
+			savedYuan:   cfg.InitialUsageSummary.SavedYuan,
+			costKnown:   llm.CostKnown(cfg.Model),
+			steps:       cfg.InitialUsageSummary.Turns,
+			activeAgent: "coding-default",
 		},
 	}
 	app.errLang = llm.ResolveLang(cfg.Language)
@@ -1572,6 +1586,18 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		a.agent.ReasoningEffort = newEffort
 		a.status.reasoningEffort = newEffort
 		a.scrollback.AppendInfo(fmt.Sprintf("effort: %s -> %s", old, newEffort))
+		a.refreshView()
+	case "/cost":
+		report := RenderCostReport(CostReportInput{
+			Model:        a.status.model,
+			Steps:        a.status.steps,
+			Usage:        a.status.usage,
+			CostYuan:     a.status.costYuan,
+			SavedYuan:    a.status.savedYuan,
+			ContextLimit: a.status.contextLimit,
+			CostKnown:    a.status.costKnown,
+		})
+		a.scrollback.AppendInfo(report)
 		a.refreshView()
 	case "/theme":
 		return a.openThemes()

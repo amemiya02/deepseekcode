@@ -190,3 +190,77 @@ func writeFile(t *testing.T, path, body string) {
 		t.Fatalf("write file: %v", err)
 	}
 }
+
+// TestInspectFilePrefixReasons verifies that prefix.snapshot Reason values
+// are aggregated and rendered in the output.
+func TestInspectFilePrefixReasons(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"h","reason":"session_start"}`,
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"h","reason":"epoch_switched"}`,
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"h","reason":"epoch_switched"}`,
+		`{"type":"usage","epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":100,"output_tokens":5,"cost_cny":0.0001}`,
+		`{"type":"agent.done","epoch_id":"e1","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if len(rep.PrefixReasons) != 2 {
+		t.Fatalf("PrefixReasons len = %d, want 2", len(rep.PrefixReasons))
+	}
+	// epoch_switched=2 should come first (descending count).
+	if rep.PrefixReasons[0].Reason != "epoch_switched" || rep.PrefixReasons[0].Count != 2 {
+		t.Errorf("PrefixReasons[0] = %+v, want epoch_switched=2", rep.PrefixReasons[0])
+	}
+	if rep.PrefixReasons[1].Reason != "session_start" || rep.PrefixReasons[1].Count != 1 {
+		t.Errorf("PrefixReasons[1] = %+v, want session_start=1", rep.PrefixReasons[1])
+	}
+	out := RenderText(rep)
+	if !strings.Contains(out, "cache reasons: epoch_switched=2 session_start=1") {
+		t.Errorf("RenderText missing prefix reasons line:\n%s", out)
+	}
+}
+
+// TestInspectFileRepairSummary verifies that repair records are aggregated
+// by kind and by tool.
+func TestInspectFileRepairSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"h"}`,
+		`{"type":"usage","epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":100,"output_tokens":5,"cost_cny":0.0001}`,
+		`{"type":"repair","kind":"args_completed","tool":"read_file","call_id":"c1"}`,
+		`{"type":"repair","kind":"args_completed","tool":"read_file","call_id":"c2"}`,
+		`{"type":"repair","kind":"recovered","tool":"grep","call_id":"c3"}`,
+		`{"type":"agent.done","epoch_id":"e1","reason":"model_done"}`,
+	}, "\n"))
+
+	rep, err := InspectFile(path)
+	if err != nil {
+		t.Fatalf("InspectFile: %v", err)
+	}
+	if len(rep.RepairKinds) != 2 {
+		t.Fatalf("RepairKinds len = %d, want 2", len(rep.RepairKinds))
+	}
+	// args_completed=2 first (descending count).
+	if rep.RepairKinds[0].Name != "args_completed" || rep.RepairKinds[0].Count != 2 {
+		t.Errorf("RepairKinds[0] = %+v, want args_completed=2", rep.RepairKinds[0])
+	}
+	if rep.RepairKinds[1].Name != "recovered" || rep.RepairKinds[1].Count != 1 {
+		t.Errorf("RepairKinds[1] = %+v, want recovered=1", rep.RepairKinds[1])
+	}
+	if len(rep.RepairTools) != 2 {
+		t.Fatalf("RepairTools len = %d, want 2", len(rep.RepairTools))
+	}
+	if rep.RepairTools[0].Name != "read_file" || rep.RepairTools[0].Count != 2 {
+		t.Errorf("RepairTools[0] = %+v, want read_file=2", rep.RepairTools[0])
+	}
+	out := RenderText(rep)
+	if !strings.Contains(out, "repairs: args_completed=2 recovered=1") {
+		t.Errorf("RenderText missing repairs line:\n%s", out)
+	}
+	if !strings.Contains(out, "repair tools: read_file=2 grep=1") {
+		t.Errorf("RenderText missing repair tools line:\n%s", out)
+	}
+}

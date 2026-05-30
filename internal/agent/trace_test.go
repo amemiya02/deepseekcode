@@ -52,6 +52,56 @@ func decodeTrace(t *testing.T, b []byte) []map[string]any {
 	return recs
 }
 
+// TestTraceSinkRepair verifies that EventRepair emits a "repair" trace record
+// with the correct fields and schema version 2.
+func TestTraceSinkRepair(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewTraceSink(&buf, "deepseek-v4-flash")
+	s.Handle(EventEpochCreated{EpochID: "e1", StaticPrefixHash: "h", ToolsHash: "t", Reason: "session_start"})
+	s.Handle(EventRepair{
+		Kind:       "args_completed",
+		Tool:       "read_file",
+		CallID:     "c1",
+		Message:    "arguments repaired",
+		BeforeHash: "old",
+		AfterHash:  "new",
+	})
+
+	recs := decodeTrace(t, buf.Bytes())
+	var found bool
+	for _, r := range recs {
+		if r["type"] != "repair" {
+			continue
+		}
+		found = true
+		if r["kind"] != "args_completed" {
+			t.Errorf("kind = %v, want args_completed", r["kind"])
+		}
+		if r["tool"] != "read_file" {
+			t.Errorf("tool = %v, want read_file", r["tool"])
+		}
+		if r["call_id"] != "c1" {
+			t.Errorf("call_id = %v, want c1", r["call_id"])
+		}
+		if r["before_hash"] != "old" {
+			t.Errorf("before_hash = %v, want old", r["before_hash"])
+		}
+		if r["after_hash"] != "new" {
+			t.Errorf("after_hash = %v, want new", r["after_hash"])
+		}
+		if int(r["schema_version"].(float64)) != 2 {
+			t.Errorf("schema_version = %v, want 2", r["schema_version"])
+		}
+		// Verify no raw arguments are present.
+		if _, ok := r["arguments"]; ok {
+			t.Error("repair record should not contain raw arguments")
+		}
+	}
+	if !found {
+		t.Fatal("no repair record found in trace output")
+	}
+}
+
 func TestTraceSinkEmitsRealEpochAndUsage(t *testing.T) {
 	var buf bytes.Buffer
 	s := NewTraceSink(&buf, "deepseek-v4-flash")

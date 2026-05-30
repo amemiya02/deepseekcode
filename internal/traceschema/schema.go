@@ -12,7 +12,7 @@ package traceschema
 
 // Version is stamped onto SchemaVersion of every emitted record. Bump it when
 // the record shape changes in a way a reader must branch on.
-const Version = 1
+const Version = 2
 
 // Record is one agent-trace JSONL line. Tags use omitempty to keep the emitted
 // bytes byte-stable with the pre-T6.1 emitter (readers ignore omitempty).
@@ -44,10 +44,16 @@ type Record struct {
 	// budget.* records (T6.4) so the inspector can show realized vs projected.
 	ProjectedCNY *float64 `json:"projected_cny,omitempty"`
 
-	// pending_change / drift.blocked
+	// pending_change / drift.blocked / repair
 	Kind        string `json:"kind,omitempty"`
 	Description string `json:"description,omitempty"`
 	Which       string `json:"which,omitempty"`
+
+	// repair — tool, call ID, and content hashes (no raw arguments).
+	Tool       string `json:"tool,omitempty"`
+	CallID     string `json:"call_id,omitempty"`
+	BeforeHash string `json:"before_hash,omitempty"`
+	AfterHash  string `json:"after_hash,omitempty"`
 
 	// compaction — the measured static-prefix fingerprints before and after.
 	BeforeStaticPrefixHash string   `json:"before_static_prefix_hash,omitempty"`

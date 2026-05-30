@@ -242,6 +242,17 @@ func (s *TraceSink) Handle(ev Event) {
 			kind = "rule"
 		}
 		s.write(traceRecord{Type: "permission.denied", Kind: kind, Description: e.Tool, Reason: e.Reason})
+	case EventRepair:
+		s.write(traceRecord{
+			Type:        "repair",
+			EpochID:     s.curEpochID,
+			Kind:        e.Kind,
+			Tool:        e.Tool,
+			CallID:      e.CallID,
+			Description: e.Message,
+			BeforeHash:  e.BeforeHash,
+			AfterHash:   e.AfterHash,
+		})
 	case EventDone:
 		// A terminal marker per agent. The root stamps agent_role="root"; a
 		// subagent stamps "subagent" + parent_epoch_id. The benchmark requires

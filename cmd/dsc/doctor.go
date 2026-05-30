@@ -40,6 +40,8 @@ func runDoctor(cfg config.Config, loadErr error) error {
 		checkProviderCapabilities(cfg),
 		checkSandbox(cfg),
 		checkAPIReachable(cfg),
+		checkDeepSeekAccount(cfg),
+		checkPricingFreshness(time.Now().UTC()),
 		checkSQLite(),
 		checkSnapshots(),
 		checkTerminal(),
@@ -152,6 +154,59 @@ func checkProviderCapabilities(cfg config.Config) checkResult {
 		detail += " effort=" + efforts
 	}
 	return checkResult{"capabilities", "ok", detail}
+}
+
+func checkDeepSeekAccount(cfg config.Config) checkResult {
+	_, pcfg, ok := activeProvider(cfg)
+	if !ok {
+		return checkResult{"account", "fail", "active provider not configured"}
+	}
+	if pcfg.Type != "deepseek" {
+		return checkResult{"account", "ok", "skipped (provider type " + pcfg.Type + ")"}
+	}
+	apiKey, err := config.ResolveSecret(pcfg)
+	if err != nil {
+		return checkResult{"account", "warn", "cannot resolve secret: " + err.Error()}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client := llm.NewClient(apiKey, pcfg.BaseURL)
+	ub, err := client.GetUserBalance(ctx)
+	if err != nil {
+		return checkResult{"account", "warn", "balance endpoint error: " + err.Error()}
+	}
+	if !ub.IsAvailable {
+		return checkResult{"account", "warn", "unavailable " + formatUserBalanceForDoctor(ub)}
+	}
+	return checkResult{"account", "ok", "available " + formatUserBalanceForDoctor(ub)}
+}
+
+// formatUserBalanceForDoctor renders balance infos as "CNY=110.00 USD=2.50"
+// in deterministic sorted-currency order.
+func formatUserBalanceForDoctor(balance llm.UserBalance) string {
+	infos := make([]llm.BalanceInfo, len(balance.BalanceInfos))
+	copy(infos, balance.BalanceInfos)
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Currency < infos[j].Currency
+	})
+	var parts []string
+	for _, bi := range infos {
+		parts = append(parts, bi.Currency+"="+bi.TotalBalance)
+	}
+	return strings.Join(parts, " ")
+}
+
+func checkPricingFreshness(now time.Time) checkResult {
+	f, err := llm.PricingFreshnessAt(now)
+	if err != nil {
+		return checkResult{"pricing", "warn", "freshness check failed: " + err.Error()}
+	}
+	detail := fmt.Sprintf("checked %s (%d days old) source=%s",
+		llm.PricingCheckedDate, f.AgeDays, f.SourceURL)
+	if f.Stale {
+		return checkResult{"pricing", "warn", detail}
+	}
+	return checkResult{"pricing", "ok", detail}
 }
 
 func checkSandbox(cfg config.Config) checkResult {

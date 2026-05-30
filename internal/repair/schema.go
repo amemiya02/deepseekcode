@@ -3,6 +3,9 @@ package repair
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 // SchemaAnalysis holds the results of schema complexity analysis.
@@ -11,6 +14,38 @@ type SchemaAnalysis struct {
 	LeafCount            int
 	HasNestedArrayObject bool
 	ShouldAdapt          bool
+}
+
+// AnalyzeToolSchemas inspects a slice of llm.Tool schemas and returns
+// one Report per tool whose schema exceeds maxDepth, maxLeaves, or has
+// nested array/object shape. Reports are sorted by tool name for
+// deterministic order.
+func AnalyzeToolSchemas(tools []llm.Tool, maxDepth int, maxLeaves int) []Report {
+	var reports []Report
+	for _, tool := range tools {
+		schema := tool.Function.Parameters
+		if len(schema) == 0 {
+			continue
+		}
+		analysis, err := AnalyzeSchema(schema)
+		if err != nil {
+			continue
+		}
+		if analysis.MaxDepth > maxDepth || analysis.LeafCount > maxLeaves || analysis.HasNestedArrayObject {
+			msg := fmt.Sprintf("schema depth %d leaves %d nested_array_object=%v (limits: depth %d leaves %d)",
+				analysis.MaxDepth, analysis.LeafCount, analysis.HasNestedArrayObject, maxDepth, maxLeaves)
+			reports = append(reports, Report{
+				Kind:    KindSchemaComplex,
+				Tool:    tool.Function.Name,
+				Message: msg,
+			})
+		}
+	}
+	// Sort by tool name for deterministic order.
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].Tool < reports[j].Tool
+	})
+	return reports
 }
 
 // AnalyzeSchema analyzes a JSON schema for complexity indicators.

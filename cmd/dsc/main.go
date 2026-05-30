@@ -451,13 +451,14 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	// Persistence (best effort). Notices are collected and rendered at
 	// TUI startup, not written to stderr.
 	var (
-		sessionID  string
-		undoFn     func(int) (int, error)
-		listFn     func() ([]session.Session, error)
-		setModelFn func(string) error
-		setThemeFn func(string) error
-		notices    []string
-		sess       session.Session
+		sessionID    string
+		undoFn       func(int) (int, error)
+		listFn       func() ([]session.Session, error)
+		setModelFn   func(string) error
+		setThemeFn   func(string) error
+		notices      []string
+		sess         session.Session
+		usageSummary session.UsageSummary
 	)
 	notices = append(notices, rt.Notices...)
 
@@ -510,6 +511,14 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 			persister := session.NewPersister(store, snaps, sess.ID)
 			a.Persister = persister
 			sessionID = sess.ID
+
+			// Seed the status-line cost/cache totals from persisted usage so
+			// a resumed session restores its HUD instead of starting from zero.
+			if sum, sumErr := persister.UsageSummary(ctx); sumErr == nil {
+				usageSummary = sum
+			} else {
+				notices = append(notices, "warning: loading usage summary: "+sumErr.Error())
+			}
 
 			if continueSes || resumeSes != "" {
 				msgs, loadErr := store.Replay(ctx, sess.ID)
@@ -600,6 +609,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		Commands:              customCmds,
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,
+		InitialUsageSummary:   usageSummary,
 		HistoryPath:           projectHistoryPath(home, cwd),
 		Language:              cfg.UI.Language,
 		LSPReady:              len(lspReg.Servers()) > 0,

@@ -207,12 +207,13 @@ Ctrl+D      quit
 Ctrl+R      toggle the most recent thinking block
 Ctrl+T      toggle all thinking blocks
 PgUp/PgDn   scroll
+Tab / ←→ / h l   switch help tabs
 ```
 
 Slash commands:
 
 ```text
-/help       show keymap and commands
+/help       open the tabbed help (General / Commands / Custom commands)
 /clear      clear scrollback
 /quit       exit
 /models     list or switch the main-loop model

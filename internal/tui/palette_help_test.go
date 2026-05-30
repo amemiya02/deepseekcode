@@ -4,6 +4,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // TestPaletteWindowFollowsCursorAndScrolls pins the scroll fix: with more
@@ -257,19 +260,19 @@ func TestHelpQuestionMarkLiteralInInsert(t *testing.T) {
 
 // TestHelpBodyGeneratedFromRegistry: the help body lists the built-in commands
 // from the shared registry (so it can't drift from the / menu) and the static
-// keybinding table.
+// keybinding table. Migrated from the deleted helpBody to the new tab builders.
 func TestHelpBodyGeneratedFromRegistry(t *testing.T) {
 	rows := allCommands(nil, nil)
-	body := helpBody(rows)
+	cmdBody := helpCommandsBody(rows)
 	for _, want := range []string{"/help", "/models", "/compact"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("help body should list %q from the registry", want)
+		if !strings.Contains(cmdBody, want) {
+			t.Errorf("Commands tab body should list %q from the registry", want)
 		}
 	}
-	// The keybinding table half must be present too.
+	genBody := helpGeneralBody(DarkTheme(), 100)
 	for _, want := range []string{"^P", "^G", "^R"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("help body should document the %q keybinding", want)
+		if !strings.Contains(genBody, want) {
+			t.Errorf("General tab body should document the %q keybinding", want)
 		}
 	}
 }
@@ -293,7 +296,7 @@ func TestHelpScrollsWithJK(t *testing.T) {
 		t.Fatalf("k should clamp the help scroll at the top, offset = %d", a.overlay.Cursor())
 	}
 	// Rendering at the short height must not panic and must produce a pane.
-	if got := renderHelp(a.theme, a.helpCommandRows(), a.overlay.Cursor(), 100, 10); got == "" {
+	if got := renderHelp(a.theme, a.helpCommandRows(), a.overlay.HelpTab(), a.overlay.Cursor(), 100, 10); got == "" {
 		t.Fatal("renderHelp should produce a non-empty pane")
 	}
 }
@@ -311,5 +314,225 @@ func TestHelpSlashOpensOverlay(t *testing.T) {
 	}
 	if got := len(a.scrollback.Items()); got != before {
 		t.Fatalf("/help must not dump into the scrollback (grew by %d)", got-before)
+	}
+}
+
+// --- 4102: tab body builders ------------------------------------------------
+
+// TestHelpCommandsBodyListsBuiltins verifies the Commands tab shows all built-in
+// commands and does NOT include (custom) or (skill) tags.
+func TestHelpCommandsBodyListsBuiltins(t *testing.T) {
+	body := helpCommandsBody(allCommands(nil, nil))
+	for _, want := range []string{"/help", "/models", "/compact", "/clear"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Commands body should contain %q", want)
+		}
+	}
+	if strings.Contains(body, "(custom)") {
+		t.Error("Commands body should NOT contain (custom)")
+	}
+	if strings.Contains(body, "(skill)") {
+		t.Error("Commands body should NOT contain (skill)")
+	}
+}
+
+// TestHelpCustomBodyEmptyState verifies the empty-state line when there are no
+// custom commands or skills.
+func TestHelpCustomBodyEmptyState(t *testing.T) {
+	body := helpCustomBody(allCommands(nil, nil))
+	if !strings.Contains(body, "(no custom commands or skills found)") {
+		t.Errorf("Custom body should show empty-state line, got:\n%s", body)
+	}
+}
+
+// TestHelpCustomBodyTagsRows verifies that custom and skill rows are tagged and
+// built-in commands are excluded.
+func TestHelpCustomBodyTagsRows(t *testing.T) {
+	rows := []slashCmd{
+		{Name: "help", Summary: "show help", Kind: builtinCmd},
+		{Name: "my-cmd", Summary: "a custom", Kind: customCmd},
+		{Name: "my-skill", Summary: "a skill", Kind: skillCmd},
+	}
+	body := helpCustomBody(rows)
+	if !strings.Contains(body, "/my-cmd") {
+		t.Error("Custom body should contain /my-cmd")
+	}
+	if !strings.Contains(body, "(custom)") {
+		t.Error("Custom body should contain (custom) tag")
+	}
+	if !strings.Contains(body, "/my-skill") {
+		t.Error("Custom body should contain /my-skill")
+	}
+	if !strings.Contains(body, "(skill)") {
+		t.Error("Custom body should contain (skill) tag")
+	}
+	if strings.Contains(body, "/help") {
+		t.Error("Custom body should NOT contain built-in /help")
+	}
+}
+
+// TestHelpGeneralBodyHasIntroAndShortcuts verifies the General tab contains the
+// intro sentence and the keybinding table.
+func TestHelpGeneralBodyHasIntroAndShortcuts(t *testing.T) {
+	body := helpGeneralBody(DarkTheme(), 100)
+	if !strings.Contains(body, "deepseekcode") {
+		t.Error("General body should contain 'deepseekcode' in the intro")
+	}
+	if !strings.Contains(body, "shortcuts") {
+		t.Error("General body should contain a 'shortcuts' header")
+	}
+	if !strings.Contains(body, "^P") {
+		t.Error("General body should contain at least one keybinding key (^P)")
+	}
+}
+
+// TestRenderHelpShowsActiveTabBody verifies that the tabbed renderHelp draws the
+// correct body for each tab and includes the tab titles.
+func TestRenderHelpShowsActiveTabBody(t *testing.T) {
+	rows := allCommands(nil, nil)
+	// Commands tab should contain built-in command names.
+	cmdOut := stripANSI(renderHelp(DarkTheme(), rows, helpTabCommands, 0, 100, 40))
+	if !strings.Contains(cmdOut, "/models") {
+		t.Error("Commands tab render should contain /models")
+	}
+	if !strings.Contains(cmdOut, "General") || !strings.Contains(cmdOut, "Commands") {
+		t.Error("renderHelp should show tab titles (General, Commands)")
+	}
+	// General tab should contain intro + shortcuts.
+	genOut := stripANSI(renderHelp(DarkTheme(), rows, helpTabGeneral, 0, 100, 40))
+	if !strings.Contains(genOut, "shortcuts") {
+		t.Error("General tab render should contain 'shortcuts'")
+	}
+	if !strings.Contains(genOut, "deepseekcode") {
+		t.Error("General tab render should contain 'deepseekcode' intro")
+	}
+}
+
+// TestColumnizeWideVsNarrow verifies column-major layout at wide widths and
+// single-column fallback at narrow widths.
+func TestColumnizeWideVsNarrow(t *testing.T) {
+	cells := make([]string, 8)
+	for i := range cells {
+		cells[i] = "^" + strconv.Itoa(i) + " label"
+	}
+	// Wide: 2 columns → ceil(8/2) = 4 rows.
+	wide := columnize(cells, 100)
+	if len(wide) != 4 {
+		t.Errorf("columnize(cells, 100): got %d rows, want 4", len(wide))
+	}
+	for i, row := range wide {
+		if w := lipgloss.Width(row); w > 100 {
+			t.Errorf("row %d width %d exceeds 100", i, w)
+		}
+	}
+	// Narrow: 1 column → 8 rows.
+	narrow := columnize(cells, 40)
+	if len(narrow) != 8 {
+		t.Errorf("columnize(cells, 40): got %d rows, want 8", len(narrow))
+	}
+	for i, row := range narrow {
+		if w := lipgloss.Width(row); w > 40 {
+			t.Errorf("narrow row %d width %d exceeds 40", i, w)
+		}
+	}
+}
+
+// --- 4104: help tab key bindings -------------------------------------------
+
+// key helpers for named keys not covered by the shared press()/ctrl() helpers.
+func keyShiftTab() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift} }
+func keyLeft() tea.KeyPressMsg     { return tea.KeyPressMsg{Code: tea.KeyLeft} }
+func keyRight() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: tea.KeyRight} }
+
+// TestHelpTabKeysSwitch verifies that h/l switch help tabs with wrap-around.
+func TestHelpTabKeysSwitch(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.openHelp()
+	if a.overlay.HelpTab() != 0 {
+		t.Fatalf("precondition: HelpTab() = %d, want 0", a.overlay.HelpTab())
+	}
+	a.handleOverlayKey(press('l'))
+	if got := a.overlay.HelpTab(); got != 1 {
+		t.Fatalf("l → HelpTab() = %d, want 1", got)
+	}
+	a.handleOverlayKey(press('l'))
+	if got := a.overlay.HelpTab(); got != 2 {
+		t.Fatalf("l → HelpTab() = %d, want 2", got)
+	}
+	a.handleOverlayKey(press('l')) // wrap
+	if got := a.overlay.HelpTab(); got != 0 {
+		t.Fatalf("l (wrap) → HelpTab() = %d, want 0", got)
+	}
+	a.handleOverlayKey(press('h'))
+	if got := a.overlay.HelpTab(); got != 2 {
+		t.Fatalf("h (wrap back) → HelpTab() = %d, want 2", got)
+	}
+}
+
+// TestHelpTabKeysViaTabAndArrows verifies tab/shift+tab/←/→ switching.
+func TestHelpTabKeysViaTabAndArrows(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.openHelp()
+
+	a.handleOverlayKey(keyTab())
+	if got := a.overlay.HelpTab(); got != 1 {
+		t.Fatalf("Tab → HelpTab() = %d, want 1", got)
+	}
+	a.handleOverlayKey(keyRight())
+	if got := a.overlay.HelpTab(); got != 2 {
+		t.Fatalf("Right → HelpTab() = %d, want 2", got)
+	}
+	a.handleOverlayKey(keyShiftTab())
+	if got := a.overlay.HelpTab(); got != 1 {
+		t.Fatalf("Shift+Tab → HelpTab() = %d, want 1", got)
+	}
+	a.handleOverlayKey(keyLeft())
+	if got := a.overlay.HelpTab(); got != 0 {
+		t.Fatalf("Left → HelpTab() = %d, want 0", got)
+	}
+}
+
+// TestHelpJKStillScrollsNotSwitch verifies j/k scroll within a tab, not switch.
+func TestHelpJKStillScrollsNotSwitch(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.openHelp()
+
+	a.handleOverlayKey(press('j'))
+	if got := a.overlay.Cursor(); got != 1 {
+		t.Fatalf("j → Cursor() = %d, want 1", got)
+	}
+	if got := a.overlay.HelpTab(); got != 0 {
+		t.Fatalf("j should not switch tab, HelpTab() = %d", got)
+	}
+	a.handleOverlayKey(press('k'))
+	if got := a.overlay.Cursor(); got != 0 {
+		t.Fatalf("k → Cursor() = %d, want 0", got)
+	}
+	if got := a.overlay.HelpTab(); got != 0 {
+		t.Fatalf("k should not switch tab, HelpTab() = %d", got)
+	}
+}
+
+// TestTapeIgnoresTabSwitchKeys verifies that tab/shift+tab/h/l are no-ops in
+// modeTape (they must not move the tape cursor or switch anything).
+func TestTapeIgnoresTabSwitchKeys(t *testing.T) {
+	a := newKeyflowApp(t)
+	a = sizeApp(t, a, 100, 40)
+	a.overlay.OpenTape()
+	before := a.overlay.Cursor()
+
+	a.handleOverlayKey(press('l'))
+	if got := a.overlay.Cursor(); got != before {
+		t.Fatalf("l in tape: Cursor() = %d, want %d (unchanged)", got, before)
+	}
+	if got := a.overlay.Mode(); got != modeTape {
+		t.Fatalf("l in tape: mode changed to %v", got)
+	}
+	a.handleOverlayKey(keyTab())
+	if got := a.overlay.Cursor(); got != before {
+		t.Fatalf("Tab in tape: Cursor() = %d, want %d (unchanged)", got, before)
 	}
 }

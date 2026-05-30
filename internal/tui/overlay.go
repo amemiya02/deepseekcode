@@ -22,6 +22,15 @@ const (
 	modeHelp                 // ? / ctrl+g / /help — keybinding + command overlay (G7)
 )
 
+// Named help-tab indices. They index a switch inside renderHelp, not an
+// overlayMode, so they are plain untyped int consts.
+const (
+	helpTabGeneral  = 0
+	helpTabCommands = 1
+	helpTabCustom   = 2
+	helpTabCount    = 3
+)
+
 // Overlay owns the modal-picker state — which picker is up, where
 // the cursor sits, and the picker-specific data rows. App composes
 // one of these instead of carrying overlay/overlayCursor/models/
@@ -35,6 +44,7 @@ const (
 type Overlay struct {
 	mode         overlayMode
 	cursor       int // tape entry index / help scroll offset
+	helpTab      int // active help tab (0..helpTabCount-1); only meaningful in modeHelp
 	models       []modelOption
 	sessionsRows []sessionRow
 	palette      []paletteAction
@@ -107,7 +117,29 @@ func (o *Overlay) OpenPalette(actions []paletteAction) {
 }
 
 // OpenHelp switches to the help overlay (G7), scrolled to the top.
-func (o *Overlay) OpenHelp() { o.mode = modeHelp; o.cursor = 0 }
+func (o *Overlay) OpenHelp() { o.mode = modeHelp; o.cursor = 0; o.helpTab = 0 }
+
+// HelpTab returns the active help tab index (0..helpTabCount-1).
+func (o *Overlay) HelpTab() int { return o.helpTab }
+
+// SetHelpTab sets the active help tab, clamped to [0, helpTabCount-1], and
+// resets the scroll offset (cursor) to 0. A no-op-safe clamp: negative -> 0,
+// >= helpTabCount -> helpTabCount-1.
+func (o *Overlay) SetHelpTab(i int) {
+	if i < 0 {
+		i = 0
+	} else if i >= helpTabCount {
+		i = helpTabCount - 1
+	}
+	o.helpTab = i
+	o.cursor = 0
+}
+
+// NextHelpTab / PrevHelpTab cycle the active help tab with wrap-around
+// (Next from the last tab -> first; Prev from the first -> last) and reset the
+// scroll offset (cursor) to 0.
+func (o *Overlay) NextHelpTab() { o.SetHelpTab((o.helpTab + 1) % helpTabCount) }
+func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % helpTabCount) }
 
 // Filterable reports whether the active overlay routes typing into the shared
 // filter (the pickers and the palette) rather than treating letters as nav
@@ -561,30 +593,9 @@ func renderPalette(t Theme, actions []paletteAction, visible []int, cursor int, 
 	return wrapPane(t, "palette", header, b.String(), width, height)
 }
 
-// helpBody returns the structured help body for the overlay (G7): the command
-// list (from the shared registry, so it can't drift from the / menu) followed
-// by a static keybinding table. It is a plain string so renderHelp can scroll
-// it by line offset.
-func helpBody(commandRows []slashCmd) string {
-	var b strings.Builder
-	b.WriteString("commands\n")
-	for _, c := range commandRows {
-		name := "/" + c.Name
-		tag := ""
-		switch c.Kind {
-		case customCmd:
-			tag = " (custom)"
-		case skillCmd:
-			tag = " (skill)"
-		}
-		b.WriteString(fmt.Sprintf("  %-18s %s%s\n", name, c.Summary, tag))
-	}
-	b.WriteString("\nkeys\n")
-	for _, k := range keybindingRows() {
-		b.WriteString(fmt.Sprintf("  %-12s %s\n", k[0], k[1]))
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
+// helpTabTitles holds the display names for each help tab, indexed by the
+// helpTab* consts.
+var helpTabTitles = [helpTabCount]string{"General", "Commands", "Custom commands"}
 
 // keybindingRows is the static keybinding table shown in the help overlay
 // (G7). Kept as a literal table (not derived from the dispatcher) so it reads
@@ -612,24 +623,158 @@ func keybindingRows() [][2]string {
 	}
 }
 
-// renderHelp draws the scrollable help overlay (G7). offset is the first
-// visible body line (j/k scroll); the body comes from helpBody so the command
-// list cannot drift from the / menu.
-func renderHelp(t Theme, commandRows []slashCmd, offset, width, height int) string {
-	lines := strings.Split(helpBody(commandRows), "\n")
-	// Keep every row to one line: truncate to the pane interior (border 2 +
-	// horizontal padding 4) so wrapPane can't word-wrap long summaries into the
-	// multi-line wall the help used to show.
+// --- tabbed help body builders (Task 4102) -----------------------------------
+
+// helpIntroText returns the one-sentence description shown atop the General tab.
+// Plain unstyled string (no trailing newline), wrapped by the caller.
+func helpIntroText() string {
+	return "deepseekcode reads your codebase, proposes edits you approve, and runs tools — all from your terminal, powered by DeepSeek models."
+}
+
+// twoColMinWidth is the minimum pane interior width at which columnize lays
+// cells out in two columns. Below this it falls back to a single column.
+const twoColMinWidth = 80
+
+// columnize lays cells into 2 columns when width >= twoColMinWidth, else 1
+// column. Fill is COLUMN-MAJOR: the left column gets the first ceil(n/2) cells
+// top-to-bottom, the right column the rest. Each returned element is one row
+// string; each cell is truncated to the per-column width (truncateCells). A
+// 2-space gutter separates columns. Returns nil for an empty input.
+func columnize(cells []string, width int) []string {
+	if len(cells) == 0 {
+		return nil
+	}
+	if width < twoColMinWidth {
+		out := make([]string, len(cells))
+		for i, c := range cells {
+			out[i] = truncateCells(c, width)
+		}
+		return out
+	}
+	half := (len(cells) + 1) / 2
+	colW := (width - 2) / 2 // 2 = gutter
+	if colW < 1 {
+		colW = 1
+	}
+	out := make([]string, half)
+	for i := 0; i < half; i++ {
+		left := truncateCells(cells[i], colW)
+		right := ""
+		if i+half < len(cells) {
+			right = truncateCells(cells[i+half], colW)
+		}
+		// Pad left to colW display cells so the gutter stays fixed.
+		leftPad := lipgloss.NewStyle().Width(colW).Render(left)
+		out[i] = leftPad + "  " + right
+	}
+	return out
+}
+
+// helpGeneralBody returns the General tab body: the intro sentence wrapped to
+// width, a blank line, a "shortcuts" header, then the keybindingRows() table
+// laid out via columnize at width. width is the pane interior width.
+func helpGeneralBody(t Theme, width int) string {
+	intro := lipgloss.NewStyle().Width(width).Render(helpIntroText())
+	cells := make([]string, len(keybindingRows()))
+	for i, k := range keybindingRows() {
+		cells[i] = fmt.Sprintf("%-10s %s", k[0], k[1])
+	}
+	rows := columnize(cells, width)
+	return strings.TrimRight(intro+"\n\n"+"shortcuts"+"\n"+strings.Join(rows, "\n"), "\n")
+}
+
+// helpCommandsBody returns the Commands tab body: a "commands" header then one
+// line per built-in command (rows with Kind == builtinCmd), formatted
+// "  /name  summary". Rows are taken from commandRows in their given order.
+func helpCommandsBody(commandRows []slashCmd) string {
+	var b strings.Builder
+	b.WriteString("commands\n")
+	for _, c := range commandRows {
+		if c.Kind != builtinCmd {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-18s %s\n", "/"+c.Name, c.Summary)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// helpCustomBody returns the Custom-commands tab body: a header then one line
+// per row with Kind == customCmd or skillCmd, formatted "  /name  summary (custom)"
+// or "(skill)". When no such rows exist, the body is the header + a single
+// dimmed-able empty-state line "  (no custom commands or skills found)".
+func helpCustomBody(commandRows []slashCmd) string {
+	var b strings.Builder
+	b.WriteString("custom commands & skills\n")
+	count := 0
+	for _, c := range commandRows {
+		if c.Kind != customCmd && c.Kind != skillCmd {
+			continue
+		}
+		tag := " (custom)"
+		if c.Kind == skillCmd {
+			tag = " (skill)"
+		}
+		fmt.Fprintf(&b, "  %-18s %s%s\n", "/"+c.Name, c.Summary, tag)
+		count++
+	}
+	if count == 0 {
+		b.WriteString("  (no custom commands or skills found)\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderHelpTabBar renders the three tab titles on ONE line: active tab as a
+// filled chip (SelBg/SelFg, bold, padded 0,1), inactive as dim (t.Hint, padded
+// 0,1), separated by a single space. Degrades to bold BrandLight fg (no bg) for
+// the active tab when t.Transparent() || !t.Truecolor(). The whole line is
+// truncated to width. active is a helpTab* index.
+func renderHelpTabBar(t Theme, active, width int) string {
+	var parts []string
+	for i, title := range helpTabTitles {
+		style := lipgloss.NewStyle().Padding(0, 1)
+		if i == active {
+			if t.Transparent() || !t.Truecolor() {
+				style = style.Foreground(t.BrandLight).Bold(true)
+			} else {
+				style = style.Background(t.SelBg).Foreground(t.SelFg).Bold(true)
+			}
+		} else {
+			style = style.Foreground(t.FgFaint)
+		}
+		parts = append(parts, style.Render(title))
+	}
+	return truncateCells(strings.Join(parts, " "), width)
+}
+
+// renderHelp draws the tabbed help overlay. tab selects the body
+// (helpTabGeneral/Commands/Custom); offset is the first visible BODY line of
+// the active tab (j/k scroll). Tab bar + a blank line are fixed chrome above
+// the scrolled body; the scroll viewport is height-6. Always returns exactly
+// height rows × width cells via wrapPane.
+func renderHelp(t Theme, commandRows []slashCmd, tab, offset, width, height int) string {
 	interiorW := width - 6
 	if interiorW < 10 {
 		interiorW = 10
 	}
+
+	// Select body by tab index.
+	var body string
+	switch tab {
+	case helpTabCommands:
+		body = helpCommandsBody(commandRows)
+	case helpTabCustom:
+		body = helpCustomBody(commandRows)
+	default:
+		body = helpGeneralBody(t, interiorW)
+	}
+
+	lines := strings.Split(body, "\n")
 	for i := range lines {
 		lines[i] = truncateCells(lines[i], interiorW)
 	}
-	// Interior height: the surface chrome (top margin 1 + title 1 + rule 1 +
-	// blank 1) comes off the top; the rest shows help lines.
-	view := height - 4
+
+	// Tab bar + blank are fixed chrome; the rest is the scrollable body.
+	view := height - 6
 	if view < 3 {
 		view = 3
 	}
@@ -646,9 +791,15 @@ func renderHelp(t Theme, commandRows []slashCmd, offset, width, height int) stri
 	if end > len(lines) {
 		end = len(lines)
 	}
-	body := strings.Join(lines[offset:end], "\n")
-	header := fmt.Sprintf("%d lines · j/k scroll · esc/q close", len(lines))
-	return wrapPane(t, "help", header, body, width, height)
+	tabBar := renderHelpTabBar(t, tab, interiorW)
+	bodyOut := tabBar + "\n\n" + strings.Join(lines[offset:end], "\n")
+
+	title := "General"
+	if tab >= 0 && tab < helpTabCount {
+		title = helpTabTitles[tab]
+	}
+	header := fmt.Sprintf("%s · %d lines · tab/←→ switch · j/k scroll", title, len(lines))
+	return wrapPane(t, "help", header, bodyOut, width, height)
 }
 
 // selectedRow renders a picker's focused row as a filled selection band: a

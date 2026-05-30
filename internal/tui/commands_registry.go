@@ -29,7 +29,7 @@ type slashCmd struct {
 
 // builtinCommands returns the static built-in command list. It mirrors
 // exactly the commands handled in handleSlash (and surfaced by the /help
-// overlay via helpBody): names carry no leading slash and aliases match the
+// overlay via the tab body builders): names carry no leading slash and aliases match the
 // alternate forms accepted by the dispatcher.
 func builtinCommands() []slashCmd {
 	return []slashCmd{

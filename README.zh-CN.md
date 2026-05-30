@@ -196,12 +196,13 @@ Ctrl+D      退出
 Ctrl+R      展开/折叠最近一个 thinking block
 Ctrl+T      展开/折叠全部 thinking blocks
 PgUp/PgDn   滚动
+Tab / ←→ / h l   切换帮助标签页
 ```
 
 Slash commands：
 
 ```text
-/help       显示快捷键和命令
+/help       打开标签页帮助（通用 / 命令 / 自定义命令）
 /clear      清空 scrollback
 /quit       退出
 /models     列出或切换主循环模型

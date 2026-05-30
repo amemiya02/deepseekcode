@@ -849,8 +849,8 @@ func (a *App) renderOverlay() string {
 		body = renderPalette(a.theme, a.overlay.Palette(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
 		footerText = "j/k move · ⏎ run · esc back · q quit"
 	case modeHelp:
-		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.Cursor(), a.width, h)
-		footerText = "j/k scroll · esc/q close"
+		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.HelpTab(), a.overlay.Cursor(), a.width, h)
+		footerText = "tab/←→/hl switch · j/k scroll · esc close"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -1787,6 +1787,16 @@ func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case "ctrl+c":
 		return tea.Quit
+	case "tab", "right", "l":
+		if a.overlay.Mode() == modeHelp {
+			a.overlay.NextHelpTab()
+		}
+		return nil
+	case "shift+tab", "left", "h":
+		if a.overlay.Mode() == modeHelp {
+			a.overlay.PrevHelpTab()
+		}
+		return nil
 	case "j", "down":
 		a.overlay.MoveDown()
 	case "k", "up":

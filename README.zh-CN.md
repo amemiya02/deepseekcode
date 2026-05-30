@@ -3,7 +3,7 @@
 [![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
 [![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
-[![Baseline](https://img.shields.io/badge/baseline-v0.2.0-blue)](#版本管理)
+[![Baseline](https://img.shields.io/badge/baseline-v0.3.1-blue)](#版本管理)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md)
@@ -13,7 +13,7 @@ chat-completions 端点的终端原生编码 Agent。它以单个 Go 二进制 `
 分发，包含 Bubble Tea TUI、一次性 CLI 模式、结构化工具、SQLite 会话、
 缓存友好的请求序列化，以及适合日常仓库工作的权限模型。
 
-当前文档基线版本：**v0.2.0**。
+当前文档基线版本：**v0.3.1**。
 
 ## 为什么选择 deepseekcode
 
@@ -58,7 +58,7 @@ DeepSeek 暴露了推理内容、前缀缓存指标、长上下文和成本特�
 curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
 ```
 
-默认安装到 `~/.local/bin`。可通过 `PREFIX=/usr/local sh` 覆盖安装路径，或通过 `DSC_VERSION=v0.3.0 sh` 指定版本。
+默认安装到 `~/.local/bin`。可通过 `PREFIX=/usr/local sh` 覆盖安装路径，或通过 `DSC_VERSION=v0.3.1 sh` 指定版本。
 
 ### macOS（Homebrew）
 
@@ -294,12 +294,9 @@ make test
 
 ## 版本管理
 
-当前仓库的公开维护基线建议使用 **v0.2.0**。代码已经包含终端 Agent 表面，
-并且已经实现 provider 配置、web tools、MCP bridging、LSP 集成、子 Agent
-分派、worktree 支持、sandbox wiring 和诊断命令。
-
 Release build 会通过 `make build` 使用 `git describe` 注入版本；因此
-`v0.2.0` 这样的 tag 会出现在 `dsc -version` 输出中。
+`v0.3.1` 这样的 tag 会出现在 `dsc -version` 输出中。使用 `dsc upgrade`
+检查并应用新版本。
 
 ## 参与贡献
 

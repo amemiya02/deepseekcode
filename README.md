@@ -3,7 +3,7 @@
 [![CI](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml/badge.svg)](https://github.com/amemiya02/deepseekcode/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/amemiya02/deepseekcode.svg)](https://pkg.go.dev/github.com/amemiya02/deepseekcode)
 [![Go Report Card](https://goreportcard.com/badge/github.com/amemiya02/deepseekcode)](https://goreportcard.com/report/github.com/amemiya02/deepseekcode)
-[![Baseline](https://img.shields.io/badge/baseline-v0.2.0-blue)](#versioning)
+[![Baseline](https://img.shields.io/badge/baseline-v0.3.1-blue)](#versioning)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [English](README.md) · [简体中文](README.zh-CN.md)
@@ -14,7 +14,7 @@ binary named `dsc`, with a Bubble Tea TUI, one-shot CLI mode, structured
 tools, SQLite-backed sessions, cache-aware request serialization, and a
 permission model designed for day-to-day repository work.
 
-Current documented baseline: **v0.2.0**.
+Current documented baseline: **v0.3.1**.
 
 ## Why deepseekcode
 
@@ -66,7 +66,7 @@ generic chat wrapper.
 curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
 ```
 
-Installs `dsc` to `~/.local/bin`. Override with `PREFIX=/usr/local sh` or pin a version with `DSC_VERSION=v0.3.0 sh`.
+Installs `dsc` to `~/.local/bin`. Override with `PREFIX=/usr/local sh` or pin a version with `DSC_VERSION=v0.3.1 sh`.
 
 ### macOS (Homebrew)
 
@@ -311,13 +311,9 @@ make test
 
 ## Versioning
 
-Use **v0.2.0** as the current public baseline for this repository. The
-codebase includes the terminal agent surface plus implemented provider
-configuration, web tools, MCP bridging, LSP integration, subagent
-dispatch, worktree support, sandbox wiring, and diagnostic commands.
-
 Release builds are stamped by `make build` through `git describe`, so a
-tagged build such as `v0.2.0` will appear in `dsc -version`.
+tagged build such as `v0.3.1` will appear in `dsc -version`. Use
+`dsc upgrade` to check for and apply newer releases.
 
 ## Contributing
 

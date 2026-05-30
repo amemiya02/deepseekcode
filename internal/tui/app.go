@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -215,6 +216,14 @@ func New(cfg Config) *App {
 	st.Cursor.Shape = tea.CursorBlock
 	ta.SetStyles(st)
 	ta.Focus()
+	// Add "shift+enter" to the InsertNewline binding so the textarea
+	// recognises it as a newline key.  Without this, bubbletea's default
+	// binding only matches "enter" and "ctrl+m"; Shift+Enter falls through
+	// as an unrecognised key and nothing happens.
+	ta.KeyMap.InsertNewline = key.NewBinding(
+		key.WithKeys("enter", "shift+enter", "ctrl+m"),
+		key.WithHelp("enter", "insert newline"),
+	)
 
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true

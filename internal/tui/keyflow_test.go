@@ -71,6 +71,9 @@ func ctrl(r rune) tea.KeyPressMsg {
 
 func keyEnter() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func keyEscape() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEscape} }
+func shiftEnter() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
+}
 
 // drive sends a key through Update and returns the resulting *App.
 func drive(t *testing.T, a *App, km tea.KeyPressMsg) *App {
@@ -126,6 +129,29 @@ func TestInsertModeFallThroughReachesTextarea(t *testing.T) {
 	a = drive(t, a, press('j'))
 	if got := a.input.Value(); got != "j" {
 		t.Fatalf("after typing 'j' in Insert mode, input value = %q, want %q", got, "j")
+	}
+}
+
+// TestShiftEnterInsertsNewline: Shift+Enter must insert a newline into the
+// textarea (not submit).  handleKey reports intercepted=false (the hasShiftEnter
+// fast-path), and the textarea's InsertNewline binding includes "shift+enter"
+// so the key splits the current line.
+func TestShiftEnterInsertsNewline(t *testing.T) {
+	a := sizeApp(t, newKeyflowApp(t), 100, 40)
+	// Type some text, then Shift+Enter.
+	a = drive(t, a, press('h'))
+	a = drive(t, a, press('i'))
+	// Shift+Enter: handleKey must NOT intercept (falls through to textarea).
+	cmd, intercepted := a.handleKey(shiftEnter())
+	if intercepted {
+		t.Fatalf("handleKey intercepted Shift+Enter; it must fall through to the textarea")
+	}
+	_ = cmd
+	// Drive through Update so the textarea actually processes it.
+	a = drive(t, a, shiftEnter())
+	got := a.input.Value()
+	if got != "hi\n" {
+		t.Fatalf("after Shift+Enter, input value = %q, want %q", got, "hi\n")
 	}
 }
 

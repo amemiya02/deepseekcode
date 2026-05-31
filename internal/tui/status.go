@@ -32,6 +32,11 @@ type statusState struct {
 	// session (the common case, and every existing golden) is unaffected.
 	queued int
 
+	// balanceNote holds the formatted account balance (e.g. "CNY=110.00
+	// USD=2.50") fetched at TUI startup. Empty means balance unavailable
+	// or not yet fetched.
+	balanceNote string
+
 	// Capability counters for the status-line capability segment.
 	mcpTools int  // total tools across connected MCP servers; 0 hides the sub-part
 	lspReady bool // at least one LSP server attached
@@ -88,9 +93,6 @@ func (s statusState) render(t Theme) string {
 		cacheStyle = lipgloss.NewStyle().Foreground(t.WarnColor)
 	}
 	cacheChip := cacheStyle.Render(fmt.Sprintf("cache %.0f%%", hit))
-	if s.savedYuan > 0 {
-		cacheChip += label.Render(fmt.Sprintf(" · saved ¥%.3f", s.savedYuan))
-	}
 
 	// Context fill bar with accent-colored filled cells. Built locally (not
 	// via RenderHUD) so the filled cells can carry the brand accent while the
@@ -108,14 +110,14 @@ func (s statusState) render(t Theme) string {
 		dot + label.Render(fmt.Sprintf("%d steps", s.steps)) +
 		dot + cacheChip +
 		dot + costStyle.Render(costStr)
+	if s.balanceNote != "" {
+		line1 += dot + label.Render("bal "+s.balanceNote)
+	}
 	if s.thinking && s.reasoningEffort.Valid() {
 		line1 += dot + label.Render("effort "+string(s.reasoningEffort))
 	}
 	if ctxSeg != "" {
 		line1 += dot + ctxSeg
-	}
-	if s.activeAgent != "" {
-		line1 += dot + label.Render("agent "+s.activeAgent)
 	}
 	if s.runningJobs > 0 {
 		line1 += dot + label.Render(fmt.Sprintf("jobs %d", s.runningJobs))
@@ -131,9 +133,6 @@ func (s statusState) render(t Theme) string {
 	}
 	if s.lspReady {
 		line1 += dot + label.Render("lsp ✓")
-	}
-	if s.skills > 0 {
-		line1 += dot + label.Render(fmt.Sprintf("skills %d", s.skills))
 	}
 
 	// Transient-state chips. "compacted N" is an episodic event, so it reads

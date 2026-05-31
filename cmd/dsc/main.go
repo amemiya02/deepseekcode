@@ -593,6 +593,19 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg.Register(tools.NewSubagentTool(spawner))
 	reg.Register(tools.NewWorktreeTool(wtMgr))
 
+	// Fetch account balance (non-blocking on failure). Only meaningful
+	// for DeepSeek providers; other providers skip silently.
+	var balanceNote string
+	if _, pcfg, ok := activeProvider(cfg); ok && pcfg.Type == "deepseek" {
+		if _, secErr := config.ResolveSecret(pcfg); secErr == nil && client != nil {
+			balCtx, balCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if ub, balErr := client.GetUserBalance(balCtx); balErr == nil && ub.IsAvailable {
+				balanceNote = formatUserBalanceForDoctor(ub)
+			}
+			balCancel()
+		}
+	}
+
 	app := tui.New(tui.Config{
 		Agent:    a,
 		Model:    rt.Model,
@@ -610,6 +623,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,
 		InitialUsageSummary:   usageSummary,
+		InitialBalance:        balanceNote,
 		HistoryPath:           projectHistoryPath(home, cwd),
 		Language:              cfg.UI.Language,
 		LSPReady:              len(lspReg.Servers()) > 0,

@@ -208,6 +208,11 @@ type Config struct {
 	// LSPReady reports whether at least one LSP server is attached.
 	LSPReady bool
 
+	// InitialBalance seeds the status-line account balance display.
+	// Populated from llm.Client.GetUserBalance at TUI launch. Empty
+	// means balance unavailable or not a DeepSeek provider.
+	InitialBalance string
+
 	// InitialUsageSummary seeds the status-line cost/cache totals from a
 	// resumed session's persisted usage. Populated from
 	// Persister.UsageSummary at launch. Zero value means no prior usage.
@@ -283,6 +288,7 @@ func New(cfg Config) *App {
 			savedYuan:   cfg.InitialUsageSummary.SavedYuan,
 			costKnown:   llm.CostKnown(cfg.Model),
 			steps:       cfg.InitialUsageSummary.Turns,
+			balanceNote: cfg.InitialBalance,
 			activeAgent: "coding-default",
 		},
 	}
@@ -1596,6 +1602,7 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			SavedYuan:    a.status.savedYuan,
 			ContextLimit: a.status.contextLimit,
 			CostKnown:    a.status.costKnown,
+			Balance:      a.status.balanceNote,
 		})
 		a.scrollback.AppendInfo(report)
 		a.refreshView()

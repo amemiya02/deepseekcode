@@ -31,14 +31,13 @@ func TestStatusUnknownModelShowsQuestion(t *testing.T) {
 	}
 }
 
-// T5.3: the live status line carries a single cache chip with the saved-¥
-// suffix, a populated context fill bar, and separate slots for the
-// prefix-cache note and the generic transient hint (they coexist).
-func TestStatusCacheSavingsAndNoteCoexist(t *testing.T) {
+// T5.3: the live status line carries a cache chip, a populated context
+// fill bar, and separate slots for the prefix-cache note and the generic
+// transient hint (they coexist).
+func TestStatusCacheNoteAndHintCoexist(t *testing.T) {
 	th := DarkTheme()
 	s := statusState{
 		model:        "deepseek-v4-flash",
-		savedYuan:    0.123,
 		contextLimit: 1_000_000,
 		usage: llm.Usage{
 			PromptCacheHitTokens:  950,
@@ -49,12 +48,9 @@ func TestStatusCacheSavingsAndNoteCoexist(t *testing.T) {
 		hint:      "generic hint",
 	}
 	plain := stripANSI(s.render(th))
-	// Exactly one "cache " chip — the duplicate HUD cache chip was removed.
+	// Exactly one "cache " chip.
 	if n := strings.Count(plain, "cache "); n != 1 {
 		t.Errorf("expected exactly one 'cache ' chip, got %d in %q", n, plain)
-	}
-	if !strings.Contains(plain, "saved ¥0.123") {
-		t.Errorf("expected saved-¥ suffix, got %q", plain)
 	}
 	if !strings.Contains(plain, "cache:tools changed") || !strings.Contains(plain, "generic hint") {
 		t.Errorf("cacheNote and hint must coexist, got %q", plain)
@@ -96,20 +92,20 @@ func TestStatusEffortHiddenWhenThinkingOff(t *testing.T) {
 	}
 }
 
-// TestStatusCapabilitySegment verifies the mcp/lsp/skills capability
+// TestStatusCapabilitySegment verifies the mcp/lsp capability
 // segment: non-zero/true parts are shown, zero/false parts are omitted.
 func TestStatusCapabilitySegment(t *testing.T) {
 	th := DarkTheme()
 
-	// All zero/false → no capability segment, output identical to before.
+	// All zero/false → no capability segment.
 	s0 := statusState{model: "deepseek-v4-flash", steps: 1}
 	out0 := stripANSI(s0.render(th))
-	if strings.Contains(out0, "mcp") || strings.Contains(out0, "lsp") || strings.Contains(out0, "skills") {
+	if strings.Contains(out0, "mcp") || strings.Contains(out0, "lsp") {
 		t.Errorf("all-zero capabilities should not appear: %q", out0)
 	}
 
-	// Mixed: mcp=3, lsp=true, skills=5.
-	s1 := statusState{model: "deepseek-v4-flash", steps: 1, mcpTools: 3, lspReady: true, skills: 5}
+	// Mixed: mcp=3, lsp=true.
+	s1 := statusState{model: "deepseek-v4-flash", steps: 1, mcpTools: 3, lspReady: true}
 	out1 := stripANSI(s1.render(th))
 	if !strings.Contains(out1, "mcp 3") {
 		t.Errorf("expected 'mcp 3', got %q", out1)
@@ -117,17 +113,32 @@ func TestStatusCapabilitySegment(t *testing.T) {
 	if !strings.Contains(out1, "lsp ✓") {
 		t.Errorf("expected 'lsp ✓', got %q", out1)
 	}
-	if !strings.Contains(out1, "skills 5") {
-		t.Errorf("expected 'skills 5', got %q", out1)
-	}
 
-	// skills=0 → skills part omitted, others shown.
-	s2 := statusState{model: "deepseek-v4-flash", steps: 1, mcpTools: 2, lspReady: true}
+	// mcp=0 → mcp part omitted, lsp shown.
+	s2 := statusState{model: "deepseek-v4-flash", steps: 1, lspReady: true}
 	out2 := stripANSI(s2.render(th))
-	if strings.Contains(out2, "skills") {
-		t.Errorf("skills=0 should be omitted: %q", out2)
+	if strings.Contains(out2, "mcp") {
+		t.Errorf("mcp=0 should be omitted: %q", out2)
 	}
-	if !strings.Contains(out2, "mcp 2") {
-		t.Errorf("expected 'mcp 2', got %q", out2)
+	if !strings.Contains(out2, "lsp ✓") {
+		t.Errorf("expected 'lsp ✓', got %q", out2)
+	}
+}
+
+func TestStatusBalanceShown(t *testing.T) {
+	th := DarkTheme()
+	s := statusState{model: "deepseek-v4-flash", steps: 1, balanceNote: "CNY=110.00 USD=2.50", costKnown: true}
+	plain := stripANSI(s.render(th))
+	if !strings.Contains(plain, "bal CNY=110.00 USD=2.50") {
+		t.Errorf("balanceNote should render 'bal ...'; got %q", plain)
+	}
+}
+
+func TestStatusBalanceHidden(t *testing.T) {
+	th := DarkTheme()
+	s := statusState{model: "deepseek-v4-flash", steps: 1, costKnown: true}
+	plain := stripANSI(s.render(th))
+	if strings.Contains(plain, "bal") {
+		t.Errorf("empty balanceNote should not render 'bal'; got %q", plain)
 	}
 }

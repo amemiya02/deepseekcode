@@ -63,6 +63,31 @@ func TestRenderCostReportUnknownModel(t *testing.T) {
 	}
 }
 
+func TestRenderCostReportWithBalance(t *testing.T) {
+	in := CostReportInput{
+		Model:     "deepseek-v4-flash",
+		Steps:     1,
+		CostKnown: true,
+		Balance:   "CNY=110.00 USD=2.50",
+	}
+	out := RenderCostReport(in)
+	if !strings.Contains(out, "balance CNY=110.00 USD=2.50") {
+		t.Errorf("expected balance line:\n%s", out)
+	}
+}
+
+func TestRenderCostReportNoBalance(t *testing.T) {
+	in := CostReportInput{
+		Model:     "deepseek-v4-flash",
+		Steps:     1,
+		CostKnown: true,
+	}
+	out := RenderCostReport(in)
+	if strings.Contains(out, "balance") {
+		t.Errorf("empty balance should not render:\n%s", out)
+	}
+}
+
 func TestSlashCost(t *testing.T) {
 	sb := NewScrollback()
 	a := &App{

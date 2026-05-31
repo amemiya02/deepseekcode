@@ -16,6 +16,7 @@ type CostReportInput struct {
 	SavedYuan    float64
 	ContextLimit int
 	CostKnown    bool
+	Balance      string
 }
 
 // RenderCostReport returns deterministic plain text summarizing the
@@ -33,6 +34,10 @@ func RenderCostReport(in CostReportInput) string {
 		fmt.Fprintf(&b, "cost ¥%.6f | saved ¥%.6f\n", in.CostYuan, in.SavedYuan)
 	} else {
 		fmt.Fprintf(&b, "cost unknown model\n")
+	}
+
+	if in.Balance != "" {
+		fmt.Fprintf(&b, "balance %s\n", in.Balance)
 	}
 
 	if in.ContextLimit > 0 {

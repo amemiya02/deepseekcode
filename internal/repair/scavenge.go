@@ -42,8 +42,18 @@ func ScavengeToolCalls(reasoning, content string, allowed map[string]struct{}, o
 			src = src[:opts.MaxBytes]
 		}
 
-		// Find and extract tool calls from this source
-		calls := extractToolCalls(src, allowed, &result.Reports, opts.MaxCalls-len(result.Calls))
+		// Find and extract tool calls from this source (JSON shapes first, then DSML).
+		remaining := opts.MaxCalls - len(result.Calls)
+		calls := extractToolCalls(src, allowed, &result.Reports, remaining)
+
+		// Also scan for DSML XML envelopes.
+		dsmlCalls := parseDSMLToolCalls(src)
+		for _, call := range dsmlCalls {
+			if !isAllowed(call.Function.Name, allowed) {
+				continue
+			}
+			calls = append(calls, call)
+		}
 
 		for _, call := range calls {
 			// Deduplicate
@@ -147,7 +157,7 @@ func parseToolCall(jsonStr string, allowed map[string]struct{}, reports *[]Repor
 	repair := RepairJSONArgs(jsonStr)
 	candidate := repair.Repaired
 
-	// Try DeepSeek/DSML shape: {"name":"tool","arguments":{...}}
+	// Try bare JSON shape: {"name":"tool","arguments":{...}}
 	var dsmlShape struct {
 		Name      string `json:"name"`
 		Arguments any    `json:"arguments"`

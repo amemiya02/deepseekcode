@@ -24,6 +24,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/skills"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -244,6 +245,13 @@ type Agent struct {
 	// prior is used. Touched only on the single Run/runStep goroutine (like
 	// loopFloor), so it needs no lock.
 	charsPerToken float64
+
+	// staticPrefixResidual is the learned server-side static-prefix token cost
+	// (system+tool-schema template) not visible to the local tokenizer. Learned
+	// once from the first real usage.PromptTokens frame, then cached. Zero until
+	// learned — only a small turn-1 undercount. Touched only on the run goroutine.
+	staticPrefixResidual  int
+	staticResidualLearned bool
 
 	// schemaComplexEmitted tracks which tools have had schema-complexity
 	// telemetry emitted in the current prefix epoch, keyed by
@@ -586,6 +594,30 @@ func (a *Agent) calibrateCharsPerToken(promptMessages []llm.Message, usage llm.U
 		return
 	}
 	a.charsPerToken = emaAlpha*observed + (1-emaAlpha)*a.charsPerToken
+}
+
+// learnStaticResidual records, once, the server-side static-prefix token cost
+// (system+tool-schema template) not visible to the local tokenizer:
+//
+//	residual = max(0, usage.PromptTokens - tokenizer.Count(system) - convTokens)
+//
+// where convTokens is the tokenizer's CountMessages of the request that produced usage.
+// No-op when the tokenizer is unavailable or residual already learned.
+func (a *Agent) learnStaticResidual(usagePromptTokens int, sentMessages []llm.Message) {
+	if a.staticResidualLearned || usagePromptTokens <= 0 {
+		return
+	}
+	if !tokenizer.Available() {
+		return
+	}
+	sys := tokenizer.Count(a.System)
+	conv, _ := tokenizer.CountMessages(sentMessages)
+	residual := usagePromptTokens - sys - conv
+	if residual < 0 {
+		residual = 0
+	}
+	a.staticPrefixResidual = residual
+	a.staticResidualLearned = true
 }
 
 // maybeCompact runs the compaction pipeline and, if it produced a
@@ -948,7 +980,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		a.BudgetState.UnknownModelWarned = true
 		a.bus.Publish(EventBudget{Kind: BudgetKindUnpriced, Model: a.Model, SpentCNY: a.BudgetState.SpentCNY})
 	}
-	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken, a.BudgetState.SessionCacheHitRate())
+	projectedCNY := ProjectedTurnCostCNY(a.Model, req, a.charsPerToken, a.BudgetState.SessionCacheHitRate(), a.staticPrefixResidual)
 	allow, warn := CheckBudget(a.BudgetPolicy, a.BudgetState, projectedCNY)
 	if warn {
 		a.BudgetState.Warned = true
@@ -1004,7 +1036,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 			flashCost := llm.Cost(a.Model, sr.usage)
 			gateState := a.BudgetState
 			gateState.SpentCNY += flashCost
-			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken, a.BudgetState.SessionCacheHitRate()))
+			allow, _ := CheckBudget(a.BudgetPolicy, gateState, ProjectedTurnCostCNY(a.EscalationModel, proReq, a.charsPerToken, a.BudgetState.SessionCacheHitRate(), a.staticPrefixResidual))
 			if !allow {
 				a.bus.Publish(EventInfo{Text: "escalation skipped: projected cost would exceed the session budget"})
 			} else {
@@ -1090,6 +1122,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// count correlates with usage.PromptTokens. A zero/absent usage frame leaves
 	// the prior ratio untouched.
 	a.calibrateCharsPerToken(req.Messages, sr.usage)
+	a.learnStaticResidual(sr.usage.PromptTokens, req.Messages)
 
 	return StepRecord{
 		FinishReason:      sr.finish,

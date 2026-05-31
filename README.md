@@ -13,6 +13,22 @@ OpenAI-compatible chat-completions endpoints. It ships as a single Go binary
 named `dsc`, with an interactive TUI, one-shot CLI mode, repository tools,
 SQLite-backed sessions, and a conservative permission model.
 
+## Why dsc (DeepSeek specialization)
+
+- **Provable prefix-cache stability** -- a single canonical serializer feeds
+  both the wire bytes and the cache fingerprint; they cannot diverge by
+  construction, and `dsc trace inspect` shows `prefixes==1` to prove a stable
+  run ([docs/prefix-cache.md](docs/prefix-cache.md)).
+- **Real multi-model routing** -- the Duet pro-validator fires on destructive
+  tool calls and `<<<NEEDS_PRO>>>` / error escalation is wired into the agent
+  loop, not just documented ([docs/duet.md](docs/duet.md)).
+- **Real OS sandbox** -- sandbox-exec (macOS) / Landlock (Linux) with a real
+  PTY, not just path containment
+  ([docs/SANDBOX.md](docs/SANDBOX.md)).
+- **Auto reasoning-effort** -- per-turn thinking on/off via multi-language
+  keyword detection plus `low/medium/high/max` effort, dialed down
+  automatically on simple tasks.
+
 ## Features
 
 - Interactive Bubble Tea TUI and scriptable `dsc -p "prompt"` mode.

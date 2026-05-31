@@ -1,5 +1,20 @@
 # deepseekcode — v0.1 Design Document
 
+> **Historical document (v0.1).** This is the original design plan written
+> before the DeepSeek V4 retarget. It predates the prefix-epoch / capability
+> system, the OS sandbox, subagents, LSP integration, and roughly 18 tools
+> that have since shipped. Treat it as **design intent, not a current file
+> map**.
+>
+> **Current sources of truth:**
+>
+> - [CONTEXT.md](../CONTEXT.md) -- glossary and runtime vocabulary
+> - [docs/MODEL_COMPATIBILITY.md](MODEL_COMPATIBILITY.md) -- model support matrix
+> - [docs/prefix-cache.md](prefix-cache.md) -- prefix-cache economics and stability
+> - [docs/pricing.md](pricing.md) -- per-token pricing
+> - [docs/adr/0001-prefix-fingerprint-is-model-visible-bytes-only.md](adr/0001-prefix-fingerprint-is-model-visible-bytes-only.md) -- epoch/capability architecture
+> - [CLAUDE.md](../CLAUDE.md) -- developer guide and architecture reference
+
 A terminal-native coding agent purpose-built for DeepSeek models. Single Go
 binary. Distinctive UX around reasoning, cache economics, and a two-model
 duet that's surgical, not noisy.

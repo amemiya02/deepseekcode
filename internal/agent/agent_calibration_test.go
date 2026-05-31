@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 )
 
 // T4.1 — calibrated token estimation. These tests pin that the cold-start path
@@ -62,10 +63,21 @@ func TestContextPressureScalesWithRatio(t *testing.T) {
 
 func TestProjectedTurnCostCNYUsesCalibratedRatio(t *testing.T) {
 	req := llm.Request{Messages: msgsWithChars(40_000), MaxTokens: 1000}
-	c4 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 4.0, 0)
-	c2 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 2.0, 0)
-	if !(c4 > 0 && c2 > c4) {
-		t.Errorf("smaller ratio must raise projected cost (more input tokens): c4=%v c2=%v", c4, c2)
+	c4 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 4.0, 0, 0)
+	c2 := ProjectedTurnCostCNY("deepseek-v4-flash", req, 2.0, 0, 0)
+	if c4 <= 0 {
+		t.Errorf("c4 must be positive: %v", c4)
+	}
+	if tokenizer.Available() {
+		// With the exact tokenizer, charsPerToken doesn't affect the count.
+		if c2 != c4 {
+			t.Errorf("tokenizer available: c2=%v should equal c4=%v (exact count ignores ratio)", c2, c4)
+		}
+	} else {
+		// Heuristic path: smaller ratio → more tokens → higher cost.
+		if !(c2 > c4) {
+			t.Errorf("smaller ratio must raise projected cost (more input tokens): c4=%v c2=%v", c4, c2)
+		}
 	}
 }
 

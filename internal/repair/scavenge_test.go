@@ -6,7 +6,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
-func TestScavengeToolCalls_DSMLShape(t *testing.T) {
+func TestScavengeToolCalls_JSONShape(t *testing.T) {
 	content := `{"name":"read_file","arguments":{"path":"README.md"}}`
 	allowed := map[string]struct{}{"read_file": {}}
 
@@ -278,5 +278,47 @@ func TestParityScenario_tool_call_in_reasoning_scavenge(t *testing.T) {
 	}
 	if result.Calls[0].Function.Name != "read_file" {
 		t.Errorf("expected read_file, got %s", result.Calls[0].Function.Name)
+	}
+}
+
+func TestScavengeToolCalls_DSMLEnvelope(t *testing.T) {
+	content := "<｜DSML｜invoke name=\"read_file\"><｜DSML｜parameter name=\"path\" string=\"true\">a.go</｜DSML｜parameter></｜DSML｜invoke>"
+	allowed := map[string]struct{}{"read_file": {}}
+
+	result := ScavengeToolCalls("", content, allowed, ScavengeOptions{})
+
+	if len(result.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(result.Calls))
+	}
+	if result.Calls[0].Function.Name != "read_file" {
+		t.Errorf("expected name read_file, got %s", result.Calls[0].Function.Name)
+	}
+	if len(result.Calls[0].ID) < 10 || result.Calls[0].ID[:10] != "recovered_" {
+		t.Errorf("expected ID prefix 'recovered_', got %s", result.Calls[0].ID)
+	}
+}
+
+func TestScavengeToolCalls_DSMLUnknownToolFiltered(t *testing.T) {
+	content := "<｜DSML｜invoke name=\"unknown_tool\"><｜DSML｜parameter name=\"path\" string=\"true\">a.go</｜DSML｜parameter></｜DSML｜invoke>"
+	allowed := map[string]struct{}{"read_file": {}}
+
+	result := ScavengeToolCalls("", content, allowed, ScavengeOptions{})
+
+	if len(result.Calls) != 0 {
+		t.Errorf("expected 0 calls for unknown tool, got %d", len(result.Calls))
+	}
+}
+
+func TestScavengeToolCalls_DSMLAndJSONDedup(t *testing.T) {
+	// Same call present as both JSON shape and DSML envelope should dedup to one.
+	jsonCall := `{"name":"read_file","arguments":{"path":"README.md"}}`
+	dsmlCall := "<｜DSML｜invoke name=\"read_file\"><｜DSML｜parameter name=\"path\" string=\"true\">README.md</｜DSML｜parameter></｜DSML｜invoke>"
+	content := jsonCall + " " + dsmlCall
+	allowed := map[string]struct{}{"read_file": {}}
+
+	result := ScavengeToolCalls("", content, allowed, ScavengeOptions{})
+
+	if len(result.Calls) != 1 {
+		t.Errorf("expected 1 call after dedup of JSON+DSML, got %d", len(result.Calls))
 	}
 }

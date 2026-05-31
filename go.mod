@@ -10,6 +10,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/alecthomas/chroma/v2 v2.20.0
 	github.com/creack/pty v1.1.24
+	github.com/dlclark/regexp2 v1.11.5
 	github.com/google/uuid v1.6.0
 	github.com/landlock-lsm/go-landlock v0.8.1
 	github.com/lucasb-eyer/go-colorful v1.4.0
@@ -17,6 +18,7 @@ require (
 	github.com/muesli/reflow v0.3.0
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/net v0.39.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.1
 )
 
@@ -32,7 +34,6 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -46,7 +47,6 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

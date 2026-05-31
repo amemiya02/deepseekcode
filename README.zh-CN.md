@@ -12,6 +12,21 @@
 端点的终端编码 Agent。它以单个 Go 二进制 `dsc` 分发，包含交互式 TUI、
 一次性 CLI 模式、仓库工具、SQLite 会话，以及保守的权限模型。
 
+## 为什么选择 dsc（DeepSeek 深度特化）
+
+- **可证明的前缀缓存稳定性** -- 单一 canonical 序列化器同时喂给 wire
+  字节和缓存指纹，二者构造级一致不可能发散；`dsc trace inspect` 的
+  `prefixes==1` 可证明整次会话缓存稳定
+  （[docs/prefix-cache.md](docs/prefix-cache.md)）。
+- **真实的多模型路由** -- Duet pro 校验器在破坏性工具调用时触发，
+  `<<<NEEDS_PRO>>>` / 错误升级已实装到 agent 循环中，而非仅停留在文档
+  （[docs/duet.md](docs/duet.md)）。
+- **真实的 OS 沙箱** -- sandbox-exec (macOS) / Landlock (Linux) 真隔离 +
+  真 PTY，不只是路径围栏
+  （[docs/SANDBOX.md](docs/SANDBOX.md)）。
+- **自动推理强度** -- 逐回合按多语言关键词自动开关 thinking，加
+  `low/medium/high/max` 推理档位，简单任务自动降档。
+
 ## 功能
 
 - 交互式 Bubble Tea TUI，以及可脚本化的 `dsc -p "prompt"` 模式。

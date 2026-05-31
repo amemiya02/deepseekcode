@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 )
 
 // CompactionConfig controls when and how the agent compacts its
@@ -101,6 +102,16 @@ func EstimateTokensCalibrated(messages []llm.Message, charsPerToken float64) int
 	}
 	chars, n := estimateChars(messages)
 	return n*perMessageOverhead + int(float64(chars)/charsPerToken)
+}
+
+// EstimateInputTokens returns the exact tokenizer count of messages when the
+// embedded V4 tokenizer is available, else the calibrated heuristic. This is
+// the preferred token estimator for compaction triggering and budget projection.
+func EstimateInputTokens(messages []llm.Message, charsPerToken float64) int {
+	if n, ok := tokenizer.CountMessages(messages); ok {
+		return n
+	}
+	return EstimateTokensCalibrated(messages, charsPerToken)
 }
 
 // EstimateTokens returns the cold-start (UTF-8 byte ÷ 4) token estimate. It
@@ -282,7 +293,7 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 	if len(messages) <= preserve*2 {
 		return false, 0, 0
 	}
-	if EstimateTokensCalibrated(messages, charsPerToken) < threshold {
+	if EstimateInputTokens(messages, charsPerToken) < threshold {
 		return false, 0, 0
 	}
 	return true, 0, len(messages) - preserve

@@ -613,3 +613,375 @@ func TestRegistryFailoverPartial(t *testing.T) {
 		t.Error("expected error for failed server")
 	}
 }
+
+func TestConnectSSEViaSeam(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg := NewRegistry()
+
+	// Set up SSE dialer seam that injects a mock pipe transport.
+	tr, cleanup := pipePair(t, func(r io.Reader, w io.Writer, done <-chan struct{}) {
+		mockMCPServer(t, r, w, done)
+	})
+	defer cleanup()
+
+	caps, err := initialize(ctx, tr)
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	tools, err := listTools(ctx, tr)
+	if err != nil {
+		t.Fatalf("listTools: %v", err)
+	}
+
+	reg.sseDialer = func(ctx context.Context, name, sseURL string) (dialResult, error) {
+		return dialResult{t: tr, caps: caps, tools: tools}, nil
+	}
+
+	if err := reg.ConnectSSE(ctx, "sse-mock", "https://example.com/sse"); err != nil {
+		t.Fatalf("ConnectSSE: %v", err)
+	}
+
+	// Verify the server is connected with the SSE transport kind.
+	reg.mu.RLock()
+	proxy := reg.servers["sse-mock"]
+	reg.mu.RUnlock()
+	if proxy.State != StateConnected {
+		t.Errorf("state = %v, want connected", proxy.State)
+	}
+	if proxy.kind != transportSSE {
+		t.Errorf("kind = %v, want transportSSE", proxy.kind)
+	}
+	if proxy.sseURL != "https://example.com/sse" {
+		t.Errorf("sseURL = %q, want https://example.com/sse", proxy.sseURL)
+	}
+
+	// Verify tool bridge works.
+	bridged := BridgeAll(reg)
+	if len(bridged) != 2 {
+		t.Fatalf("expected 2 bridged tools, got %d", len(bridged))
+	}
+
+	// Verify call through registry.
+	content, isError, err := reg.CallTool(ctx, "mcp__sse-mock__echo", json.RawMessage(`{"text":"hi"}`))
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if isError {
+		t.Error("expected isError=false")
+	}
+	if content == "" {
+		t.Error("expected non-empty content from echo tool")
+	}
+
+	// Verify snapshot includes the SSE server.
+	snaps := reg.Snapshots()
+	var found bool
+	for _, s := range snaps {
+		if s.Name == "sse-mock" && s.State == StateConnected {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("SSE server not found in snapshots")
+	}
+}
+
+func TestConnectSSEFailedConnect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg := NewRegistry()
+	reg.sseDialer = func(ctx context.Context, name, sseURL string) (dialResult, error) {
+		return dialResult{}, fmt.Errorf("connection refused")
+	}
+
+	err := reg.ConnectSSE(ctx, "bad-sse", "https://example.com/sse")
+	if err == nil {
+		t.Fatal("expected error for failed SSE connect")
+	}
+
+	// Verify the server is in failed state.
+	reg.mu.RLock()
+	proxy := reg.servers["bad-sse"]
+	reg.mu.RUnlock()
+	if proxy.State != StateFailed {
+		t.Errorf("state = %v, want failed", proxy.State)
+	}
+	if proxy.lastError == "" {
+		t.Error("expected lastError to be set")
+	}
+
+	// Verify snapshot shows the failed server.
+	snaps := reg.Snapshots()
+	var found bool
+	for _, s := range snaps {
+		if s.Name == "bad-sse" && s.State == StateFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("failed SSE server not found in snapshots")
+	}
+}
+
+func TestStdioBackwardCompatWithNewConfig(t *testing.T) {
+	// Verify that a config with Transport="" (default stdio) still works
+	// with Connect, and that the transport kind is stored correctly.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg := NewRegistry()
+
+	tr, cleanup := pipePair(t, func(r io.Reader, w io.Writer, done <-chan struct{}) {
+		mockMCPServer(t, r, w, done)
+	})
+	defer cleanup()
+
+	caps, err := initialize(ctx, tr)
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	tools, err := listTools(ctx, tr)
+	if err != nil {
+		t.Fatalf("listTools: %v", err)
+	}
+
+	reg.dialer = func(ctx context.Context, name, command string, args []string, env map[string]string) (dialResult, error) {
+		return dialResult{t: tr, caps: caps, tools: tools}, nil
+	}
+
+	if err := reg.Connect(ctx, "local", "echo", nil, nil); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	reg.mu.RLock()
+	proxy := reg.servers["local"]
+	reg.mu.RUnlock()
+	if proxy.kind != transportStdio {
+		t.Errorf("kind = %v, want transportStdio", proxy.kind)
+	}
+	if proxy.sseURL != "" {
+		t.Errorf("sseURL = %q, want empty for stdio", proxy.sseURL)
+	}
+}
+
+// ---------- Task-015: Per-tool enable/disable ----------
+
+func TestSetToolFilterDisabledTools(t *testing.T) {
+	reg := NewRegistry()
+
+	// Set up a mock server with 3 tools.
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "write_file", Description: "write", InputSchema: json.RawMessage(`{}`)},
+			{Name: "delete_file", Description: "delete", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Disable delete_file.
+	reg.SetToolFilter("fs", nil, []string{"delete_file"})
+
+	tools := reg.Tools()
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools after disable, got %d", len(tools))
+	}
+	for _, tool := range tools {
+		if strings.HasSuffix(tool.Name, "delete_file") {
+			t.Errorf("delete_file should be hidden, got %q", tool.Name)
+		}
+	}
+
+	// Snapshots should also reflect the filter.
+	snaps := reg.Snapshots()
+	for _, s := range snaps {
+		if s.Name == "fs" {
+			if s.ToolCount != 2 {
+				t.Errorf("snapshot ToolCount = %d, want 2", s.ToolCount)
+			}
+			for _, n := range s.Tools {
+				if n == "delete_file" {
+					t.Error("delete_file should not appear in snapshot")
+				}
+			}
+		}
+	}
+}
+
+func TestSetToolFilterEnabledTools(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["github"] = &ServerProxy{
+		Name:  "github",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "search_issues", Description: "search", InputSchema: json.RawMessage(`{}`)},
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "create_issue", Description: "create", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Enable only search_issues and read_file.
+	reg.SetToolFilter("github", []string{"search_issues", "read_file"}, nil)
+
+	tools := reg.Tools()
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools after enable, got %d", len(tools))
+	}
+	for _, tool := range tools {
+		if strings.HasSuffix(tool.Name, "create_issue") {
+			t.Errorf("create_issue should be hidden, got %q", tool.Name)
+		}
+	}
+}
+
+func TestSetToolFilterClearsPreviousFilter(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "write_file", Description: "write", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Set a disabled filter, then clear it.
+	reg.SetToolFilter("fs", nil, []string{"write_file"})
+	if len(reg.Tools()) != 1 {
+		t.Fatalf("expected 1 tool with disabled filter, got %d", len(reg.Tools()))
+	}
+
+	// Clear filter.
+	reg.SetToolFilter("fs", nil, nil)
+	if len(reg.Tools()) != 2 {
+		t.Fatalf("expected 2 tools after clearing filter, got %d", len(reg.Tools()))
+	}
+}
+
+func TestSetToolFilterEnabledWinsOverDisabled(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "write_file", Description: "write", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// SetToolFilter with enabledTools takes precedence.
+	reg.SetToolFilter("fs", []string{"read_file"}, []string{"write_file"})
+
+	tools := reg.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool (enabled wins), got %d", len(tools))
+	}
+	if !strings.HasSuffix(tools[0].Name, "read_file") {
+		t.Errorf("expected read_file, got %q", tools[0].Name)
+	}
+}
+
+func TestSetToolFilterNonexistentServer(t *testing.T) {
+	reg := NewRegistry()
+	// Should not panic.
+	reg.SetToolFilter("nonexistent", nil, []string{"foo"})
+}
+
+func TestToolFilterToolNameNotProvidedByServer(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Enable a tool that doesn't exist — should result in 0 tools.
+	reg.SetToolFilter("fs", []string{"nonexistent_tool"}, nil)
+
+	tools := reg.Tools()
+	if len(tools) != 0 {
+		t.Fatalf("expected 0 tools when enabling nonexistent tool, got %d", len(tools))
+	}
+}
+
+func TestToolFilterRemovesAllTools(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "write_file", Description: "write", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Disable all tools.
+	reg.SetToolFilter("fs", nil, []string{"read_file", "write_file"})
+
+	tools := reg.Tools()
+	if len(tools) != 0 {
+		t.Fatalf("expected 0 tools when all disabled, got %d", len(tools))
+	}
+
+	// BridgeAll should also return 0 tools for this server.
+	bridged := BridgeAll(reg)
+	if len(bridged) != 0 {
+		t.Fatalf("expected 0 bridged tools, got %d", len(bridged))
+	}
+}
+
+func TestToolFilterPendingSchemaChanges(t *testing.T) {
+	reg := NewRegistry()
+
+	reg.mu.Lock()
+	reg.servers["fs"] = &ServerProxy{
+		Name:  "fs",
+		State: StateConnected,
+		Tools: []McpToolMeta{
+			{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{}`)},
+			{Name: "write_file", Description: "write", InputSchema: json.RawMessage(`{}`)},
+		},
+	}
+	reg.mu.Unlock()
+
+	// Snapshot the current (unfiltered) tools.
+	oldTools := reg.Tools()
+
+	// Now disable write_file.
+	reg.SetToolFilter("fs", nil, []string{"write_file"})
+
+	// PendingSchemaChanges should detect the removal.
+	changes := reg.PendingSchemaChanges(oldTools)
+	var foundRemove bool
+	for _, c := range changes {
+		if c.Kind == "tool_removed" && strings.HasSuffix(c.ToolName, "write_file") {
+			foundRemove = true
+		}
+	}
+	if !foundRemove {
+		t.Errorf("expected tool_removed for write_file, got changes: %v", changes)
+	}
+}

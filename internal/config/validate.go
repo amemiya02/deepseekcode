@@ -72,7 +72,7 @@ func ValidateStrict(c *Config) []ValidationError {
 		})
 	}
 
-	// MCP servers: name and command required.
+	// MCP servers: name required; transport-specific fields validated.
 	for name, srv := range c.MCPServers {
 		if name == "" {
 			errs = append(errs, ValidationError{
@@ -80,10 +80,34 @@ func ValidateStrict(c *Config) []ValidationError {
 				Message: "server name must not be empty",
 			})
 		}
-		if srv.Command == "" {
+		switch srv.Transport {
+		case "", "stdio":
+			// Default is stdio. Command is required.
+			if srv.Command == "" {
+				errs = append(errs, ValidationError{
+					Path:    "mcp_servers[" + name + "].command",
+					Message: "must not be empty for stdio transport",
+				})
+			}
+		case "sse":
+			// SSE transport: URL is required.
+			if srv.URL == "" {
+				errs = append(errs, ValidationError{
+					Path:    "mcp_servers[" + name + "].url",
+					Message: "must not be empty for sse transport",
+				})
+			}
+		default:
 			errs = append(errs, ValidationError{
-				Path:    "mcp_servers[" + name + "].command",
-				Message: "must not be empty",
+				Path:    "mcp_servers[" + name + "].transport",
+				Message: "unknown transport " + quote(srv.Transport) + "; valid: stdio, sse",
+			})
+		}
+		// enabled_tools and disabled_tools are mutually exclusive.
+		if len(srv.EnabledTools) > 0 && len(srv.DisabledTools) > 0 {
+			errs = append(errs, ValidationError{
+				Path:    "mcp_servers[" + name + "].enabled_tools",
+				Message: "cannot specify both enabled_tools and disabled_tools; use one or the other",
 			})
 		}
 	}

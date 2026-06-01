@@ -27,6 +27,27 @@
 - **自动推理强度** -- 逐回合按多语言关键词自动开关 thinking，加
   `low/medium/high/max` 推理档位，简单任务自动降档。
 
+## DeepSeek V4 Agent 故事
+
+DeepSeekCode 专为 DeepSeek V4 模型构建，相比通用编码 Agent 具有可验证的优势：
+
+- **可证明的前缀缓存稳定性** — 单一 canonical 序列化器保证 wire 字节
+  与缓存指纹构造级一致；`dsc trace inspect` 可验证
+  （[docs/prefix-cache.md](docs/prefix-cache.md)）。
+- **选择性 Pro 校验** — 破坏性工具调用获得第二次
+  `deepseek-v4-pro` 判断，而非每回合都调用；低成本加安全保障
+  （[docs/duet.md](docs/duet.md)）。
+- **1M 上下文工作流** — 大仓库阅读和长历史会话无需激进压缩；1M 上下文
+  是使能器，不是工具和检索的替代。
+- **工具调用修复管道** — 自动修复截断 JSON、从推理文本中回收调用、
+  风暴守卫抑制重复失败调用。
+
+完整故事及本地验证命令：
+[docs/deepseek-v4-agent-story.md](docs/deepseek-v4-agent-story.md)
+
+基准证据：
+[bench/README.md](bench/README.md)
+
 ## 功能
 
 - 交互式 Bubble Tea TUI，以及可脚本化的 `dsc -p "prompt"` 模式。
@@ -152,6 +173,7 @@ default_model = "gpt-4o"
 - [LSP](docs/lsp.md)
 - [Reasoning tape](docs/tape.md)
 - [模型兼容性](docs/MODEL_COMPATIBILITY.md)
+- [DeepSeek V4 Agent 故事](docs/deepseek-v4-agent-story.md)
 
 ## 开发
 

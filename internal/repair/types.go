@@ -15,6 +15,8 @@ import (
 type Kind string
 
 const (
+	// KindNone indicates no repair was needed.
+	KindNone Kind = ""
 	// KindArgsCompleted indicates truncated JSON arguments were successfully repaired.
 	KindArgsCompleted Kind = "args_completed"
 	// KindArgsInvalid indicates arguments could not be repaired.
@@ -25,7 +27,66 @@ const (
 	KindSuppressed Kind = "suppressed"
 	// KindSchemaComplex indicates a tool schema exceeds complexity thresholds.
 	KindSchemaComplex Kind = "schema_complex"
+	// KindContinue indicates the repair pipeline should continue to the next stage.
+	KindContinue Kind = "continue"
+	// KindArgsNeedMore indicates arguments were truncated inside a string
+	// and the model should be asked to re-emit complete arguments.
+	KindArgsNeedMore Kind = "args_need_more"
+	// KindSchemaFlattened indicates a tool schema was flattened for model compatibility.
+	KindSchemaFlattened Kind = "schema_flattened"
 )
+
+// Action represents the outcome of a repair strategy.
+type Action string
+
+const (
+	// ActionNone indicates no repair was needed.
+	ActionNone Action = "none"
+	// ActionRepaired indicates the tool call was successfully repaired.
+	ActionRepaired Action = "repaired"
+	// ActionRejected indicates the tool call was rejected and should not be executed.
+	ActionRejected Action = "rejected"
+	// ActionContinue indicates the repair pipeline should continue to the next stage.
+	ActionContinue Action = "continue"
+)
+
+// KindFromAction maps an Action to a Kind for reporting purposes.
+func KindFromAction(action Action) Kind {
+	switch action {
+	case ActionNone:
+		return KindNone
+	case ActionRepaired:
+		return KindArgsCompleted
+	case ActionRejected:
+		return KindArgsInvalid
+	case ActionContinue:
+		return KindContinue
+	default:
+		return KindNone
+	}
+}
+
+// Pipeline orchestrates repair strategies for tool calls.
+type Pipeline struct {
+	// strategies will be added by later tasks
+}
+
+// NewPipeline creates a new repair pipeline with default strategies.
+func NewPipeline() *Pipeline {
+	return &Pipeline{}
+}
+
+// Repair applies repair strategies to a tool call and returns the potentially
+// modified call along with a report describing what was done.
+func (p *Pipeline) Repair(call llm.ToolCall) (llm.ToolCall, Report) {
+	// No-op: pass through unchanged
+	return call, Report{
+		Kind:    KindFromAction(ActionNone),
+		Tool:    call.Function.Name,
+		CallID:  call.ID,
+		Message: "no repair needed",
+	}
+}
 
 // Report describes a single repair action.
 type Report struct {

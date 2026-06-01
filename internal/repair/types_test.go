@@ -2,6 +2,8 @@ package repair
 
 import (
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 func TestHashArgs_Empty(t *testing.T) {
@@ -126,5 +128,149 @@ func TestCanonicalArgs_MixedTypes(t *testing.T) {
 	expected := `{"a":true,"b":123,"c":"str","d":null}`
 	if out != expected {
 		t.Errorf("expected %q, got %q", expected, out)
+	}
+}
+
+func TestPipeline_Repair_NoOpReturnsSameCall(t *testing.T) {
+	p := NewPipeline()
+	original := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunc{
+			Name:      "read",
+			Arguments: `{"path":"/src/file.go"}`,
+		},
+	}
+
+	repaired, report := p.Repair(original)
+
+	// Should return the exact same call byte-for-byte
+	if repaired.ID != original.ID {
+		t.Errorf("ID mismatch: got %q, want %q", repaired.ID, original.ID)
+	}
+	if repaired.Type != original.Type {
+		t.Errorf("Type mismatch: got %q, want %q", repaired.Type, original.Type)
+	}
+	if repaired.Function.Name != original.Function.Name {
+		t.Errorf("Function.Name mismatch: got %q, want %q", repaired.Function.Name, original.Function.Name)
+	}
+	if repaired.Function.Arguments != original.Function.Arguments {
+		t.Errorf("Function.Arguments mismatch: got %q, want %q", repaired.Function.Arguments, original.Function.Arguments)
+	}
+	_ = report // No-op returns a report
+}
+
+func TestPipeline_Repair_NoOpReportsActionNone(t *testing.T) {
+	p := NewPipeline()
+	call := llm.ToolCall{
+		ID:   "call_456",
+		Type: "function",
+		Function: llm.ToolCallFunc{
+			Name:      "write",
+			Arguments: `{"path":"/tmp/test.txt"}`,
+		},
+	}
+
+	_, report := p.Repair(call)
+
+	if report.Kind != KindNone {
+		t.Errorf("expected Kind %q, got %q", KindNone, report.Kind)
+	}
+	if report.Tool != "write" {
+		t.Errorf("expected Tool %q, got %q", "write", report.Tool)
+	}
+	if report.CallID != "call_456" {
+		t.Errorf("expected CallID %q, got %q", "call_456", report.CallID)
+	}
+	if report.Message == "" {
+		t.Error("expected non-empty message")
+	}
+}
+
+func TestPipeline_Repair_UnknownToolNotRewritten(t *testing.T) {
+	p := NewPipeline()
+	original := llm.ToolCall{
+		ID:   "call_789",
+		Type: "function",
+		Function: llm.ToolCallFunc{
+			Name:      "unknown_tool_xyz",
+			Arguments: `{"foo":"bar"}`,
+		},
+	}
+
+	repaired, _ := p.Repair(original)
+
+	// Unknown tools should pass through unchanged
+	if repaired.Function.Name != "unknown_tool_xyz" {
+		t.Errorf("unknown tool was rewritten to %q", repaired.Function.Name)
+	}
+	if repaired.Function.Arguments != `{"foo":"bar"}` {
+		t.Errorf("arguments were changed to %q", repaired.Function.Arguments)
+	}
+}
+
+func TestPipeline_Repair_EmptyToolNameNoPanic(t *testing.T) {
+	p := NewPipeline()
+	call := llm.ToolCall{
+		ID:   "call_empty",
+		Type: "function",
+		Function: llm.ToolCallFunc{
+			Name:      "",
+			Arguments: `{}`,
+		},
+	}
+
+	// Should not panic
+	repaired, report := p.Repair(call)
+
+	if repaired.Function.Name != "" {
+		t.Errorf("empty tool name was changed to %q", repaired.Function.Name)
+	}
+	if report.Tool != "" {
+		t.Errorf("report tool should be empty, got %q", report.Tool)
+	}
+}
+
+func TestPipeline_Repair_EmptyArgumentsNoPanic(t *testing.T) {
+	p := NewPipeline()
+	call := llm.ToolCall{
+		ID:   "call_noargs",
+		Type: "function",
+		Function: llm.ToolCallFunc{
+			Name:      "bash",
+			Arguments: "",
+		},
+	}
+
+	// Should not panic
+	repaired, report := p.Repair(call)
+
+	if repaired.Function.Arguments != "" {
+		t.Errorf("empty arguments were changed to %q", repaired.Function.Arguments)
+	}
+	if report.Tool != "bash" {
+		t.Errorf("expected tool %q, got %q", "bash", report.Tool)
+	}
+}
+
+func TestKindFromAction_Mapping(t *testing.T) {
+	tests := []struct {
+		action   Action
+		expected Kind
+	}{
+		{ActionNone, KindNone},
+		{ActionRepaired, KindArgsCompleted},
+		{ActionRejected, KindArgsInvalid},
+		{ActionContinue, KindContinue},
+		{Action("unknown"), KindNone},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.action), func(t *testing.T) {
+			got := KindFromAction(tt.action)
+			if got != tt.expected {
+				t.Errorf("KindFromAction(%q) = %q, want %q", tt.action, got, tt.expected)
+			}
+		})
 	}
 }

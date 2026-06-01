@@ -195,3 +195,87 @@ func TestRepairJSONArgs_EscapedQuote(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, result.Repaired)
 	}
 }
+
+func TestRepairTruncatedJSON_MissingBraces(t *testing.T) {
+	input := `{"path":"README.md"`
+	result := RepairTruncatedJSON(input)
+	if !result.Valid {
+		t.Errorf("expected Valid=true after repair, got Notes: %v", result.Notes)
+	}
+	if !result.Changed {
+		t.Errorf("expected Changed=true")
+	}
+	if result.NeedMore {
+		t.Errorf("expected NeedMore=false for missing braces (safe to auto-repair)")
+	}
+	expected := `{"path":"README.md"}`
+	if result.Repaired != expected {
+		t.Errorf("expected %q, got %q", expected, result.Repaired)
+	}
+}
+
+func TestRepairTruncatedJSON_StringInternalTruncation(t *testing.T) {
+	input := `{"path":"README`
+	result := RepairTruncatedJSON(input)
+	if !result.Valid {
+		t.Errorf("expected Valid=true after repair, got Notes: %v", result.Notes)
+	}
+	if !result.Changed {
+		t.Errorf("expected Changed=true")
+	}
+	if !result.NeedMore {
+		t.Errorf("expected NeedMore=true for string-internal truncation (unsafe to auto-repair)")
+	}
+	// Even though we repaired it, we signal that the repair was unsafe
+	expected := `{"path":"README"}`
+	if result.Repaired != expected {
+		t.Errorf("expected %q, got %q", expected, result.Repaired)
+	}
+}
+
+func TestRepairTruncatedJSON_ValidPassthrough(t *testing.T) {
+	input := `{"path":"README.md"}`
+	result := RepairTruncatedJSON(input)
+	if !result.Valid {
+		t.Errorf("expected Valid=true for valid JSON")
+	}
+	if result.Changed {
+		t.Errorf("expected Changed=false for valid JSON")
+	}
+	if result.NeedMore {
+		t.Errorf("expected NeedMore=false for valid JSON")
+	}
+	if result.Repaired != input {
+		t.Errorf("expected Repaired=input for valid JSON")
+	}
+}
+
+func TestRepairTruncatedJSON_Unrecoverable(t *testing.T) {
+	input := `{this is not json at all`
+	result := RepairTruncatedJSON(input)
+	if result.Valid {
+		t.Errorf("expected Valid=false for unrecoverable input")
+	}
+	if !result.Fallback {
+		t.Errorf("expected Fallback=true for unrecoverable input")
+	}
+	// NeedMore depends on string state - in this case, truncation is not in a string
+	if result.NeedMore {
+		t.Errorf("expected NeedMore=false when not truncated in string")
+	}
+	if result.Repaired != input {
+		t.Errorf("expected Repaired=input for unrecoverable, got %q", result.Repaired)
+	}
+}
+
+func TestRepairTruncatedJSON_StringInternalTruncation_EscapedQuote(t *testing.T) {
+	// Test that escaped quotes don't confuse string state detection
+	input := `{"path":"say \"hello`
+	result := RepairTruncatedJSON(input)
+	if !result.Valid {
+		t.Errorf("expected Valid=true after repair, got Notes: %v", result.Notes)
+	}
+	if !result.NeedMore {
+		t.Errorf("expected NeedMore=true for string-internal truncation with escaped quote")
+	}
+}

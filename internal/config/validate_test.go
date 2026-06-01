@@ -52,6 +52,111 @@ func TestValidateStrictMCPServerEmptyCommand(t *testing.T) {
 	}
 }
 
+func TestValidateStrictMCPServerSSENoURL(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"remote": {Transport: "sse", URL: ""},
+	}
+	errs := ValidateStrict(&cfg)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if errs[0].Path != "mcp_servers[remote].url" {
+		t.Errorf("path = %q, want mcp_servers[remote].url", errs[0].Path)
+	}
+}
+
+func TestValidateStrictMCPServerSSEWithURL(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"remote": {Transport: "sse", URL: "https://example.com/mcp/sse"},
+	}
+	errs := ValidateStrict(&cfg)
+	for _, e := range errs {
+		if strings.Contains(e.Path, "mcp_servers[remote]") {
+			t.Errorf("unexpected MCP error: %v", e)
+		}
+	}
+}
+
+func TestValidateStrictMCPServerUnknownTransport(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"remote": {Transport: "websocket"},
+	}
+	errs := ValidateStrict(&cfg)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if errs[0].Path != "mcp_servers[remote].transport" {
+		t.Errorf("path = %q, want mcp_servers[remote].transport", errs[0].Path)
+	}
+}
+
+func TestValidateStrictMCPServerSSENoCommandRequired(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"remote": {Transport: "sse", URL: "https://example.com/mcp/sse", Command: ""},
+	}
+	// SSE transport does not require Command — should not produce a command error.
+	errs := ValidateStrict(&cfg)
+	for _, e := range errs {
+		if strings.Contains(e.Path, "mcp_servers[remote].command") {
+			t.Errorf("SSE transport should not require command, got error: %v", e)
+		}
+	}
+}
+
+func TestValidateStrictMCPServerBothEnabledAndDisabled(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"fs": {
+			Command:       "mcp-fs",
+			EnabledTools:  []string{"read_file"},
+			DisabledTools: []string{"delete_file"},
+		},
+	}
+	errs := ValidateStrict(&cfg)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if errs[0].Path != "mcp_servers[fs].enabled_tools" {
+		t.Errorf("path = %q, want mcp_servers[fs].enabled_tools", errs[0].Path)
+	}
+}
+
+func TestValidateStrictMCPServerDisabledToolsOnly(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"fs": {
+			Command:       "mcp-fs",
+			DisabledTools: []string{"delete_file"},
+		},
+	}
+	errs := ValidateStrict(&cfg)
+	for _, e := range errs {
+		if strings.Contains(e.Path, "mcp_servers[fs]") {
+			t.Errorf("disabled_tools only should be valid, got error: %v", e)
+		}
+	}
+}
+
+func TestValidateStrictMCPServerEnabledToolsOnly(t *testing.T) {
+	cfg := Default()
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"github": {
+			Command:      "mcp-github",
+			EnabledTools: []string{"search_issues"},
+		},
+	}
+	errs := ValidateStrict(&cfg)
+	for _, e := range errs {
+		if strings.Contains(e.Path, "mcp_servers[github]") {
+			t.Errorf("enabled_tools only should be valid, got error: %v", e)
+		}
+	}
+}
+
 func TestValidateStrictMCPServerEmptyName(t *testing.T) {
 	cfg := Default()
 	cfg.MCPServers = map[string]MCPServerConfig{

@@ -469,3 +469,370 @@ func TestSchemaComplexDoesNotIncrementRepairErrors(t *testing.T) {
 		t.Errorf("escalationTrigger = %q, want empty (schema-complex must not trigger escalation)", trigger)
 	}
 }
+
+// TestRepairIntegration_NeedMoreDropsCall proves that string-internal
+// truncation (NeedMore=true) causes the call to be dropped rather than
+// executed with an invented value. This is the safety behaviour required
+// by Task-010: "truncation inside string asks for continuation instead
+// of guessing."
+func TestRepairIntegration_NeedMoreDropsCall(t *testing.T) {
+	bus := NewBus()
+	a := &Agent{
+		Tools:        tools.New(),
+		stormBreaker: repair.NewStormBreaker(6, 3),
+		bus:          bus,
+	}
+
+	a.Tools.Register(&mockTool{name: "read_file", readOnly: true})
+
+	// Collect repair events
+	sub := bus.Subscribe(64)
+	var repairs []EventRepair
+	done := make(chan struct{})
+	go func() {
+		for env := range sub.C {
+			if ev, ok := env.Event.(EventRepair); ok {
+				repairs = append(repairs, ev)
+			}
+		}
+		close(done)
+	}()
+
+	// Call with truncation inside a string value — the model
+	// never finished emitting the path string.
+	declared := []llm.ToolCall{
+		{ID: "1", Function: llm.ToolCallFunc{Name: "read_file", Arguments: `{"path":"README`}},
+	}
+	blocks := []llm.ContentBlock{llm.ToolUseBlock{ID: "1", Name: "read_file"}}
+
+	kept, repairErrors := a.repairToolCalls(context.Background(), "", "", declared, &blocks)
+
+	bus.Close()
+	<-done
+
+	// The call must be DROPPED — not executed with invented content.
+	if len(kept) != 0 {
+		t.Errorf("expected 0 kept calls (NeedMore should drop), got %d", len(kept))
+	}
+
+	// repairErrors must be incremented so the model gets a continuation prompt.
+	if repairErrors != 1 {
+		t.Errorf("expected 1 repair error (NeedMore), got %d", repairErrors)
+	}
+
+	// Must emit a KindArgsNeedMore event for observability.
+	foundNeedMore := false
+	for _, ev := range repairs {
+		if ev.Kind == string(repair.KindArgsNeedMore) {
+			foundNeedMore = true
+		}
+	}
+	if !foundNeedMore {
+		t.Error("expected a KindArgsNeedMore repair event, got none")
+	}
+
+	// Blocks should have no ToolUseBlocks (call was dropped).
+	for _, b := range blocks {
+		if _, ok := b.(llm.ToolUseBlock); ok {
+			t.Error("expected no ToolUseBlocks after NeedMore drop, found one")
+		}
+	}
+}
+
+// TestRepairIntegration_BraceOnlyRepairExecutes proves that brace-only
+// truncation (NeedMore=false) is auto-repaired and the call IS executed.
+// This complements TestRepairIntegration_NeedMoreDropsCall: safe repairs
+// should still go through.
+func TestRepairIntegration_BraceOnlyRepairExecutes(t *testing.T) {
+	a := &Agent{
+		Tools:        tools.New(),
+		stormBreaker: repair.NewStormBreaker(6, 3),
+		bus:          NewBus(),
+	}
+
+	a.Tools.Register(&mockTool{name: "read_file", readOnly: true})
+
+	// Call with missing closing brace — safe to auto-repair.
+	declared := []llm.ToolCall{
+		{ID: "1", Function: llm.ToolCallFunc{Name: "read_file", Arguments: `{"path":"README.md"`}},
+	}
+	blocks := []llm.ContentBlock{llm.ToolUseBlock{ID: "1", Name: "read_file"}}
+
+	kept, repairErrors := a.repairToolCalls(context.Background(), "", "", declared, &blocks)
+
+	// The call should be kept with repaired arguments.
+	if len(kept) != 1 {
+		t.Fatalf("expected 1 kept call (brace repair should succeed), got %d", len(kept))
+	}
+
+	// Arguments should be valid JSON now.
+	var m map[string]any
+	if err := json.Unmarshal([]byte(kept[0].Function.Arguments), &m); err != nil {
+		t.Errorf("expected repaired arguments to be valid JSON, got error: %v", err)
+	}
+
+	// repairErrors should be 0 (successful repair).
+	if repairErrors != 0 {
+		t.Errorf("expected 0 repair errors for brace-only repair, got %d", repairErrors)
+	}
+}
+
+// TestSchemaFlatteningReachesModelViaEpoch proves that schema flattening
+// actually reaches the model through the epoch system. This is the critical
+// end-to-end test for Task-008: it verifies that buildEpochComponents
+// flattens complex schemas, that FreezeEpoch captures the flattened tools
+// in FrozenTools, and that the model-facing request gets flat schemas.
+//
+// The previous version of this test hand-set schemaAdapters and bypassed
+// the epoch path, making it green over a feature that never executed.
+func TestSchemaFlatteningReachesModelViaEpoch(t *testing.T) {
+	a := New(nil, tools.New(), nil, "deepseek-v4-flash")
+	a.System = "static system prompt"
+	a.bus = NewBus()
+
+	// Register a tool with a deeply-nested schema (depth 3 triggers flattening).
+	complexSchema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"target": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string"},
+					"range": {
+						"type": "object",
+						"properties": {
+							"start": {"type": "integer"},
+							"end": {"type": "integer"}
+						}
+					}
+				}
+			}
+		}
+	}`)
+	a.Tools.Register(&mockComplexTool{name: "edit_file", schema: complexSchema})
+
+	// Step 1: buildEpochComponents must flatten the schema.
+	comps := a.buildEpochComponents()
+
+	// Find the edit_file tool in ToolSpecs.
+	var editFileSpec *llm.Tool
+	for i := range comps.ToolSpecs {
+		if comps.ToolSpecs[i].Function.Name == "edit_file" {
+			editFileSpec = &comps.ToolSpecs[i]
+			break
+		}
+	}
+	if editFileSpec == nil {
+		t.Fatal("edit_file tool not found in epoch ToolSpecs")
+	}
+
+	// ToolSpecs should carry the FLAT schema (target__path, target__range__start).
+	var flatSchema map[string]any
+	if err := json.Unmarshal(editFileSpec.Function.Parameters, &flatSchema); err != nil {
+		t.Fatalf("flattened schema not valid JSON: %v", err)
+	}
+	props, _ := flatSchema["properties"].(map[string]any)
+	if _, has := props["target__path"]; !has {
+		t.Error("expected flattened schema to have 'target__path' in ToolSpecs")
+	}
+	if _, has := props["target__range__start"]; !has {
+		t.Error("expected flattened schema to have 'target__range__start' in ToolSpecs")
+	}
+	// Should NOT have nested "target" object in the flat schema.
+	if _, has := props["target"]; has {
+		t.Error("expected 'target' to be removed from flat schema properties")
+	}
+
+	// Step 2: InitEpoch + FreezeEpoch must capture the flat tools.
+	epoch := a.epochMgr.InitEpoch("session_start", comps)
+	a.epochMgr.FreezeEpoch()
+
+	// FrozenTools must carry the flattened schema (not the original).
+	var frozenEditFile *llm.Tool
+	for i := range epoch.FrozenTools {
+		if epoch.FrozenTools[i].Function.Name == "edit_file" {
+			frozenEditFile = &epoch.FrozenTools[i]
+			break
+		}
+	}
+	if frozenEditFile == nil {
+		t.Fatal("edit_file tool not found in FrozenTools")
+	}
+	var frozenSchema map[string]any
+	if err := json.Unmarshal(frozenEditFile.Function.Parameters, &frozenSchema); err != nil {
+		t.Fatalf("frozen schema not valid JSON: %v", err)
+	}
+	frozenProps, _ := frozenSchema["properties"].(map[string]any)
+	if _, has := frozenProps["target__path"]; !has {
+		t.Error("expected FrozenTools to carry flattened 'target__path'")
+	}
+
+	// Step 3: schemaAdapters must be populated for rehydration.
+	adapter, hasAdapter := a.schemaAdapters["edit_file"]
+	if !hasAdapter {
+		t.Fatal("expected schemaAdapters['edit_file'] to be populated after buildEpochComponents")
+	}
+	if len(adapter.FieldMap) == 0 {
+		t.Fatal("expected adapter.FieldMap to have entries for flattened fields")
+	}
+
+	// Step 4: repairToolCalls must rehydrate flat args → nested.
+	// Simulate the model returning flat arguments (which it will, since
+	// the model saw the flat schema from FrozenTools).
+	bus := a.bus
+	sub := bus.Subscribe(64)
+	var repairs []EventRepair
+	done := make(chan struct{})
+	go func() {
+		for env := range sub.C {
+			if ev, ok := env.Event.(EventRepair); ok {
+				repairs = append(repairs, ev)
+			}
+		}
+		close(done)
+	}()
+
+	flatArgs := `{"target__path":"main.go","target__range__start":1,"target__range__end":10}`
+	declared := []llm.ToolCall{
+		{ID: "1", Function: llm.ToolCallFunc{Name: "edit_file", Arguments: flatArgs}},
+	}
+	blocks := []llm.ContentBlock{llm.ToolUseBlock{ID: "1", Name: "edit_file"}}
+
+	kept, repairErrors := a.repairToolCalls(context.Background(), "", "", declared, &blocks)
+
+	bus.Close()
+	<-done
+
+	// Call should be kept.
+	if len(kept) != 1 {
+		t.Fatalf("expected 1 kept call, got %d", len(kept))
+	}
+
+	// Arguments should be rehydrated to nested form.
+	var args map[string]any
+	if err := json.Unmarshal([]byte(kept[0].Function.Arguments), &args); err != nil {
+		t.Fatalf("rehydrated args not valid JSON: %v", err)
+	}
+
+	// Should have nested "target" object.
+	target, ok := args["target"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'target' object, got %T", args["target"])
+	}
+	if target["path"] != "main.go" {
+		t.Errorf("expected target.path = 'main.go', got %v", target["path"])
+	}
+
+	// Should have nested "target.range" object.
+	targetRange, ok := target["range"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'target.range' object, got %T", target["range"])
+	}
+	if targetRange["start"] != float64(1) {
+		t.Errorf("expected target.range.start = 1, got %v", targetRange["start"])
+	}
+	if targetRange["end"] != float64(10) {
+		t.Errorf("expected target.range.end = 10, got %v", targetRange["end"])
+	}
+
+	// Should NOT have flat keys in the output.
+	if _, has := args["target__path"]; has {
+		t.Error("expected flat key 'target__path' to be removed after rehydration")
+	}
+
+	// repairErrors should be 0 (rehydration is a valid repair).
+	if repairErrors != 0 {
+		t.Errorf("expected 0 repair errors after rehydration, got %d", repairErrors)
+	}
+
+	// Should have a rehydration repair event.
+	foundRehydrated := false
+	for _, ev := range repairs {
+		if ev.Kind == string(repair.KindArgsCompleted) && strings.Contains(ev.Message, "rehydrated") {
+			foundRehydrated = true
+		}
+	}
+	if !foundRehydrated {
+		t.Error("expected a 'rehydrated' repair event, got none")
+	}
+}
+
+// TestRehydrationNoOpDoesNotEmitEvent proves that when the model returns
+// nested args (no flat keys to rehydrate), the rehydration step does NOT
+// emit a misleading "arguments rehydrated" event. This happens when the
+// epoch has adapters but the model somehow returns nested args anyway.
+func TestRehydrationNoOpDoesNotEmitEvent(t *testing.T) {
+	a := New(nil, tools.New(), nil, "deepseek-v4-flash")
+	a.System = "static system prompt"
+	a.bus = NewBus()
+
+	complexSchema := json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"target": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string"},
+					"range": {
+						"type": "object",
+						"properties": {
+							"start": {"type": "integer"},
+							"end": {"type": "integer"}
+						}
+					}
+				}
+			}
+		}
+	}`)
+	a.Tools.Register(&mockComplexTool{name: "edit_file", schema: complexSchema})
+
+	// Run buildEpochComponents to populate schemaAdapters.
+	a.buildEpochComponents()
+	if len(a.schemaAdapters) == 0 {
+		t.Fatal("expected schemaAdapters to be populated")
+	}
+
+	bus := a.bus
+	sub := bus.Subscribe(64)
+	var repairs []EventRepair
+	done := make(chan struct{})
+	go func() {
+		for env := range sub.C {
+			if ev, ok := env.Event.(EventRepair); ok {
+				repairs = append(repairs, ev)
+			}
+		}
+		close(done)
+	}()
+
+	// Model returns NESTED args (not flat) — no rehydration needed.
+	nestedArgs := `{"target":{"path":"main.go","range":{"start":1,"end":10}}}`
+	declared := []llm.ToolCall{
+		{ID: "1", Function: llm.ToolCallFunc{Name: "edit_file", Arguments: nestedArgs}},
+	}
+	blocks := []llm.ContentBlock{llm.ToolUseBlock{ID: "1", Name: "edit_file"}}
+
+	kept, repairErrors := a.repairToolCalls(context.Background(), "", "", declared, &blocks)
+
+	bus.Close()
+	<-done
+
+	if len(kept) != 1 {
+		t.Fatalf("expected 1 kept call, got %d", len(kept))
+	}
+	if repairErrors != 0 {
+		t.Errorf("expected 0 repair errors, got %d", repairErrors)
+	}
+
+	// Args should be unchanged — rehydration was a no-op passthrough.
+	if kept[0].Function.Arguments != nestedArgs {
+		t.Error("expected nested args to pass through unchanged")
+	}
+
+	// Should NOT have a "rehydrated" event — no actual rehydration occurred.
+	for _, ev := range repairs {
+		if strings.Contains(ev.Message, "rehydrated") {
+			t.Errorf("unexpected 'rehydrated' event for no-op passthrough: %+v", ev)
+		}
+	}
+}

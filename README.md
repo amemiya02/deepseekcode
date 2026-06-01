@@ -29,6 +29,30 @@ SQLite-backed sessions, and a conservative permission model.
   keyword detection plus `low/medium/high/max` effort, dialed down
   automatically on simple tasks.
 
+## DeepSeek V4 Agent Story
+
+DeepSeekCode is purpose-built for DeepSeek V4 models with verifiable
+advantages over generic coding agents:
+
+- **Provable prefix-cache stability** — a single canonical serializer
+  guarantees the wire bytes and cache fingerprint cannot diverge; verify with
+  `dsc trace inspect` ([docs/prefix-cache.md](docs/prefix-cache.md)).
+- **Selective Pro validation** — destructive tool calls get a second
+  `deepseek-v4-pro` judgment, not every turn; keep costs low with a safety net
+  where it matters ([docs/duet.md](docs/duet.md)).
+- **1M context workflows** — large-repo reading and long-history sessions
+  without aggressive compaction; 1M context is an enabler, not a replacement
+  for tools and retrieval.
+- **Tool-call repair pipeline** — automatic recovery from truncated JSON,
+  scavenged calls in reasoning text, and storm-guard suppression of repeated
+  failed calls.
+
+Full story with local verification commands:
+[docs/deepseek-v4-agent-story.md](docs/deepseek-v4-agent-story.md)
+
+Benchmark evidence:
+[bench/README.md](bench/README.md)
+
 ## Features
 
 - Interactive Bubble Tea TUI and scriptable `dsc -p "prompt"` mode.
@@ -161,6 +185,7 @@ See [docs/config.md](docs/config.md) and
 - [LSP](docs/lsp.md)
 - [Reasoning tape](docs/tape.md)
 - [Model compatibility](docs/MODEL_COMPATIBILITY.md)
+- [DeepSeek V4 Agent Story](docs/deepseek-v4-agent-story.md)
 
 ## Development
 

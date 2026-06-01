@@ -303,7 +303,14 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	var mcpNotices []string
 	for name, srv := range cfg.MCPServers {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := mcpReg.Connect(ctx, name, srv.Command, srv.Args, srv.Env)
+		var err error
+		switch srv.Transport {
+		case "sse":
+			err = mcpReg.ConnectSSE(ctx, name, srv.URL)
+		default:
+			// Default transport is stdio.
+			err = mcpReg.Connect(ctx, name, srv.Command, srv.Args, srv.Env)
+		}
 		cancel()
 		if err != nil {
 			slog.Warn("mcp server failed to start", "name", name, "err", err)
@@ -312,6 +319,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 		if srv.TimeoutSeconds > 0 {
 			mcpReg.SetTimeout(name, srv.TimeoutSeconds)
+		}
+		if len(srv.EnabledTools) > 0 || len(srv.DisabledTools) > 0 {
+			mcpReg.SetToolFilter(name, srv.EnabledTools, srv.DisabledTools)
 		}
 	}
 	for _, t := range mcp.BridgeAll(mcpReg) {
@@ -789,7 +799,13 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	defer mcpReg.Shutdown()
 	for name, srv := range cfg.MCPServers {
 		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cerr := mcpReg.Connect(mctx, name, srv.Command, srv.Args, srv.Env)
+		var cerr error
+		switch srv.Transport {
+		case "sse":
+			cerr = mcpReg.ConnectSSE(mctx, name, srv.URL)
+		default:
+			cerr = mcpReg.Connect(mctx, name, srv.Command, srv.Args, srv.Env)
+		}
 		mcancel()
 		if cerr != nil {
 			fmt.Fprintf(os.Stderr, "warning: mcp[%s]: failed — %v\n", name, cerr)
@@ -797,6 +813,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		}
 		if srv.TimeoutSeconds > 0 {
 			mcpReg.SetTimeout(name, srv.TimeoutSeconds)
+		}
+		if len(srv.EnabledTools) > 0 || len(srv.DisabledTools) > 0 {
+			mcpReg.SetToolFilter(name, srv.EnabledTools, srv.DisabledTools)
 		}
 	}
 	for _, t := range mcp.BridgeAll(mcpReg) {

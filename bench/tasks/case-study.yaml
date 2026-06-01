@@ -1,0 +1,13 @@
+id: case-study
+fixture_repo: fixtures/case-study
+commit: HEAD
+prompt_file: prompts/case-study.md
+timeout_seconds: 300
+read_only: true
+success:
+  tests: []
+  diff_invariants:
+    - no_changes: true
+metrics:
+  require_cache_gate: true
+  min_post_warm_turns: 1

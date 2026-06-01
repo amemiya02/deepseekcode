@@ -14,10 +14,19 @@ import (
 // transport plus the capabilities and tools discovered during the
 // handshake.
 type dialResult struct {
-	t     *StdioTransport
+	t     Transport
 	caps  ServerCapabilities
 	tools []McpToolMeta
 }
+
+// transportKind identifies which transport type a server uses, so the
+// reconnect path can recreate it.
+type transportKind int
+
+const (
+	transportStdio transportKind = iota
+	transportSSE
+)
 
 // Registry manages the lifecycle of multiple MCP servers and provides
 // unified tool discovery and calling.
@@ -50,6 +59,9 @@ type Registry struct {
 	// seam: defaulted to the real dial, overridable in-package by tests
 	// to inject a pipe transport instead of exec'ing a real process.
 	dialer func(ctx context.Context, name, command string, args []string, env map[string]string) (dialResult, error)
+	// sseDialer performs the SSE connect+initialize+listTools sequence.
+	// Seam for testing, analogous to dialer.
+	sseDialer func(ctx context.Context, name, sseURL string) (dialResult, error)
 }
 
 // NewRegistry returns an empty Registry.
@@ -62,6 +74,7 @@ func NewRegistry() *Registry {
 		reconnectTimeout: 10 * time.Second,
 	}
 	r.dialer = r.dial
+	r.sseDialer = r.dialSSE
 	return r
 }
 
@@ -95,8 +108,37 @@ func (r *Registry) dial(ctx context.Context, name, command string, args []string
 	return dialResult{t: transport, caps: caps, tools: tools}, nil
 }
 
+// dialSSE connects to an MCP server via SSE transport. It opens the
+// SSE stream, runs initialize and listTools over it, and returns the
+// live transport.
+func (r *Registry) dialSSE(ctx context.Context, name, sseURL string) (dialResult, error) {
+	if sseURL == "" {
+		return dialResult{}, fmt.Errorf("mcp %q: empty url for sse transport", name)
+	}
+
+	transport := NewSSETransport(sseURL)
+	if err := transport.Start(ctx); err != nil {
+		return dialResult{}, fmt.Errorf("mcp %q: sse connect: %w", name, err)
+	}
+
+	caps, err := initialize(ctx, transport)
+	if err != nil {
+		transport.Close()
+		return dialResult{}, fmt.Errorf("mcp %q: initialize: %w", name, err)
+	}
+
+	tools, err := listTools(ctx, transport)
+	if err != nil {
+		transport.Close()
+		return dialResult{}, fmt.Errorf("mcp %q: tools/list: %w", name, err)
+	}
+
+	return dialResult{t: transport, caps: caps, tools: tools}, nil
+}
+
 // Connect spawns an MCP server, runs initialize, discovers tools, and
-// registers it under the given name. Name must be unique.
+// registers it under the given name. Name must be unique. This is the
+// stdio transport path — use ConnectSSE for SSE servers.
 func (r *Registry) Connect(ctx context.Context, name, command string, args []string, env map[string]string) error {
 	r.mu.Lock()
 	if _, ok := r.servers[name]; ok {
@@ -127,13 +169,49 @@ func (r *Registry) Connect(ctx context.Context, name, command string, args []str
 		command: command,
 		args:    args,
 		env:     env,
+		kind:    transportStdio,
 	}
 	r.mu.Unlock()
 
 	// Spawn the liveness watcher bound to THIS transport's Done channel.
-	// A later reconnect installs a fresh transport with its own watcher;
-	// this watcher exits once its old Done is closed, so it can never
-	// degrade a freshly-reconnected transport.
+	r.wg.Add(1)
+	go r.watch(name, res.t.Done())
+	return nil
+}
+
+// ConnectSSE connects to an MCP server via SSE transport. It opens the
+// SSE event stream, runs initialize, discovers tools, and registers the
+// server under the given name. Name must be unique.
+func (r *Registry) ConnectSSE(ctx context.Context, name, sseURL string) error {
+	r.mu.Lock()
+	if _, ok := r.servers[name]; ok {
+		r.mu.Unlock()
+		return fmt.Errorf("mcp server %q already registered", name)
+	}
+	r.servers[name] = &ServerProxy{Name: name, State: StateInitializing}
+	r.mu.Unlock()
+
+	res, err := r.sseDialer(ctx, name, sseURL)
+	if err != nil {
+		r.mu.Lock()
+		r.servers[name].State = StateFailed
+		r.servers[name].lastError = err.Error()
+		r.mu.Unlock()
+		return err
+	}
+
+	r.mu.Lock()
+	r.servers[name] = &ServerProxy{
+		Name:    name,
+		State:   StateConnected,
+		Caps:    res.caps,
+		Tools:   res.tools,
+		t:       res.t,
+		kind:    transportSSE,
+		sseURL:  sseURL,
+	}
+	r.mu.Unlock()
+
 	r.wg.Add(1)
 	go r.watch(name, res.t.Done())
 	return nil
@@ -193,16 +271,27 @@ func (r *Registry) attemptReconnect(name string) {
 		r.mu.RUnlock()
 		return
 	}
+	kind := proxy.kind
 	command := proxy.command
 	args := proxy.args
 	env := proxy.env
+	sseURL := proxy.sseURL
 	r.mu.RUnlock()
 
 	// Dial without holding r.mu so the spawn/handshake can't block the
 	// lock and stall the rest of the registry.
 	dialCtx, cancel := context.WithTimeout(context.Background(), r.reconnectTimeout)
 	defer cancel()
-	res, err := r.dialer(dialCtx, name, command, args, env)
+
+	var res dialResult
+	var err error
+	switch kind {
+	case transportSSE:
+		res, err = r.sseDialer(dialCtx, name, sseURL)
+	default:
+		res, err = r.dialer(dialCtx, name, command, args, env)
+	}
+
 	if err != nil {
 		// Failure: record the single attempt and arm the cooldown gate.
 		r.mu.Lock()
@@ -232,15 +321,22 @@ func (r *Registry) attemptReconnect(name string) {
 		res.t.Close()
 		return
 	}
+	// Preserve tool filters from the old proxy across reconnect.
+	oldEnabled := proxy.enabledTools
+	oldDisabled := proxy.disabledTools
 	r.servers[name] = &ServerProxy{
-		Name:    name,
-		State:   StateConnected,
-		Caps:    res.caps,
-		Tools:   res.tools,
-		t:       res.t,
-		command: command,
-		args:    args,
-		env:     env,
+		Name:          name,
+		State:         StateConnected,
+		Caps:          res.caps,
+		Tools:         res.tools,
+		t:             res.t,
+		command:       command,
+		args:          args,
+		env:           env,
+		kind:          kind,
+		sseURL:        sseURL,
+		enabledTools:  oldEnabled,
+		disabledTools: oldDisabled,
 	}
 	r.mu.Unlock()
 
@@ -319,15 +415,25 @@ func (r *Registry) Snapshots() []ServerSnapshot {
 	defer r.mu.RUnlock()
 	out := make([]ServerSnapshot, 0, len(r.servers))
 	for _, p := range r.servers {
-		names := make([]string, len(p.Tools))
-		for i, t := range p.Tools {
-			names[i] = t.Name
+		var names []string
+		for _, t := range p.Tools {
+			// Apply the same filter as Tools().
+			if p.enabledTools != nil {
+				if !p.enabledTools[t.Name] {
+					continue
+				}
+			} else if p.disabledTools != nil {
+				if p.disabledTools[t.Name] {
+					continue
+				}
+			}
+			names = append(names, t.Name)
 		}
 		sort.Strings(names)
 		out = append(out, ServerSnapshot{
 			Name:         p.Name,
 			State:        p.State,
-			ToolCount:    len(p.Tools),
+			ToolCount:    len(names),
 			Tools:        names,
 			BackoffUntil: p.backoffUntil,
 			LastError:    p.lastError,
@@ -342,7 +448,8 @@ func (r *Registry) Snapshots() []ServerSnapshot {
 const mcpPrefix = "mcp__"
 
 // Tools returns all MCP tools with their names prefixed as
-// "mcp__<server>__<tool>".
+// "mcp__<server>__<tool>". Per-server tool filters (enabled_tools,
+// disabled_tools) are applied before returning.
 func (r *Registry) Tools() []McpToolMeta {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -352,6 +459,18 @@ func (r *Registry) Tools() []McpToolMeta {
 			continue
 		}
 		for _, t := range s.Tools {
+			// Apply per-server filter.
+			if s.enabledTools != nil {
+				// Allowlist: only listed tools are exposed.
+				if !s.enabledTools[t.Name] {
+					continue
+				}
+			} else if s.disabledTools != nil {
+				// Blocklist: listed tools are hidden.
+				if s.disabledTools[t.Name] {
+					continue
+				}
+			}
 			fullName := mcpPrefix + s.Name + "__" + t.Name
 			out = append(out, McpToolMeta{
 				Name:        fullName,
@@ -402,6 +521,38 @@ func (r *Registry) SetTimeout(name string, seconds int) {
 	r.mu.Lock()
 	r.timeouts[name] = seconds
 	r.mu.Unlock()
+}
+
+// SetToolFilter configures per-server tool filtering. enabledTools is an
+// allowlist (only listed tools are exposed); disabledTools is a blocklist
+// (listed tools are hidden). At most one may be non-nil; the caller
+// (typically main.go) is responsible for ensuring they are not both set,
+// since config validation already rejects that combination.
+func (r *Registry) SetToolFilter(name string, enabledTools, disabledTools []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	proxy, ok := r.servers[name]
+	if !ok {
+		return
+	}
+	if len(enabledTools) > 0 {
+		m := make(map[string]bool, len(enabledTools))
+		for _, t := range enabledTools {
+			m[t] = true
+		}
+		proxy.enabledTools = m
+		proxy.disabledTools = nil
+	} else if len(disabledTools) > 0 {
+		m := make(map[string]bool, len(disabledTools))
+		for _, t := range disabledTools {
+			m[t] = true
+		}
+		proxy.disabledTools = m
+		proxy.enabledTools = nil
+	} else {
+		proxy.enabledTools = nil
+		proxy.disabledTools = nil
+	}
 }
 
 // MCPChange describes a tool-level mutation detected between two schema snapshots.

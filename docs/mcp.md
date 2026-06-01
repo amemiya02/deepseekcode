@@ -19,6 +19,41 @@ command = "uvx"
 args = ["mcp-server-git", "--repository", "."]
 ```
 
+### SSE transport
+
+Remote MCP servers using Server-Sent Events can be configured with
+`transport = "sse"` and a `url` field:
+
+```toml
+[mcp_servers.remote-tools]
+transport = "sse"
+url = "https://example.com/mcp/sse"
+```
+
+The `url` should point to the server's SSE endpoint. The transport
+automatically discovers the POST URL from the initial `endpoint` event.
+If `transport` is omitted, it defaults to `"stdio"`.
+
+### Per-tool enable/disable
+
+Individual MCP tools can be selectively exposed or hidden using
+`enabled_tools` (allowlist) or `disabled_tools` (blocklist). These
+are mutually exclusive — use one or the other, not both.
+
+```toml
+[mcp_servers.fs]
+command = "mcp-fs"
+disabled_tools = ["delete_file"]
+
+[mcp_servers.github]
+command = "mcp-github"
+enabled_tools = ["search_issues", "read_file"]
+```
+
+Tools listed in `disabled_tools` are not visible to the model even if
+the server provides them. `enabled_tools` exposes only the listed
+tools; all others from that server are hidden.
+
 ## Shipped behavior
 
 The following MCP features are implemented and available today:
@@ -26,8 +61,15 @@ The following MCP features are implemented and available today:
 ### Stdio transport
 
 MCP servers are spawned as subprocesses and communicate over
-stdin/stdout using JSON-RPC 2.0 with Content-Length framing. This is
-the only transport currently supported.
+stdin/stdout using JSON-RPC 2.0 with newline-delimited messages. This
+is the default transport when `transport` is omitted.
+
+### SSE transport
+
+Remote MCP servers can be reached via Server-Sent Events. The transport
+opens an SSE stream to discover the POST endpoint, then sends JSON-RPC
+requests over HTTP POST and receives responses as SSE events. Reconnect
+and backoff are handled by the same lifecycle manager as stdio.
 
 ### Startup connection
 
@@ -89,9 +131,6 @@ filterable — type to narrow by server name.
 
 ## Roadmap
 
-The following MCP features are planned but not yet shipped:
-
-- **HTTP/SSE transport** — connect to remote MCP servers over HTTP
-  with Server-Sent Events for streaming.
-- **Per-tool enable/disable** — selectively enable or disable
-  individual MCP tools without removing the server config.
+No MCP features are currently on the roadmap. The shipped transport
+options (stdio, SSE), lifecycle management, tool bridge, drift
+detection, and per-tool enable/disable cover the core MCP workflow.

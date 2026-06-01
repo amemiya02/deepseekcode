@@ -265,6 +265,11 @@ type Agent struct {
 	// telemetry emitted in the current prefix epoch, keyed by
 	// epochID + "\x00" + toolName. Prevents repeated noise per epoch.
 	schemaComplexEmitted map[string]bool
+
+	// schemaAdapters maps tool names to their SchemaAdapter for
+	// rehydrating flattened arguments back to nested form before execution.
+	// Populated by runStep when BuildSchemaAdapters flattens complex schemas.
+	schemaAdapters map[string]repair.SchemaAdapter
 }
 
 // New returns an Agent with sensible defaults for v0.1.
@@ -292,6 +297,7 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		Jobs:                 NewJobRegistry(),
 		stormBreaker:         repair.NewStormBreaker(6, 3),
 		schemaComplexEmitted: make(map[string]bool),
+		schemaAdapters:       make(map[string]repair.SchemaAdapter),
 	}
 
 	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
@@ -829,10 +835,34 @@ func (a *Agent) currentProfileID() string {
 // into EpochComponents. Shared by runStep (initial freeze + drift detection)
 // and SwitchProfile (explicit epoch switch) so both compute the same hash
 // from the same inputs.
+//
+// Complex tool schemas (depth > 2) are flattened here so that ToolSpecs,
+// FrozenTools, and the wire-format request all carry the same flat schemas.
+// The adapter map is stored on a.schemaAdapters for repairToolCalls to
+// rehydrate flat arguments back to nested form before execution.
 func (a *Agent) buildEpochComponents() EpochComponents {
+	rawTools := a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+
+	// Flatten complex tool schemas for DeepSeek compatibility.
+	// This MUST happen here (not downstream) so that ToolSpecs → FrozenTools
+	// → fingerprint → wire all carry the flat schemas. If flattening were
+	// applied to req.Tools after epoch freeze, the epoch would overwrite it
+	// with the original unflattened tools on every turn.
+	var epochTools []llm.Tool
+	flattenedTools, adapters, err := repair.BuildSchemaAdapters(rawTools)
+	if err == nil && len(adapters) > 0 {
+		epochTools = flattenedTools
+		a.schemaAdapters = adapters
+	} else {
+		epochTools = rawTools
+		// Reset adapters when no flattening is needed (e.g. after a profile
+		// switch that removes the complex-schema tool).
+		a.schemaAdapters = make(map[string]repair.SchemaAdapter)
+	}
+
 	return EpochComponents{
 		StaticSystem:   a.staticSystem(),
-		ToolSpecs:      a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
+		ToolSpecs:      epochTools,
 		Model:          a.Model,
 		AgentProfileID: a.currentProfileID(),
 		Capability:     a.buildCapabilitySet(),
@@ -901,6 +931,18 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 
 	staticSys := a.staticSystem()
 	epochComps := a.buildEpochComponents()
+
+	// Emit telemetry for schema-flattened tools. buildEpochComponents
+	// already flattened and stored adapters; this just publishes events
+	// for observability. Must happen after buildEpochComponents so that
+	// a.schemaAdapters is populated.
+	for name := range a.schemaAdapters {
+		a.publishRepairEvent(EventRepair{
+			Kind:    string(repair.KindSchemaFlattened),
+			Tool:    name,
+			Message: "schema flattened for DeepSeek compatibility",
+		})
+	}
 
 	epoch := a.epochMgr.CurrentEpoch()
 	if epoch == nil {
@@ -1937,6 +1979,21 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 	repairedCalls := make([]llm.ToolCall, 0, len(allCalls))
 	for _, call := range allCalls {
 		repairResult := repair.RepairJSONArgs(call.Function.Arguments)
+
+		// When truncation is inside a string, the repair is unsafe —
+		// we'd be inventing string content the model never finished.
+		// Drop the call and ask the model to re-emit complete arguments.
+		if repairResult.NeedMore {
+			repairErrors++
+			a.publishRepairEvent(EventRepair{
+				Kind:    string(repair.KindArgsNeedMore),
+				Tool:    call.Function.Name,
+				CallID:  call.ID,
+				Message: "arguments truncated inside string — requesting continuation",
+			})
+			continue
+		}
+
 		if repairResult.Changed {
 			call.Function.Arguments = repairResult.Repaired
 			a.publishRepairEvent(EventRepair{
@@ -1958,6 +2015,49 @@ func (a *Agent) repairToolCalls(ctx context.Context, reasoning, content string, 
 			})
 		}
 		repairedCalls = append(repairedCalls, call)
+	}
+
+	// Step 3b: Rehydrate flattened arguments back to nested form.
+	// When BuildSchemaAdapters flattened complex schemas for the model,
+	// the model returns flat arguments (e.g. "target__path" → "target.path").
+	// We must reconstruct the nested structure before execution.
+	// Only emit a repair event when rehydration actually changed the args
+	// (i.e. flat keys were found and nested). When the model returns nested
+	// args (no flat keys to rehydrate), Rehydrate is a no-op passthrough —
+	// no event, no re-serialization.
+	for i, call := range repairedCalls {
+		adapter, hasAdapter := a.schemaAdapters[call.Function.Name]
+		if !hasAdapter || len(adapter.FieldMap) == 0 {
+			continue
+		}
+		rehydrated, err := adapter.Rehydrate(json.RawMessage(call.Function.Arguments))
+		if err != nil {
+			// Rehydration failed — log and skip (keep flat args, which
+			// will likely fail validation, but don't silently drop).
+			a.publishRepairEvent(EventRepair{
+				Kind:    string(repair.KindArgsInvalid),
+				Tool:    call.Function.Name,
+				CallID:  call.ID,
+				Message: "schema rehydration failed: " + err.Error(),
+			})
+			continue
+		}
+		before := call.Function.Arguments
+		after := string(rehydrated)
+		if before == after {
+			// Rehydration was a no-op (no flat keys found in args).
+			// Don't emit a misleading event or re-serialize.
+			continue
+		}
+		repairedCalls[i].Function.Arguments = after
+		a.publishRepairEvent(EventRepair{
+			Kind:       string(repair.KindArgsCompleted),
+			Tool:       call.Function.Name,
+			CallID:     call.ID,
+			Message:    "arguments rehydrated from flattened schema",
+			BeforeHash: repair.HashArgs(before),
+			AfterHash:  repair.HashArgs(after),
+		})
 	}
 
 	// Step 4: Build tool kinds map from registry using ReadOnlyHint

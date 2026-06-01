@@ -149,10 +149,14 @@ type ToolsConfig struct {
 }
 
 type MCPServerConfig struct {
-	Command        string            `toml:"command"`
+	Transport      string            `toml:"transport"`       // "stdio" (default) or "sse"
+	URL            string            `toml:"url"`             // required when transport="sse"
+	Command        string            `toml:"command"`         // required when transport="stdio"
 	Args           []string          `toml:"args"`
 	Env            map[string]string `toml:"env"`
 	TimeoutSeconds int               `toml:"timeout_seconds"`
+	EnabledTools   []string          `toml:"enabled_tools"`   // allowlist: only these tools exposed
+	DisabledTools  []string          `toml:"disabled_tools"`  // blocklist: these tools hidden
 }
 
 // Load reads user + project config and overlays them onto defaults.

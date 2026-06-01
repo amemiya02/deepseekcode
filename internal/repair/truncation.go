@@ -14,20 +14,22 @@ type ArgsRepair struct {
 	Changed  bool     // true if any modification was made
 	Valid    bool     // true if result is valid JSON
 	Fallback bool     // true if input was unrecoverable or oversized
+	NeedMore bool     // true when truncation is inside a string and repair is unsafe
 	Notes    []string // diagnostic notes
 }
 
-// RepairJSONArgs attempts to repair malformed JSON arguments.
-// It only applies deterministic corrections: removing trailing commas,
-// stripping control characters in strings, closing unterminated strings,
-// and appending missing brackets/braces.
-func RepairJSONArgs(raw string) ArgsRepair {
+// RepairTruncatedJSON attempts to repair truncated JSON.
+// It returns an ArgsRepair with NeedMore=true when truncation is inside a quoted string
+// (unsafe to auto-repair because we'd be inventing string content), and NeedMore=false
+// when truncation is just missing closing braces (safe to auto-repair).
+func RepairTruncatedJSON(raw string) ArgsRepair {
 	result := ArgsRepair{Raw: raw, Repaired: raw}
 
 	// Step 1: Fast-path valid JSON
 	if json.Valid([]byte(raw)) {
 		result.Valid = true
 		result.Repaired = raw
+		result.NeedMore = false
 		return result
 	}
 
@@ -35,14 +37,16 @@ func RepairJSONArgs(raw string) ArgsRepair {
 	if len(raw) > maxArgsSize {
 		result.Valid = false
 		result.Fallback = true
+		result.NeedMore = false
 		result.Notes = append(result.Notes, "input exceeds 1 MiB limit")
 		return result
 	}
 
 	// Attempt repair
-	repaired := repairJSON(raw)
+	repaired, truncatedInString := repairJSON(raw)
 	result.Repaired = repaired
 	result.Changed = repaired != raw
+	result.NeedMore = truncatedInString
 
 	// Step 7: Check if repaired JSON is valid
 	if json.Valid([]byte(repaired)) {
@@ -58,8 +62,17 @@ func RepairJSONArgs(raw string) ArgsRepair {
 	return result
 }
 
+// RepairJSONArgs attempts to repair malformed JSON arguments.
+// It only applies deterministic corrections: removing trailing commas,
+// stripping control characters in strings, closing unterminated strings,
+// and appending missing brackets/braces.
+func RepairJSONArgs(raw string) ArgsRepair {
+	return RepairTruncatedJSON(raw)
+}
+
 // repairJSON applies deterministic repairs to malformed JSON.
-func repairJSON(s string) string {
+// Returns the repaired string and a boolean indicating if truncation occurred inside a string.
+func repairJSON(s string) (string, bool) {
 	// Step 3: Strip control characters inside JSON strings
 	s = stripControlChars(s)
 
@@ -67,9 +80,9 @@ func repairJSON(s string) string {
 	s = removeTrailingCommas(s)
 
 	// Step 5 & 6: Close unterminated strings and add missing brackets
-	s = closeUnclosed(s)
+	repaired, truncatedInString := closeUnclosed(s)
 
-	return s
+	return repaired, truncatedInString
 }
 
 // stripControlChars removes literal control characters (newlines, tabs, etc.)
@@ -130,7 +143,8 @@ func removeTrailingCommas(s string) string {
 }
 
 // closeUnclosed closes unterminated strings and adds missing brackets/braces.
-func closeUnclosed(s string) string {
+// Returns the repaired string and a boolean indicating if truncation occurred inside a string.
+func closeUnclosed(s string) (string, bool) {
 	var b strings.Builder
 	b.Grow(len(s) + 10) // extra space for closers
 
@@ -166,8 +180,10 @@ func closeUnclosed(s string) string {
 	}
 
 	// Step 5: Close unterminated string
+	truncatedInString := false
 	if inString {
 		b.WriteByte('"')
+		truncatedInString = true
 	}
 
 	// Step 6: Append missing closers (in reverse order of stack)
@@ -175,5 +191,5 @@ func closeUnclosed(s string) string {
 		b.WriteByte(stack[i])
 	}
 
-	return b.String()
+	return b.String(), truncatedInString
 }

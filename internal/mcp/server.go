@@ -32,12 +32,12 @@ func (s LifecycleState) String() string {
 // discovered tools. Callers interact through the Registry, not directly.
 //
 // The liveness/backoff bookkeeping fields (reconnectAttempted,
-// backoffUntil, command, args, env) are carried per-proxy but are
-// guarded exclusively by Registry.mu — there is intentionally NO
-// per-proxy lock. The proxy is replaced wholesale on reconnect and is
-// only ever read or written while holding Registry.mu, so a per-proxy
-// lock would create lock-ordering hazards with Registry.mu and is
-// unnecessary.
+// backoffUntil, command, args, env, transportKind, sseURL) are carried
+// per-proxy but are guarded exclusively by Registry.mu — there is
+// intentionally NO per-proxy lock. The proxy is replaced wholesale on
+// reconnect and is only ever read or written while holding Registry.mu,
+// so a per-proxy lock would create lock-ordering hazards with
+// Registry.mu and is unnecessary.
 type ServerProxy struct {
 	Name  string
 	State LifecycleState
@@ -50,6 +50,14 @@ type ServerProxy struct {
 	command string
 	args    []string
 	env     map[string]string
+	kind    transportKind // stdio or sse
+	sseURL  string        // stored for SSE reconnect
+
+	// Per-server tool filter. At most one is set; they are mutually
+	// exclusive (config validation rejects both). When set, they
+	// control which tools from this server are exposed to the model.
+	enabledTools  map[string]bool // allowlist: only these tools exposed
+	disabledTools map[string]bool // blocklist: these tools hidden
 
 	// reconnectAttempted is true once the single bounded reconnect has
 	// run for the current degraded incident. Guarded by Registry.mu.

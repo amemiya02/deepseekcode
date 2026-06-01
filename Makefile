@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean run fmt vet tidy
+.PHONY: build install test lint clean run fmt vet tidy bench-case-study
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -46,3 +46,7 @@ tidy:
 
 clean:
 	rm -rf $(BIN_DIR) dist coverage.out coverage.html
+
+bench-case-study: build
+	@echo "Running case-study benchmark..."
+	@go run ./bench/cmd/benchrunner/ --agent deepseekcode-current --task case-study

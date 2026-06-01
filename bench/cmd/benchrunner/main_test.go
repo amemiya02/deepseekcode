@@ -907,3 +907,42 @@ func TestGoldenTraceGates(t *testing.T) {
 		})
 	}
 }
+
+func TestTraceStructureValidation(t *testing.T) {
+	// Validate that a synthetic trace with the required fields parses correctly.
+	// This test does NOT require a live model call or DEEPSEEK_API_KEY.
+	trace := `{"type":"prefix.snapshot","run_id":"test","agent_role":"root","epoch_id":"e1","static_prefix_hash":"abc123","tools_hash":"def456"}
+{"type":"epoch.frozen","run_id":"test","agent_role":"root","epoch_id":"e1"}
+{"type":"usage","run_id":"test","agent_role":"root","turn":1,"epoch_id":"e1","cache_hit_tokens":0,"cache_miss_tokens":5000,"output_tokens":100,"cost_cny":0.01}
+{"type":"agent.done","run_id":"test","agent_role":"root","epoch_id":"e1","reason":"model_done"}
+`
+	// Write to temp file and parse
+	tmpFile, err := os.CreateTemp("", "case-study-trace-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.WriteString(trace); err != nil {
+		t.Fatal(err)
+	}
+	tmpFile.Close()
+
+	tr, err := parseAgentTrace(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("parseAgentTrace: %v", err)
+	}
+	if !tr.Found {
+		t.Fatal("expected trace to be found")
+	}
+	if tr.UsageTurns != 1 {
+		t.Errorf("expected 1 usage turn, got %d", tr.UsageTurns)
+	}
+	if tr.ParseErrors != 0 {
+		t.Errorf("expected 0 parse errors, got %d", tr.ParseErrors)
+	}
+	// Validate epoch hash stability
+	unstable := tr.unstableEpochs()
+	if unstable != 0 {
+		t.Errorf("expected 0 unstable epochs, got %d", unstable)
+	}
+}

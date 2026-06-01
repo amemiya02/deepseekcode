@@ -24,7 +24,7 @@ go test ./internal/llm/ -run TestThinkingSerializesAsStruct -v
 
 ## High-level architecture
 
-`deepseekcode` is a single-binary terminal coding agent for DeepSeek models. The full design is in `docs/design.md` (1000+ lines, source of truth). The big-picture pieces that span multiple files:
+`deepseekcode` is a single-binary terminal coding agent for DeepSeek models. This file is the architecture summary and source of truth for cross-package conventions; per-package deep dives live under `docs/`, and the domain-language glossary is in `CONTEXT.md`. The big-picture pieces that span multiple files:
 
 ### Agent loop (`internal/agent/agent.go`)
 

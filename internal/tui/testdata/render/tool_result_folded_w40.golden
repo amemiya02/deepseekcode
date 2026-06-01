@@ -1,4 +1,4 @@
-  ▌ ✓ bash: ls -la /very/long/pa…  3ms
+  ▌ ✓ bash: ls -la /very/long/path…  3ms
   line 1 of command output
   line 2 of command output
   line 3 of command output

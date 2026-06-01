@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 	"io"
 	"strings"
@@ -8,11 +9,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
 )
 
 // Highlight uses chroma to syntax-highlight source by lang, returning
-// an ANSI-colored string. Background is locked to the Ocean card body
+// an ANSI-colored string. Background is locked to the theme's CardBody
 // color. Returns source unchanged if lang is empty or unrecognized.
 func Highlight(t Theme, source, lang string) string {
 	if source == "" {
@@ -27,19 +27,7 @@ func Highlight(t Theme, source, lang string) string {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	// Pick a chroma style that matches the theme's background: dracula's dark
-	// palette is illegible on a light terminal, so the light theme gets a
-	// light-background style. styles.Get falls back internally on an unknown
-	// name; we also guard nil explicitly.
-	styleName := "dracula"
-	if t.Name == "light" {
-		styleName = "github"
-	}
-	style := styles.Get(styleName)
-	if style == nil {
-		style = styles.Fallback
-	}
-
+	style := paletteChromaStyle(t)
 	formatter := chromaFormatter(t.CardBody.GetBackground())
 	iter, err := lexer.Tokenise(nil, source)
 	if err != nil {
@@ -70,15 +58,7 @@ func highlightOnBg(t Theme, source, lang string, bg color.Color) string {
 	}
 	lexer = chroma.Coalesce(lexer)
 
-	styleName := "dracula"
-	if t.Name == "light" {
-		styleName = "github"
-	}
-	style := styles.Get(styleName)
-	if style == nil {
-		style = styles.Fallback
-	}
-
+	style := paletteChromaStyle(t)
 	formatter := chromaFormatter(bg)
 	iter, err := lexer.Tokenise(nil, source)
 	if err != nil {
@@ -89,6 +69,48 @@ func highlightOnBg(t Theme, source, lang string, bg color.Color) string {
 		return source
 	}
 	return buf.String()
+}
+
+// paletteChromaStyle builds a chroma.Style that maps syntax token types to
+// the theme's palette colors. This ensures syntax highlighting is visually
+// consistent with the palette across all themes (ocean/light/midnight).
+func paletteChromaStyle(t Theme) *chroma.Style {
+	pal := map[chroma.TokenType]color.Color{
+		chroma.Keyword:            t.BrandDeep,
+		chroma.KeywordType:        t.BrandDeep,
+		chroma.KeywordDeclaration: t.BrandDeep,
+		chroma.KeywordNamespace:   t.BrandDeep,
+		chroma.NameFunction:       t.BrandDeep,
+		chroma.NameClass:          t.BrandDeep,
+		chroma.NameBuiltin:        t.BrandDeep,
+		chroma.LiteralString:      t.OkColor,
+		chroma.Comment:            t.FgFaint,
+		chroma.CommentSingle:      t.FgFaint,
+		chroma.CommentMultiline:   t.FgFaint,
+		chroma.Number:             t.WarnColor,
+		chroma.NumberInteger:      t.WarnColor,
+		chroma.NumberFloat:        t.WarnColor,
+		chroma.Operator:           t.FgMuted,
+		chroma.Punctuation:        t.FgMuted,
+		chroma.NameTag:            t.AccentFlash,
+		chroma.NameAttribute:      t.AccentFlash,
+		chroma.Literal:            t.AccentPro,
+		chroma.NameVariable:       t.FgBase,
+		chroma.Name:               t.FgBase,
+		chroma.Error:              t.ErrColor,
+	}
+	mappings := chroma.StyleEntries{}
+	for tok, c := range pal {
+		mappings[tok] = chromaColour(c)
+	}
+	s := chroma.MustNewStyle("palette", mappings)
+	return s
+}
+
+// chromaColour converts a color.Color to a chroma colour string "#rrggbb".
+func chromaColour(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 }
 
 // chromaFormatter returns a chroma.Formatter that maps token types to

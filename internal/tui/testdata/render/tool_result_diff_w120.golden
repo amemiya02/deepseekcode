@@ -1,4 +1,4 @@
-  ▌ ✓ bash: git diff (9 lines)  12ms
+  ▌ ✓ bash: git diff (9 lines)                                                                                      12ms
   diff --git a/internal/agent/agent.go b/internal/agent/agent.go
   index abc1234..def5678 100644
   --- a/internal/agent/agent.go

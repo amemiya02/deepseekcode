@@ -68,18 +68,33 @@ func TestCleanStyleDoesNotMutateGlamourGlobal(t *testing.T) {
 	}
 }
 
-// TestCleanStyleLightUnaffectedByFills documents the intentional design choice
-// that the light renderer is left GitHub-ish (untouched) regardless of the
-// fills gate — so a future change to the dark gate can't silently start
-// repainting light code blocks.
-func TestCleanStyleLightUnaffectedByFills(t *testing.T) {
-	on := cleanStyle(LightTheme(), true).CodeBlock.BackgroundColor
-	off := cleanStyle(LightTheme(), false).CodeBlock.BackgroundColor
-	switch {
-	case on == nil && off == nil:
-	case on != nil && off != nil && *on == *off:
-	default:
-		t.Errorf("light code-block bg must be identical regardless of fills: on=%v off=%v", on, off)
+// TestCleanStyleCodeBlockBgWell verifies that code-fence background is set
+// to bgWell for all three themes when fills are enabled, and nil when fills
+// are disabled (degraded mode). This is the three-theme BgWell evidence.
+func TestCleanStyleCodeBlockBgWell(t *testing.T) {
+	themes := []struct {
+		name  string
+		theme Theme
+	}{
+		{"dark", DarkTheme()},
+		{"light", LightTheme()},
+		{"midnight", MidnightTheme()},
+	}
+	for _, th := range themes {
+		t.Run(th.name, func(t *testing.T) {
+			on := cleanStyle(th.theme, true).CodeBlock.BackgroundColor
+			off := cleanStyle(th.theme, false).CodeBlock.BackgroundColor
+			if on == nil {
+				t.Errorf("%s: code-block bg with fills=true should be bgWell, got nil", th.name)
+			}
+			if off != nil {
+				t.Errorf("%s: code-block bg with fills=false should be nil, got %v", th.name, *off)
+			}
+			want := tokenHex(th.theme.BgWell)
+			if on != nil && *on != want {
+				t.Errorf("%s: code-block bg = %q, want bgWell = %q", th.name, *on, want)
+			}
+		})
 	}
 }
 

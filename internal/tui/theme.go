@@ -119,8 +119,8 @@ var oceanPalette = palette{
 
 	fgBase:   lipgloss.Color("#e6ebf2"),
 	fgMuted:  lipgloss.Color("#a2b1c4"),
-	fgSubtle: lipgloss.Color("#717f92"),
-	fgFaint:  lipgloss.Color("#5c6b7e"), // raised vs old #4a5663 so notes read on bgRaised
+	fgSubtle: lipgloss.Color("#8a99ab"),
+	fgFaint:  lipgloss.Color("#8fa0b3"), // brightened for AA on bgRaised
 
 	border: lipgloss.Color("#29384f"), // a touch brighter so rounded modal edges read
 	ok:     lipgloss.Color("#5ad48a"), // softer green (was neon #5fd75f)
@@ -149,13 +149,13 @@ var lightPalette = palette{
 
 	fgBase:   lipgloss.Color("#1c1c1c"),
 	fgMuted:  lipgloss.Color("#4a5663"),
-	fgSubtle: lipgloss.Color("#878787"),
-	fgFaint:  lipgloss.Color("#aab2bd"),
+	fgSubtle: lipgloss.Color("#4d5d6d"),
+	fgFaint:  lipgloss.Color("#566676"),
 
 	border: lipgloss.Color("#d4dae2"),
-	ok:     lipgloss.Color("#008f00"),
+	ok:     lipgloss.Color("#007e00"),
 	errc:   lipgloss.Color("#c0392b"),
-	warn:   lipgloss.Color("#9a6700"),
+	warn:   lipgloss.Color("#8a5e00"),
 
 	onAccent: lipgloss.Color("#ffffff"),
 }
@@ -193,8 +193,8 @@ var midnightPalette = palette{
 	bgRaised:    lipgloss.Color("#121a28"),
 	fgBase:      lipgloss.Color("#eaf0f8"),
 	fgMuted:     lipgloss.Color("#9fb0c6"),
-	fgSubtle:    lipgloss.Color("#6b7b90"),
-	fgFaint:     lipgloss.Color("#54627a"),
+	fgSubtle:    lipgloss.Color("#8393a7"),
+	fgFaint:     lipgloss.Color("#8898ac"),
 	border:      lipgloss.Color("#243349"),
 	ok:          lipgloss.Color("#5fdb91"),
 	errc:        lipgloss.Color("#f26a72"),

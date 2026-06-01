@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/colorprofile"
 )
 
 func TestGradientRamp(t *testing.T) {
@@ -189,5 +194,103 @@ func TestChromeNoNewTick(t *testing.T) {
 	c.ensureRamp(th)
 	if len(c.ramp) != len(ramp1) {
 		t.Fatal("ramp should be cached, not re-created")
+	}
+}
+
+// TestChromeCaptionGradientShimmer verifies that the active caption renders
+// with a phase-offset gradient that advances with the frame counter. Frame 0
+// and frame 4 must produce different output (gradient shifted).
+func TestChromeCaptionGradientShimmer(t *testing.T) {
+	th := DarkTheme()
+	dir := filepath.Join("testdata", "render-ansi")
+
+	// Render at frames 0, 4, 8.
+	frames := []int{0, 4, 8}
+	renders := make([]string, len(frames))
+	for i, f := range frames {
+		c := NewChrome()
+		c.BeginThinking()
+		c.frame = f
+		renders[i] = c.Render(th, false)
+	}
+
+	// Frame 0 and frame 4 must differ (gradient advanced).
+	if renders[0] == renders[1] {
+		t.Error("frame 0 and frame 4 renders are identical — gradient not advancing")
+	}
+
+	// Write golden files.
+	for i, f := range frames {
+		name := fmt.Sprintf("chrome_caption_f%d.golden", f)
+		path := filepath.Join(dir, name)
+		if os.Getenv("UPDATE_GOLDEN") == "1" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(path, []byte(renders[i]), 0o644); err != nil {
+				t.Fatalf("write golden: %v", err)
+			}
+			t.Logf("updated golden: %s", path)
+			continue
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read golden (regenerate with UPDATE_GOLDEN=1): %v", err)
+		}
+		wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+		got := strings.ReplaceAll(renders[i], "\r\n", "\n")
+		if got != wantStr {
+			t.Errorf("golden drift for %s:\n--- want ---\n%q\n--- got ---\n%q", name, wantStr, got)
+		}
+	}
+}
+
+// TestChromeRenderNoColor verifies that Chrome.Render output reaches a
+// no-color terminal as plain text with zero ANSI escape sequences.
+//
+// Architecture note: lipgloss v2's Style.Render() always produces ANSI
+// internally (this is by design — the style layer is decoupled from the
+// output layer). The color profile controls what reaches the terminal:
+//   - TrueColor: ANSI passes through as-is
+//   - Ascii/ANSI: color SGR sequences are downsampled
+//   - NoTTY: ALL ANSI is stripped via ansi.Strip()
+//
+// The card's "emits zero ANSI" describes terminal behavior, not Render()
+// internals. This test verifies the end-to-end path: Chrome.Render() →
+// NoTTY Writer → zero ANSI in output.
+func TestChromeRenderNoColor(t *testing.T) {
+	th := DarkTheme()
+	c := NewChrome()
+	c.BeginThinking()
+	c.frame = 42
+
+	raw := c.Render(th, false)
+	if raw == "" {
+		t.Fatal("Chrome.Render returned empty string for active chrome")
+	}
+
+	// Simulate writing to a NoTTY terminal (strips ALL ANSI sequences).
+	var buf strings.Builder
+	w := &colorprofile.Writer{Forward: &buf, Profile: colorprofile.NoTTY}
+	_, err := w.Write([]byte(raw))
+	if err != nil {
+		t.Fatalf("Writer.Write failed: %v", err)
+	}
+	out := buf.String()
+
+	// Assert zero ANSI escape sequences (ESC = 0x1b).
+	for i, r := range out {
+		if r == 0x1b {
+			t.Errorf("ANSI escape at byte %d in NoColor output: %q", i, out)
+			break
+		}
+	}
+
+	// Verify caption content is readable.
+	if !strings.Contains(out, "thinking") {
+		t.Errorf("NoColor output missing 'thinking' caption: %q", out)
+	}
+	if !strings.Contains(out, "[^C cancel]") {
+		t.Errorf("NoColor output missing cancel hint: %q", out)
 	}
 }

@@ -97,7 +97,10 @@ func TestQAFrame_ToolResult(t *testing.T) {
 	// then the panelled body lines under the shared 2-cell gutter (no per-line
 	// bar). assertFrameSnapshot strips ANSI (so the panel background is not
 	// visible) and trims outer whitespace (so the first line's gutter drops).
-	expected := "▌ ● read test.go\n  ▌ ✓ read test.go (3 lines)  100ms\n  package main\n  \n  func main() {}"
+	// Duration is right-aligned to width 80. The header line:
+	// gutter(2) + bar(1) + space(1) + icon(1) + space(1) + summary(22) + padding + dur(5) = 80
+	// prefix(6) + summary(22) + padding + dur(5) = 80 → padding = 47.
+	expected := "▌ ● read test.go\n  ▌ ✓ read test.go (3 lines)" + strings.Repeat(" ", 47) + "100ms\n  package main\n  \n  func main() {}"
 	assertFrameSnapshot(t, frame, expected)
 }
 

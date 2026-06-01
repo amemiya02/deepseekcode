@@ -195,17 +195,41 @@ func (i chatItem) render(t Theme, width int) string {
 			fmt.Sprintf("(%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens))) + "\n")
 		return b.String()
 	case itemToolCall:
-		// Tool CALL header: bar (model accent) + status glyph + summary. The
-		// call header stays barred but un-panelled — only the RESULT body
-		// gets a surface.
+		// Tool CALL header: bar (model accent) + status glyph + summary +
+		// right-aligned duration. The call header stays barred but un-panelled.
 		accent := toolAccent(t, i.model)
 		mcpTag := ""
 		if strings.HasPrefix(i.tool, "mcp__") {
 			mcpTag = "[MCP] "
 		}
-		summary := RenderToolSummary(i.tool, i.args, "", false, width-len(t.Gutter())-6)
-		header := t.LeftBar(accent).Render(IconToolPending + " " + mcpTag + summary)
-		return barLine(t, accent, header) + "\n"
+		// Duration string (right-aligned to width).
+		dur := ""
+		if i.duration > 0 {
+			dur = i.duration.Round(time.Millisecond).String()
+		}
+		// barLine prefix = gutter(2) + bar(1) + space(1) = 4 chars.
+		// LeftBar.Render adds icon(1) + space(1) + mcpTag prefix.
+		barPrefix := 4
+		iconOverhead := 2 + lipgloss.Width(mcpTag) // icon + space + mcpTag
+		durSpace := 0
+		if dur != "" {
+			durSpace = lipgloss.Width(dur) + 2 // "  " before dur
+		}
+		summaryWidth := width - barPrefix - iconOverhead - durSpace
+		if summaryWidth < 10 {
+			summaryWidth = 10
+		}
+		summary := RenderToolSummary(i.tool, i.args, "", false, summaryWidth)
+		headContent := t.LeftBar(accent).Render(IconToolPending + " " + mcpTag + summary)
+		if dur != "" {
+			visibleHead := lipgloss.Width(headContent)
+			padding := width - barPrefix - visibleHead - lipgloss.Width(dur)
+			if padding < 1 {
+				padding = 1
+			}
+			headContent += strings.Repeat(" ", padding) + lipgloss.NewStyle().Foreground(t.FgFaint).Render(dur)
+		}
+		return barLine(t, accent, headContent) + "\n"
 	case itemToolResult:
 		// Tool RESULT: barred header (model accent, or err on failure), then a
 		// surface-panelled body. The header stays un-panelled; the body lives
@@ -223,9 +247,7 @@ func (i chatItem) render(t Theme, width int) string {
 			mcpTag = "[MCP] "
 		}
 
-		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, width-len(t.Gutter())-len(dur)-8)
-
-		// Header line: status glyph + summary + duration, plus an inline chip.
+		// Header line: status glyph + summary + right-aligned duration.
 		var statusIcon string
 		var headColor color.Color
 		if i.result.IsError {
@@ -236,7 +258,32 @@ func (i chatItem) render(t Theme, width int) string {
 			headColor = accent
 		}
 		headStyle := lipgloss.NewStyle().Foreground(headColor)
-		headText := headStyle.Render(statusIcon+" "+mcpTag+summary) + "  " + headStyle.Render(dur)
+
+		// barLine prefix = gutter(2) + bar(1) + space(1) = 4 chars.
+		// statusIcon(1) + space(1) + mcpTag prefix.
+		barPrefix := 4
+		iconOverhead := 2 + lipgloss.Width(mcpTag) // icon + space + mcpTag
+		durSpace := lipgloss.Width(dur) + 2        // "  " before dur
+		// Account for badge (ERROR/NOTE) if present.
+		badgeSpace := 0
+		if i.result.IsError {
+			badgeSpace = lipgloss.Width(t.Badge(BadgeErr).Render("ERROR")) + 1
+		} else if isNoticeTool(i.tool) {
+			badgeSpace = lipgloss.Width(t.Badge(BadgeInfo).Render("NOTE")) + 1
+		}
+		summaryWidth := width - barPrefix - iconOverhead - durSpace - badgeSpace
+		if summaryWidth < 10 {
+			summaryWidth = 10
+		}
+		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, summaryWidth)
+
+		headText := headStyle.Render(statusIcon + " " + mcpTag + summary)
+		visibleHead := lipgloss.Width(headText)
+		padding := width - barPrefix - visibleHead - lipgloss.Width(dur) - badgeSpace
+		if padding < 1 {
+			padding = 1
+		}
+		headText += strings.Repeat(" ", padding) + headStyle.Render(dur)
 		if i.result.IsError {
 			headText += " " + t.Badge(BadgeErr).Render("ERROR")
 		} else if isNoticeTool(i.tool) {

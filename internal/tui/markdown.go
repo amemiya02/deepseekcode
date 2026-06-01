@@ -51,10 +51,15 @@ func cleanStyle(t Theme, fills bool) ansi.StyleConfig {
 		s = styles.LightStyleConfig
 	} else {
 		s = styles.DarkStyleConfig
-		var bg *string // nil clears the background (degraded); &well paints it
+	}
+
+	// Code-fence background → bgWell (inset) for all themes when fills are
+	// enabled. This aligns markdown code blocks with the palette's recessed
+	// well tier for visual cohesion. Degrades to no-background when fills
+	// are disabled (transparent mode or non-truecolor terminal).
+	{
+		var bg *string
 		if fills {
-			// Read the surface token (never an inline hex) and convert to the
-			// hex string glamour's StylePrimitive expects.
 			well := tokenHex(t.BgWell)
 			bg = &well
 		}
@@ -64,7 +69,9 @@ func cleanStyle(t Theme, fills bool) ansi.StyleConfig {
 			ch.Background.BackgroundColor = bg
 			s.CodeBlock.Chroma = &ch
 		}
+	}
 
+	if !t.IsLight() {
 		// Inline code (`path/like/this`). Retune to the theme's accent flash
 		// with NO opaque background and no padding, so inline code reads as a
 		// quiet color shift, not a block. Degrades cleanly since it never

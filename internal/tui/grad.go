@@ -68,3 +68,37 @@ func ApplyBoldForegroundGrad(base lipgloss.Style, input string, color1, color2 c
 	}
 	return o.String()
 }
+
+// ApplyForegroundGradPhase renders input with a phase-offset gradient: the
+// gradient sweep starts at grapheme index (phase % len) instead of 0, creating
+// a "shimmer" effect when phase advances each tick. The ramp is generated
+// from color1→color2 via Blend1D; the phase offset wraps via modulo.
+func ApplyForegroundGradPhase(base lipgloss.Style, input string, color1, color2 color.Color, phase int) string {
+	if input == "" {
+		return ""
+	}
+	var clusters []string
+	gr := uniseg.NewGraphemes(input)
+	for gr.Next() {
+		clusters = append(clusters, string(gr.Runes()))
+	}
+	n := len(clusters)
+	if n == 0 {
+		return ""
+	}
+
+	// Build a ramp: color1 → color2, one entry per grapheme.
+	ramp := lipgloss.Blend1D(n, color1, color2)
+
+	// Phase-shift: rotate the ramp so the gradient sweep starts at the
+	// grapheme index indicated by phase. This creates a living shimmer as
+	// phase advances each tick.
+	shift := phase % n
+	var o strings.Builder
+	for i, cl := range clusters {
+		c := ramp[(i+shift)%n]
+		style := base.Foreground(c)
+		fmt.Fprint(&o, style.Render(cl))
+	}
+	return o.String()
+}

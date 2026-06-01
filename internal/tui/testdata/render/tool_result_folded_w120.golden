@@ -1,4 +1,4 @@
-  ▌ ✓ bash: ls -la /very/long/path/that/forces/header/trunc... (15 lines)  3ms
+  ▌ ✓ bash: ls -la /very/long/path/that/forces/header/trunc... (15 lines)                                            3ms
   line 1 of command output
   line 2 of command output
   line 3 of command output

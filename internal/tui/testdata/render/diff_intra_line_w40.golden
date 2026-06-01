@@ -1,0 +1,8 @@
+  ▌ ✓ bash: git diff (7 lines)       8ms
+  diff --git a/foo.go b/foo.go
+  index abc1234..def5678 100644
+  --- a/foo.go
+  +++ b/foo.go
+  @@ -1,1 +1,1 @@
+      1 old := a.compute()
+      1 new := a.compute()

@@ -59,6 +59,68 @@ func renderDiff(t Theme, src, lang string, width int) string {
 	return out
 }
 
+// wordSpan records which word-tokens in a diff line should be emphasized.
+// start is the byte offset of the span; end is the byte offset past it.
+type wordSpan struct{ start, end int }
+
+// wordDiffSpans returns the byte-offset spans of tokens that differ between
+// oldLine and newLine, using whitespace tokenization. Returns nil if the
+// lines are identical or if the diff is whole-line (no intra-line match).
+func wordDiffSpans(oldLine, newLine string) (oldSpans, newSpans []wordSpan) {
+	oldTokens := strings.Fields(oldLine)
+	newTokens := strings.Fields(newLine)
+	if len(oldTokens) == 0 && len(newTokens) == 0 {
+		return nil, nil
+	}
+
+	// Find byte offsets by searching for each token in the original string.
+	// This handles any whitespace (spaces, tabs) correctly.
+	tokenSpans := func(line string, tokens []string) []wordSpan {
+		spans := make([]wordSpan, len(tokens))
+		pos := 0
+		for i, tok := range tokens {
+			idx := strings.Index(line[pos:], tok)
+			if idx < 0 {
+				// Fallback: shouldn't happen for Fields-derived tokens.
+				spans[i] = wordSpan{pos, pos + len(tok)}
+				pos += len(tok)
+				continue
+			}
+			start := pos + idx
+			spans[i] = wordSpan{start, start + len(tok)}
+			pos = start + len(tok)
+		}
+		return spans
+	}
+
+	oldSpansAll := tokenSpans(oldLine, oldTokens)
+	newSpansAll := tokenSpans(newLine, newTokens)
+
+	maxLen := len(oldTokens)
+	if len(newTokens) > maxLen {
+		maxLen = len(newTokens)
+	}
+	for i := 0; i < maxLen; i++ {
+		oldTok := ""
+		newTok := ""
+		if i < len(oldTokens) {
+			oldTok = oldTokens[i]
+		}
+		if i < len(newTokens) {
+			newTok = newTokens[i]
+		}
+		if oldTok != newTok {
+			if i < len(oldTokens) {
+				oldSpans = append(oldSpans, oldSpansAll[i])
+			}
+			if i < len(newTokens) {
+				newSpans = append(newSpans, newSpansAll[i])
+			}
+		}
+	}
+	return oldSpans, newSpans
+}
+
 func renderDiffUncached(t Theme, src, lang string, width int) string {
 	lines := strings.Split(strings.TrimRight(src, "\n"), "\n")
 
@@ -72,17 +134,35 @@ func renderDiffUncached(t Theme, src, lang string, width int) string {
 	// Running line numbers for the two sides, seeded from each hunk header.
 	var oldLine, newLine int
 
+	// Track pending del lines for intra-line emphasis with adjacent add lines.
+	type pendingDel struct {
+		raw  string
+		num  int
+		code string
+	}
+	var pendingDels []pendingDel
+
 	var b strings.Builder
+	flushPendingDels := func() {
+		for _, pd := range pendingDels {
+			b.WriteString(renderCodeLine(t, diffDel, pd.num, pd.code, lang, codeWidth, nil))
+			b.WriteString("\n")
+		}
+		pendingDels = nil
+	}
+
 	for _, raw := range lines {
 		kind := classifyDiffLine(raw)
 
 		switch kind {
 		case diffHunk:
+			flushPendingDels()
 			oldLine, newLine = parseHunkHeader(raw)
 			b.WriteString(renderHunkHeader(t, raw, width))
 			b.WriteString("\n")
 			continue
 		case diffMeta:
+			flushPendingDels()
 			b.WriteString(renderMetaLine(t, raw, width))
 			b.WriteString("\n")
 			continue
@@ -96,18 +176,41 @@ func renderDiffUncached(t Theme, src, lang string, width int) string {
 		case diffAdd:
 			num = newLine
 			newLine++
+			// Check if we have pending dels — compute intra-line emphasis.
+			if len(pendingDels) > 0 {
+				// Pair with the first pending del.
+				pd := pendingDels[0]
+				pendingDels = pendingDels[1:]
+				oldSpans, newSpans := wordDiffSpans(pd.code, code)
+				b.WriteString(renderCodeLine(t, diffDel, pd.num, pd.code, lang, codeWidth, oldSpans))
+				b.WriteString("\n")
+				b.WriteString(renderCodeLine(t, diffAdd, num, code, lang, codeWidth, newSpans))
+				b.WriteString("\n")
+			} else {
+				b.WriteString(renderCodeLine(t, diffAdd, num, code, lang, codeWidth, nil))
+				b.WriteString("\n")
+			}
+			// Flush any remaining pending dels.
+			flushPendingDels()
+			continue
 		case diffDel:
 			num = oldLine
 			oldLine++
+			// Buffer del lines — they might pair with a following add.
+			pendingDels = append(pendingDels, pendingDel{raw, num, code})
+			continue
 		default: // diffEqual
+			// Flush any pending dels before equal lines.
+			flushPendingDels()
 			num = newLine
 			oldLine++
 			newLine++
 		}
 
-		b.WriteString(renderCodeLine(t, kind, num, code, lang, codeWidth))
+		b.WriteString(renderCodeLine(t, kind, num, code, lang, codeWidth, nil))
 		b.WriteString("\n")
 	}
+	flushPendingDels()
 	return b.String()
 }
 
@@ -201,7 +304,11 @@ func parseLineStart(tok string) int {
 // equal lines use fgMuted on bgWell. The code text is syntax-highlighted
 // through chroma with its background FORCED to the band color so the highlight
 // sits on the fill.
-func renderCodeLine(t Theme, kind diffLineKind, num int, code, lang string, codeWidth int) string {
+//
+// emphasisSpans, when non-nil, identifies byte-offset ranges in code that
+// should be rendered with a brighter foreground (intra-line diff emphasis).
+// Only the differing words between adjacent del/add pairs are emphasized.
+func renderCodeLine(t Theme, kind diffLineKind, num int, code, lang string, codeWidth int, emphasisSpans []wordSpan) string {
 	bandFg, bandBg := diffBandColors(t, kind)
 
 	// Gutter: blank the number for add lines on the old side / del lines on the
@@ -211,7 +318,7 @@ func renderCodeLine(t Theme, kind diffLineKind, num int, code, lang string, code
 
 	// Highlight the code on the band background. When highlighting is disabled
 	// (no lang, degraded mode), fall back to a plain band-styled render.
-	codeCell := renderCodeCell(t, code, lang, bandFg, bandBg, codeWidth)
+	codeCell := renderCodeCell(t, code, lang, bandFg, bandBg, codeWidth, emphasisSpans)
 
 	return t.Gutter() + gut + " " + codeCell
 }
@@ -238,7 +345,10 @@ func renderNumberGutter(t Theme, num int) string {
 // chroma (background forced to bandBg) when lang is set and fills are enabled,
 // otherwise it renders the raw text in bandFg. Either way the cell is padded
 // to codeWidth so the band fill extends to the right edge.
-func renderCodeCell(t Theme, code, lang string, bandFg, bandBg color.Color, codeWidth int) string {
+//
+// emphasisSpans, when non-nil, identifies byte-offset ranges in code that
+// should be rendered with a brighter foreground (intra-line diff emphasis).
+func renderCodeCell(t Theme, code, lang string, bandFg, bandBg color.Color, codeWidth int, emphasisSpans []wordSpan) string {
 	// Clip overly long code to the column so the band stays one row tall.
 	display := code
 	if w := lipgloss.Width(display); w > codeWidth {
@@ -246,7 +356,10 @@ func renderCodeCell(t Theme, code, lang string, bandFg, bandBg color.Color, code
 	}
 
 	var inner string
-	if lang != "" && fillsEnabled(t) {
+	if len(emphasisSpans) > 0 && fillsEnabled(t) {
+		// Intra-line emphasis: render muted base + bright emphasis spans.
+		inner = renderWithEmphasis(display, bandFg, bandBg, emphasisSpans)
+	} else if lang != "" && fillsEnabled(t) {
 		// Force the chroma background to the band color so highlighting sits on
 		// the filled band. highlightLineOnBg returns a single ANSI-styled line
 		// already backgrounded; we then pad to width on the same background.
@@ -271,6 +384,55 @@ func renderCodeCell(t Theme, code, lang string, bandFg, bandBg color.Color, code
 		inner += padStyle.Render(strings.Repeat(" ", pad))
 	}
 	return inner
+}
+
+// renderWithEmphasis renders code with intra-line diff emphasis: the base text
+// is rendered in muted bandFg, while the byte-offset spans in emphasisSpans
+// are rendered in a brighter version of the band foreground.
+func renderWithEmphasis(code string, bandFg, bandBg color.Color, spans []wordSpan) string {
+	if len(spans) == 0 {
+		fgStyle := lipgloss.NewStyle().Foreground(bandFg).Background(bandBg)
+		return fgStyle.Render(code)
+	}
+
+	// Build emphasized string: muted base with bright spans.
+	mutedStyle := lipgloss.NewStyle().Foreground(bandFg).Background(bandBg)
+	brightStyle := lipgloss.NewStyle().Foreground(brighten(bandFg)).Background(bandBg).Bold(true)
+
+	var b strings.Builder
+	pos := 0
+	for _, sp := range spans {
+		if sp.start > pos && sp.start <= len(code) {
+			b.WriteString(mutedStyle.Render(code[pos:sp.start]))
+		}
+		if sp.start < len(code) {
+			end := sp.end
+			if end > len(code) {
+				end = len(code)
+			}
+			b.WriteString(brightStyle.Render(code[sp.start:end]))
+		}
+		pos = sp.end
+	}
+	if pos < len(code) {
+		b.WriteString(mutedStyle.Render(code[pos:]))
+	}
+	return b.String()
+}
+
+// brighten returns a brighter version of a color by boosting luminance.
+// Used for intra-line diff emphasis on changed words.
+func brighten(c color.Color) color.Color {
+	r, g, b, a := c.RGBA()
+	// Boost each channel by 40% toward 65535, capped at 65535.
+	boost := func(ch uint32) uint32 {
+		v := ch + (65535-ch)*40/100
+		if v > 65535 {
+			v = 65535
+		}
+		return v
+	}
+	return color.RGBA64{R: uint16(boost(r)), G: uint16(boost(g)), B: uint16(boost(b)), A: uint16(a)}
 }
 
 // diffBandColors returns the foreground / background colors for a code-bearing

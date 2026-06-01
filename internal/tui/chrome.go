@@ -189,13 +189,21 @@ func (c *Chrome) Render(t Theme, showNewBelow bool) string {
 	default:
 		caption = fmt.Sprintf("working… %.1fs", elapsed)
 	}
-	// Caption rides fgBase (primary text), the cancel hint rides fgFaint
-	// (meta), both straight off the semantic tokens so the band harmonizes
-	// with the painted canvas instead of borrowing legacy styles.
-	captionStyle := lipgloss.NewStyle().Foreground(t.FgBase)
+	// Caption rides a phase-offset gradient (shimmer) so the active
+	// caption feels alive — the gradient sweep advances with each tick.
+	// Static content (idle, cancel hint) uses flat tokens.
+	c.ensureRamp(t)
+	var captionRendered string
+	if len(c.ramp) >= 2 {
+		base := lipgloss.NewStyle()
+		captionRendered = ApplyForegroundGradPhase(base, caption, c.ramp[0], c.ramp[len(c.ramp)/2], c.frame)
+	} else {
+		// Degraded: no gradient ramp (non-truecolor). Flat fgBase.
+		captionRendered = lipgloss.NewStyle().Foreground(t.FgBase).Render(caption)
+	}
 	hintStyle := lipgloss.NewStyle().Foreground(t.FgFaint)
 	return "  " + c.spinner(t) + " " +
-		captionStyle.Render(caption) + "  " +
+		captionRendered + "  " +
 		hintStyle.Render("[^C cancel]")
 }
 

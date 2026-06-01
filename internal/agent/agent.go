@@ -200,6 +200,14 @@ type Agent struct {
 	// Skills is the skill metadata store. nil = no skills loaded.
 	Skills *skills.Store
 
+	// PostEditDiagnostics, when non-nil, is called after each step that
+	// includes mutating tool calls. It receives the deduplicated list of
+	// affected file paths and returns a formatted diagnostics string. An
+	// empty return means no feedback is appended. The returned string is
+	// injected as a synthetic user message so the model sees it on its
+	// next turn, following the same pattern as injectLoopBreakNudge.
+	PostEditDiagnostics func(ctx context.Context, paths []string) string
+
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	// Its SchemaHash feeds the epoch's mcp_schema_hash, so startup MCP
 	// discovery is part of the frozen prefix and mid-session schema
@@ -525,6 +533,7 @@ agentLoop:
 		// error (infra or model-facing) is serialized into a tool-result
 		// block for the model to react to, so there is no abort branch here.
 		a.runToolCalls(stepCtx, step.ToolCalls)
+		a.maybeFeedPostEditDiagnostics(stepCtx, step.ToolCalls)
 		stepCancel()
 		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
@@ -1488,6 +1497,59 @@ func (a *Agent) injectLoopBreakNudge(calls []llm.ToolCall) {
 	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: nudge})
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendUserMessage(context.Background(), nudge)
+	}
+}
+
+// maybeFeedPostEditDiagnostics collects affected file paths from mutating
+// tool calls in the just-completed step, calls PostEditDiagnostics if set,
+// and appends a synthetic user message when the callback returns non-empty.
+// Read-only tools are skipped. Paths are deduplicated.
+//
+// LSP timing note: this reads only diagnostics already cached by the LSP
+// client at the time of the call. It does not wait for a fresh
+// publishDiagnostics notification from the server. If the LSP server
+// reports diagnostics slightly after the file write, they will be visible
+// through the normal lsp tool or a later edit cycle. This is a deliberate
+// no-wait design to avoid adding latency to every mutating step.
+func (a *Agent) maybeFeedPostEditDiagnostics(ctx context.Context, calls []llm.ToolCall) {
+	if a.PostEditDiagnostics == nil {
+		return
+	}
+
+	// Collect affected paths from mutating tools only, reusing
+	// AffectedPathsFor so the path logic stays in sync with the
+	// snapshot mechanism.
+	seen := make(map[string]bool)
+	var paths []string
+	for _, call := range calls {
+		tool, ok := a.Tools.Get(call.Function.Name)
+		if !ok {
+			continue
+		}
+		// Skip read-only tools.
+		if ro, ok := tool.(tools.ReadOnlyHint); ok && ro.IsReadOnly() {
+			continue
+		}
+		for _, p := range AffectedPathsFor(a.Tools, call) {
+			if !seen[p] {
+				seen[p] = true
+				paths = append(paths, p)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+
+	text := a.PostEditDiagnostics(ctx, paths)
+	if text == "" {
+		return
+	}
+
+	msg := []llm.ContentBlock{llm.TextBlock{Text: text}}
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: msg})
+	if a.Persister != nil {
+		_, _ = a.Persister.AppendUserMessage(ctx, msg)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/lsp"
 )
 
 // TestAgentDefsResult exercises the doctor agent-def diagnostic: it surfaces a
@@ -122,5 +123,112 @@ func TestREADMEDocLinksResolve(t *testing.T) {
 				t.Errorf("%s links %q which does not resolve: %v", name, m[1], err)
 			}
 		}
+	}
+}
+
+// helper to build a diagnostic quickly.
+func diag(line, char, sev int, msg string) lsp.Diagnostic {
+	return lsp.Diagnostic{
+		Range:    lsp.Range{Start: lsp.Position{Line: line, Character: char}},
+		Severity: sev,
+		Message:  msg,
+	}
+}
+
+func TestFormatPostEditDiagnosticsEmpty(t *testing.T) {
+	if got := formatPostEditDiagnostics(nil); got != "" {
+		t.Errorf("nil input: got %q, want empty", got)
+	}
+	if got := formatPostEditDiagnostics([]fileDiagnostics{}); got != "" {
+		t.Errorf("empty input: got %q, want empty", got)
+	}
+}
+
+func TestFormatPostEditDiagnosticsBasic(t *testing.T) {
+	files := []fileDiagnostics{
+		{Path: "foo.go", Diagnostics: []lsp.Diagnostic{diag(9, 7, 1, "undefined: x")}},
+	}
+	got := formatPostEditDiagnostics(files)
+	if !strings.Contains(got, "Environment diagnostics after edit:") {
+		t.Errorf("missing header:\n%s", got)
+	}
+	if !strings.Contains(got, "foo.go:10:8 error undefined: x") {
+		t.Errorf("missing diagnostic line:\n%s", got)
+	}
+}
+
+func TestFormatPostEditDiagnosticsCapsFiles(t *testing.T) {
+	var files []fileDiagnostics
+	for i := 0; i < 10; i++ {
+		files = append(files, fileDiagnostics{
+			Path:        "file" + string(rune('a'+i)) + ".go",
+			Diagnostics: []lsp.Diagnostic{diag(0, 0, 1, "err")},
+		})
+	}
+	got := formatPostEditDiagnostics(files)
+	// Count how many distinct file lines appear. Should be capped at 5.
+	count := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, ".go:") {
+			count++
+		}
+	}
+	if count > 5 {
+		t.Errorf("got %d file lines, want <= 5:\n%s", count, got)
+	}
+}
+
+func TestFormatPostEditDiagnosticsCapsPerFile(t *testing.T) {
+	var diags []lsp.Diagnostic
+	for i := 0; i < 10; i++ {
+		diags = append(diags, diag(i, 0, 1, "err"+string(rune('0'+i))))
+	}
+	files := []fileDiagnostics{
+		{Path: "many.go", Diagnostics: diags},
+	}
+	got := formatPostEditDiagnostics(files)
+	if !strings.Contains(got, "… and 5 more diagnostics") {
+		t.Errorf("missing overflow line:\n%s", got)
+	}
+	// Exactly 5 diagnostic lines + 1 overflow line for this file.
+	diagLines := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "many.go:") {
+			diagLines++
+		}
+	}
+	if diagLines != 5 {
+		t.Errorf("got %d diagnostic lines, want 5:\n%s", diagLines, got)
+	}
+}
+
+func TestFormatPostEditDiagnosticsCapsBytes(t *testing.T) {
+	// Create enough diagnostics to exceed 512 bytes.
+	var files []fileDiagnostics
+	for i := 0; i < 5; i++ {
+		var diags []lsp.Diagnostic
+		for j := 0; j < 5; j++ {
+			diags = append(diags, diag(j, 0, 1, strings.Repeat("x", 50)))
+		}
+		files = append(files, fileDiagnostics{Path: "f" + string(rune('a'+i)) + ".go", Diagnostics: diags})
+	}
+	got := formatPostEditDiagnostics(files)
+	if len(got) > 530 { // 512 + "…\n" + some slack
+		t.Errorf("output too long: %d bytes", len(got))
+	}
+	if strings.Contains(got, "…") {
+		// Truncation marker should be present.
+	}
+}
+
+func TestFormatPostEditDiagnosticsDeterministic(t *testing.T) {
+	files := []fileDiagnostics{
+		{Path: "a.go", Diagnostics: []lsp.Diagnostic{diag(0, 0, 1, "e1"), diag(1, 0, 2, "w1")}},
+		{Path: "b.go", Diagnostics: []lsp.Diagnostic{diag(5, 3, 1, "e2")}},
+	}
+	got1 := formatPostEditDiagnostics(files)
+	got2 := formatPostEditDiagnostics(files)
+	if got1 != got2 {
+		t.Errorf("non-deterministic output:\n---\n%s\n---\n%s", got1, got2)
 	}
 }

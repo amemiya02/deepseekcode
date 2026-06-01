@@ -371,6 +371,16 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 
+	// Wire post-edit LSP diagnostics feedback. This reads only
+	// diagnostics already cached by the LSP client — no bounded wait
+	// for publishDiagnostics. If the server reports diagnostics after
+	// the cache read, they surface through the lsp tool or a later edit.
+	if len(lspReg.Servers()) > 0 {
+		a.PostEditDiagnostics = func(ctx context.Context, paths []string) string {
+			return buildPostEditDiagnostics(lspReg, paths)
+		}
+	}
+
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
 		slog.Info("feature flag: prefix_epoch DISABLED via env")
@@ -838,6 +848,16 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 
+	// Wire post-edit LSP diagnostics feedback. This reads only
+	// diagnostics already cached by the LSP client — no bounded wait
+	// for publishDiagnostics. If the server reports diagnostics after
+	// the cache read, they surface through the lsp tool or a later edit.
+	if len(lspReg.Servers()) > 0 {
+		a.PostEditDiagnostics = func(ctx context.Context, paths []string) string {
+			return buildPostEditDiagnostics(lspReg, paths)
+		}
+	}
+
 	if mf.disablePrefixEpoch {
 		a.DisablePrefixEpoch = true
 		slog.Info("feature flag: prefix_epoch DISABLED via env")
@@ -1162,4 +1182,91 @@ func buildRuleEngine(rc config.RulesConfig) *permissions.RuleEngine {
 		engine.Ask[i].Decision = "ask"
 	}
 	return engine
+}
+
+// fileDiagnostics pairs a file path with its LSP diagnostics for
+// formatting. Used by formatPostEditDiagnostics.
+type fileDiagnostics struct {
+	Path        string
+	Diagnostics []lsp.Diagnostic
+}
+
+// buildPostEditDiagnostics collects LSP diagnostics for the given file
+// paths and returns a formatted feedback string. Empty string means no
+// diagnostics to report.
+func buildPostEditDiagnostics(reg *lsp.Registry, paths []string) string {
+	var files []fileDiagnostics
+	for _, path := range paths {
+		uri := lsp.PathToURI(path)
+		q, ok := reg.ClientForURI(uri)
+		if !ok {
+			continue
+		}
+		diags := q.Diagnostics(uri)
+		if len(diags) == 0 {
+			continue
+		}
+		files = append(files, fileDiagnostics{Path: path, Diagnostics: diags})
+	}
+	return formatPostEditDiagnostics(files)
+}
+
+// formatPostEditDiagnostics formats pre-collected diagnostics into a
+// feedback string. Caps at maxDiagFiles files, maxDiagPerFile diagnostics
+// per file, and maxDiagBytes total output. Empty input returns "".
+// This is a pure function to enable deterministic unit testing.
+func formatPostEditDiagnostics(files []fileDiagnostics) string {
+	const (
+		maxDiagFiles   = 5
+		maxDiagPerFile = 5
+		maxDiagBytes   = 512
+	)
+
+	if len(files) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("Environment diagnostics after edit:\n")
+	count := 0
+	for _, f := range files {
+		if count >= maxDiagFiles {
+			break
+		}
+		count++
+		n := len(f.Diagnostics)
+		if n > maxDiagPerFile {
+			n = maxDiagPerFile
+		}
+		for _, d := range f.Diagnostics[:n] {
+			fmt.Fprintf(&b, "%s:%d:%d %s %s\n",
+				f.Path, d.Range.Start.Line+1, d.Range.Start.Character+1,
+				severityString(d.Severity), d.Message)
+		}
+		if len(f.Diagnostics) > maxDiagPerFile {
+			fmt.Fprintf(&b, "  … and %d more diagnostics\n", len(f.Diagnostics)-maxDiagPerFile)
+		}
+		if b.Len() > maxDiagBytes {
+			break
+		}
+	}
+	if b.Len() > maxDiagBytes {
+		return b.String()[:maxDiagBytes] + "…\n"
+	}
+	return b.String()
+}
+
+func severityString(s int) string {
+	switch s {
+	case 1:
+		return "error"
+	case 2:
+		return "warning"
+	case 3:
+		return "info"
+	case 4:
+		return "hint"
+	default:
+		return "unknown"
+	}
 }

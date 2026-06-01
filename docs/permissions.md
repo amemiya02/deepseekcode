@@ -97,6 +97,23 @@ allow = [
 
 当规则触发时，`dsc doctor` 会显示已加载的规则数量，TUI 中会展示拒绝原因。
 
+## `/permissions` Overlay
+
+Type `/permissions` in the TUI to open a read-only overlay showing the
+effective policy at a glance: current mode, bash allowlist size, secret
+pattern count, and whether the rule engine is active.
+
+```
+/// /permissions
+  Mode ............. default
+  Bash allowlist ... 6 patterns
+  Secret patterns .. 4 patterns
+  Rule engine ...... active
+```
+
+The overlay is informational — it does not allow editing the policy. Close
+with `esc`.
+
 ## Doctor 输出
 
 ```

@@ -48,6 +48,7 @@ func builtinCommands() []slashCmd {
 		{Name: "reload-skills", Aliases: []string{"reload"}, Summary: "re-scan skills mid-session (mints a new cache epoch)", Kind: builtinCmd},
 		{Name: "mcp", Summary: "show MCP server status", Kind: builtinCmd},
 		{Name: "lsp", Summary: "show LSP server status", Kind: builtinCmd},
+		{Name: "permissions", Summary: "show effective permission policy", Kind: builtinCmd},
 	}
 }
 

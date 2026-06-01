@@ -4,7 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/permissions"
 )
 
 // TestAvailableModelsIncludesChatAndReasoner pins the specific fix: the
@@ -277,5 +281,137 @@ func TestRenderThemesPickerListsAll(t *testing.T) {
 	// Active marker should be present for "dark"
 	if !strings.Contains(stripped, "*") {
 		t.Error("renderThemesPicker output missing active marker '*'")
+	}
+}
+
+func TestRenderPermissionsShowsModeAndBashAllowlist(t *testing.T) {
+	th := DarkTheme()
+	rows := []PermissionRow{
+		{Key: "Mode", Value: "default"},
+		{Key: "Bash allowlist", Value: "3 patterns"},
+		{Key: "Secret patterns", Value: "2 patterns"},
+	}
+	out := renderPermissions(th, rows, 100, 20)
+	stripped := stripANSI(out)
+	for _, want := range []string{"Mode", "default", "Bash allowlist", "3 patterns", "Secret patterns", "2 patterns"} {
+		if !strings.Contains(stripped, want) {
+			t.Errorf("renderPermissions missing %q:\n%s", want, stripped)
+		}
+	}
+}
+
+func TestRenderPermissionsEmptyState(t *testing.T) {
+	th := DarkTheme()
+	out := renderPermissions(th, nil, 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "no permission policy loaded") {
+		t.Fatalf("renderPermissions missing empty state:\n%s", stripped)
+	}
+}
+
+func TestRenderPermissionsShowsRuleEngine(t *testing.T) {
+	th := DarkTheme()
+	rows := []PermissionRow{
+		{Key: "Mode", Value: "yolo (auto-approve all)"},
+		{Key: "Rule engine", Value: "active"},
+	}
+	out := renderPermissions(th, rows, 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "Rule engine") {
+		t.Fatalf("renderPermissions missing rule engine:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "active") {
+		t.Fatalf("renderPermissions missing 'active':\n%s", stripped)
+	}
+}
+
+func TestNoopNotifierReturnsNil(t *testing.T) {
+	n := NoopNotifier{}
+	if err := n.Notify("title", "body"); err != nil {
+		t.Errorf("NoopNotifier.Notify returned error: %v", err)
+	}
+}
+
+// recordingNotifier captures Notify calls for test assertions.
+type recordingNotifier struct {
+	calls []struct{ title, body string }
+}
+
+func (r *recordingNotifier) Notify(title, body string) error {
+	r.calls = append(r.calls, struct{ title, body string }{title, body})
+	return nil
+}
+
+func TestNotifierReceivesCorrectPayload(t *testing.T) {
+	rn := &recordingNotifier{}
+	// Simulate the two notification sites: agent completion and permission ask.
+	_ = rn.Notify("DeepSeekCode", "Task finished")
+	_ = rn.Notify("DeepSeekCode", "Permission requested")
+	if len(rn.calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(rn.calls))
+	}
+	if rn.calls[0].title != "DeepSeekCode" || rn.calls[0].body != "Task finished" {
+		t.Errorf("call 0 = {%q, %q}, want {DeepSeekCode, Task finished}", rn.calls[0].title, rn.calls[0].body)
+	}
+	if rn.calls[1].title != "DeepSeekCode" || rn.calls[1].body != "Permission requested" {
+		t.Errorf("call 1 = {%q, %q}, want {DeepSeekCode, Permission requested}", rn.calls[1].title, rn.calls[1].body)
+	}
+}
+
+func TestOpenPermissionsSetsMode(t *testing.T) {
+	o := NewOverlay()
+	o.OpenPermissions([]PermissionRow{{Key: "Mode", Value: "default"}})
+	if o.Mode() != modePermissions {
+		t.Fatalf("expected modePermissions, got %d", o.Mode())
+	}
+	if len(o.Permissions()) != 1 {
+		t.Fatalf("expected 1 permission row, got %d", len(o.Permissions()))
+	}
+}
+
+// TestAppNotifierReceivesDoneAndPermissionEvents proves that the App's
+// dispatchAgentEvent actually calls the wired Notifier on EventDone and
+// EventPermissionAsk — not just that a fake notifier can be called manually.
+func TestAppNotifierReceivesDoneAndPermissionEvents(t *testing.T) {
+	rn := &recordingNotifier{}
+	a := sizeApp(t, New(Config{Notifier: rn}), 100, 40)
+	a.send = func(tea.Msg) {} // no-op send for test
+
+	a.dispatchAgentEvent(agent.EventDone{})
+	a.dispatchAgentEvent(agent.EventPermissionAsk{
+		Check: permissions.Check{},
+		Reply: make(chan agent.PermissionResponse, 1),
+	})
+
+	if len(rn.calls) != 2 {
+		t.Fatalf("notification calls = %d, want 2", len(rn.calls))
+	}
+	if rn.calls[0].title != "DeepSeekCode" || rn.calls[0].body != "Task finished" {
+		t.Errorf("call 0 = {%q, %q}, want {DeepSeekCode, Task finished}", rn.calls[0].title, rn.calls[0].body)
+	}
+	if rn.calls[1].title != "DeepSeekCode" || rn.calls[1].body != "Permission requested" {
+		t.Errorf("call 1 = {%q, %q}, want {DeepSeekCode, Permission requested}", rn.calls[1].title, rn.calls[1].body)
+	}
+}
+
+// TestPermissionAskClosesOverlay is a regression test: if an overlay is open
+// when EventPermissionAsk arrives, the overlay must be closed so the
+// permission card is visible to the user.
+func TestPermissionAskClosesOverlay(t *testing.T) {
+	a := sizeApp(t, New(Config{}), 100, 40)
+	a.send = func(tea.Msg) {}
+	a.overlay.OpenMCP([]McpServerRow{{Name: "fs", State: "connected"}})
+	if !a.overlay.IsOpen() {
+		t.Fatal("precondition: overlay should be open")
+	}
+	a.dispatchAgentEvent(agent.EventPermissionAsk{
+		Check: permissions.Check{},
+		Reply: make(chan agent.PermissionResponse, 1),
+	})
+	if a.overlay.IsOpen() {
+		t.Fatal("permission ask should close existing overlay")
+	}
+	if a.mode != modePermission {
+		t.Fatalf("mode = %v, want modePermission", a.mode)
 	}
 }

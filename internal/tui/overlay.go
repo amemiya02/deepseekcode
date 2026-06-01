@@ -23,6 +23,7 @@ const (
 	modeThemes               // /theme — theme picker (filterable, live preview)
 	modeMCP                  // /mcp — MCP server status overlay
 	modeLSP                  // /lsp — LSP server status overlay
+	modePermissions          // /permissions — effective policy overlay
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -54,6 +55,7 @@ type Overlay struct {
 	themes       []themeOption
 	mcpServers   []McpServerRow
 	lspServers   []LspServerRow
+	permRows     []PermissionRow
 	filter       filterableList
 }
 
@@ -74,6 +76,13 @@ type LspServerRow struct {
 	Connected       bool
 	DiagnosticCount int
 	LastError       string
+}
+
+// PermissionRow is one row in the /permissions status overlay.
+// Key/Value are displayed as "Key .... Value" pairs.
+type PermissionRow struct {
+	Key   string
+	Value string
 }
 
 // NewOverlay returns an idle Overlay (mode = chat, nothing open).
@@ -317,6 +326,16 @@ func (o *Overlay) OpenLSP(rows []LspServerRow) {
 
 // LSPServers returns the LSP server rows (read-only).
 func (o *Overlay) LSPServers() []LspServerRow { return o.lspServers }
+
+// OpenPermissions switches to the /permissions status overlay.
+func (o *Overlay) OpenPermissions(rows []PermissionRow) {
+	o.permRows = rows
+	o.mode = modePermissions
+	o.cursor = 0
+}
+
+// Permissions returns the permission rows (read-only).
+func (o *Overlay) Permissions() []PermissionRow { return o.permRows }
 
 // modelOption is one row in the /models picker.
 type modelOption struct {
@@ -1049,6 +1068,38 @@ func renderLSP(t Theme, rows []LspServerRow, visible []int, cursor int, filter s
 	}
 	header := fmt.Sprintf("%d servers · type to filter · esc cancel", len(rows))
 	return wrapPane(t, "/lsp", header, b.String(), width, height)
+}
+
+// renderPermissions draws the /permissions status overlay. Each row shows a
+// policy key and its current value. This is a non-filterable, non-selectable
+// status display — the user reads it and presses esc to close.
+func renderPermissions(t Theme, rows []PermissionRow, width, height int) string {
+	if len(rows) == 0 {
+		body := t.Hint.Render("(no permission policy loaded)")
+		return wrapPane(t, "/permissions", "no policy", body, width, height)
+	}
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	for _, r := range rows {
+		keyStr := t.StatusModel.Render(r.Key)
+		valStr := r.Value
+		// Dot leader between key and value for visual alignment.
+		dots := ""
+		keyW := lipgloss.Width(keyStr)
+		valW := lipgloss.Width(valStr)
+		gap := rowW - keyW - valW - 2 // 2 for padding
+		if gap > 2 {
+			dots = t.Hint.Render(strings.Repeat("·", gap))
+		} else {
+			dots = "  "
+		}
+		b.WriteString("  " + keyStr + dots + valStr + "\n")
+	}
+	header := fmt.Sprintf("%d entries · esc close", len(rows))
+	return wrapPane(t, "/permissions", header, b.String(), width, height)
 }
 
 // selectedRow renders a picker's focused row as a filled selection band: a

@@ -133,6 +133,13 @@ type App struct {
 	mcpStatus func() []McpServerRow
 	lspStatus func() []LspServerRow
 
+	// Permission status callback for the /permissions overlay.
+	permStatus func() []PermissionRow
+
+	// Notifier fires desktop/terminal notifications for long-running agent
+	// completion and permission requests. nil = no-op.
+	notifier Notifier
+
 	// Wiring back to the tea.Program for callbacks running off the UI loop.
 	send func(tea.Msg)
 
@@ -218,6 +225,13 @@ type Config struct {
 	// LSPStatus returns LSP server snapshots for the /lsp overlay.
 	LSPStatus func() []LspServerRow
 
+	// PermStatus returns permission policy rows for the /permissions overlay.
+	PermStatus func() []PermissionRow
+
+	// Notifier fires desktop/terminal notifications. nil means no
+	// notifications (no-op).
+	Notifier Notifier
+
 	// InitialBalance seeds the status-line account balance display.
 	// Populated from llm.Client.GetUserBalance at TUI launch. Empty
 	// means balance unavailable or not a DeepSeek provider.
@@ -280,6 +294,8 @@ func New(cfg Config) *App {
 		startupNotices: cfg.StartupNotices,
 		mcpStatus:      cfg.MCPStatus,
 		lspStatus:      cfg.LSPStatus,
+		permStatus:     cfg.PermStatus,
+		notifier:       cfg.Notifier,
 		session: sessionIntegration{
 			id:       cfg.SessionID,
 			undo:     cfg.UndoFn,
@@ -668,11 +684,18 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.scrollback.AppendRepair(e.Kind, e.Tool, e.Message)
 		a.refreshView()
 	case agent.EventPermissionAsk:
+		// Close any open overlay so the permission card is visible.
+		// Without this, /mcp, /lsp, palette, or /permissions would
+		// render on top while key input routes to the hidden prompt.
+		if a.overlay.IsOpen() {
+			a.overlay.Close()
+		}
 		a.permission.Open(e)
 		cmds = append(cmds, a.setMode(modePermission))
 		// Re-layout so the hidden input box gives its rows back to the
 		// viewport — the permission card is the active surface now.
 		a.layout()
+		a.notifySafe("DeepSeekCode", "Permission requested")
 	case agent.EventQuestionAsk:
 		a.question.Open(e)
 		cmds = append(cmds, a.setMode(modeQuestion))
@@ -687,6 +710,7 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.scrollback.EndStreams()
 		a.chrome.Reset()
 		a.refreshView()
+		a.notifySafe("DeepSeekCode", "Task finished")
 		// This run is finished UI-side. Advance the idle-hint rotation (G10) and
 		// drain the next queued prompt (G11): if one is waiting, submitting it
 		// flips uiRunning back on via the runStartMsg it returns; otherwise the
@@ -917,6 +941,9 @@ func (a *App) renderOverlay() string {
 	case modeLSP:
 		body = renderLSP(a.theme, a.overlay.LSPServers(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
 		footerText = "type to filter · esc close"
+	case modePermissions:
+		body = renderPermissions(a.theme, a.overlay.Permissions(), a.width, h)
+		footerText = "esc close"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -985,6 +1012,14 @@ func (a *App) layout() {
 	// Textarea content width = total width − 2 border cols − 2 padding cols.
 	a.input.SetWidth(a.width - 4)
 	a.refreshView()
+}
+
+// notifySafe fires a notification if a Notifier is wired. Errors are silently
+// discarded — notifications are best-effort and must never disrupt the UI loop.
+func (a *App) notifySafe(title, body string) {
+	if a.notifier != nil {
+		_ = a.notifier.Notify(title, body)
+	}
 }
 
 // refreshView pushes the scrollback's rendered content into the
@@ -1659,6 +1694,13 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			return nil
 		}
 		a.overlay.OpenLSP(a.lspStatus())
+	case "/permissions":
+		if a.permStatus == nil {
+			a.scrollback.AppendInfo("/permissions unavailable (no policy loaded)")
+			a.refreshView()
+			return nil
+		}
+		a.overlay.OpenPermissions(a.permStatus())
 	case "/export", "/scrollback":
 		// Same as `P` in Normal mode — dump scrollback to $PAGER so
 		// the user gets terminal-native drag-select across the whole

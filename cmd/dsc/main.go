@@ -680,8 +680,37 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 			}
 			return rows
 		},
+		PermStatus: func() []tui.PermissionRow {
+			return buildPermissionRows(pol)
+		},
+		Notifier: tui.NoopNotifier{},
 	})
 	return app.Run()
+}
+
+// buildPermissionRows converts a permissions.Policy into display rows for the
+// /permissions overlay. Pure function — no side effects.
+func buildPermissionRows(pol *permissions.Policy) []tui.PermissionRow {
+	modeStr := "default"
+	switch pol.Mode {
+	case permissions.ModeYolo:
+		modeStr = "yolo (auto-approve all)"
+	case permissions.ModeReadOnly:
+		modeStr = "read-only"
+	case permissions.ModeAskAll:
+		modeStr = "ask-all"
+	case permissions.ModePlan:
+		modeStr = "plan"
+	}
+	rows := []tui.PermissionRow{
+		{Key: "Mode", Value: modeStr},
+		{Key: "Bash allowlist", Value: fmt.Sprintf("%d patterns", len(pol.BashAllowlist()))},
+		{Key: "Secret patterns", Value: fmt.Sprintf("%d patterns", len(pol.SecretPathPatterns))},
+	}
+	if pol.Rules != nil {
+		rows = append(rows, tui.PermissionRow{Key: "Rule engine", Value: "active"})
+	}
+	return rows
 }
 
 // projectHistoryPath returns the per-project prompt-history ring file (G2):

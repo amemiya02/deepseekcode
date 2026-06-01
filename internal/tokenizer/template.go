@@ -252,12 +252,13 @@ func FormatPrompt(messages []llm.Message, dropThinking bool) string {
 	return b.String()
 }
 
-// CountMessages returns the token count of the rendered conversation and ok=true
-// when the tokenizer is available; (0,false) otherwise. Uses CountBounded internally.
+// CountMessages returns the EXACT token count of the rendered conversation
+// (no sampling) and ok=true when the tokenizer is available; (0,false)
+// otherwise. Uses CountExact internally — exact at any conversation size.
 func CountMessages(messages []llm.Message) (n int, ok bool) {
 	if !Available() {
 		return 0, false
 	}
 	prompt := FormatPrompt(messages, false)
-	return CountBounded(prompt, DefaultBoundedTokenizeChars), true
+	return CountExact(prompt), true
 }

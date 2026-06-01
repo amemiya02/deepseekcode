@@ -113,13 +113,15 @@ func TestRealUsageTolerance(t *testing.T) {
 	// Real prompt_tokens from the dsc session DB (session 254c5a26, turn 1).
 	const realPromptTokens = 2442
 
-	// Frozen residual: 2442 - 90 - 263 = 2089.
+	// Frozen residual: 2442 - 90 - 261 = 2091.
 	// Server-side overhead (system rendering + tool-schema template + special tokens)
-	// that the local tokenizer cannot see. Computed once with the original encoder.
-	const fixedResidual = 2089
+	// that the local tokenizer cannot see. Computed once with the corrected encoder.
+	const fixedResidual = 2091
 
 	// Exact expected conversation count — the primary accuracy gate.
-	const expectedConv = 263
+	// Updated from 263 after fixing splitAddedTokens to use proper byte offsets
+	// (charToByteOffset) instead of treating regexp2 character indices as byte offsets.
+	const expectedConv = 261
 
 	system := buildTestSystem()
 	msgs := buildTestMessages()

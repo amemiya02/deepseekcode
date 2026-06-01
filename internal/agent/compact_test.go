@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 )
 
 // TestEstimateTokensCountsUTF8Bytes pins the behavior that EstimateTokens
@@ -616,6 +617,41 @@ func TestMergeUnionsAndCapsRecentRequests(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q retained in merged recent_requests; got:\n%s", want, got)
 		}
+	}
+}
+
+// TestEstimateInputTokensExactPath verifies that EstimateInputTokens returns
+// the exact tokenizer count (not the heuristic) when the tokenizer is available.
+// This is the D-2 acceptance test: with the exact CountMessages wired in,
+// EstimateInputTokens(msgs, 4.0) must equal tokenizer.Count(tokenizer.FormatPrompt(msgs, false)).
+func TestEstimateInputTokensExactPath(t *testing.T) {
+	if !tokenizer.Available() {
+		t.Skip("tokenizer not available")
+	}
+
+	// Build a ≥10KB conversation.
+	msgs := make([]llm.Message, 0, 41)
+	msgs = append(msgs, llm.Message{Role: "system", Blocks: []llm.ContentBlock{
+		llm.TextBlock{Text: "You are a coding agent. You operate directly in the user's repository."},
+	}})
+	for i := 0; i < 20; i++ {
+		msgs = append(msgs, llm.Message{Role: "user", Blocks: []llm.ContentBlock{
+			llm.TextBlock{Text: strings.Repeat("x", 200)},
+		}})
+		msgs = append(msgs, llm.Message{Role: "assistant", Blocks: []llm.ContentBlock{
+			llm.TextBlock{Text: strings.Repeat("y", 300)},
+		}})
+	}
+
+	prompt := tokenizer.FormatPrompt(msgs, false)
+	if len(prompt) < 10_000 {
+		t.Fatalf("prompt is only %d bytes, want ≥10KB", len(prompt))
+	}
+
+	got := EstimateInputTokens(msgs, 4.0)
+	want := tokenizer.Count(prompt)
+	if got != want {
+		t.Errorf("EstimateInputTokens=%d, tokenizer.Count(FormatPrompt)=%d — exact path should match", got, want)
 	}
 }
 

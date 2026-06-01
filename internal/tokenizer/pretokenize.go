@@ -51,6 +51,40 @@ func applySplit(chunks []string, re *regexp2.Regexp) []string {
 	return out
 }
 
+// splitAddedTokens splits text into ordered segments, mirroring exactly the
+// addedPattern loop in loaded.Encode. isAdded[i]==true means seg[i] is an
+// added token (counts as exactly 1 id). It is the SHARED segmentation used by
+// both Encode and CountExact so the two can never diverge.
+func (l *loaded) splitAddedTokens(text string) (seg []string, isAdded []bool) {
+	if l.addedPattern == nil {
+		if text != "" {
+			seg = []string{text}
+			isAdded = []bool{false}
+		}
+		return
+	}
+	last := 0
+	for m, err := l.addedPattern.FindStringMatch(text); m != nil; m, err = l.addedPattern.FindNextMatch(m) {
+		if err != nil {
+			break
+		}
+		matchStart := charToByteOffset(text, m.Index)
+		match := m.String()
+		if matchStart > last {
+			seg = append(seg, text[last:matchStart])
+			isAdded = append(isAdded, false)
+		}
+		seg = append(seg, match)
+		isAdded = append(isAdded, true)
+		last = matchStart + len(match)
+	}
+	if last < len(text) {
+		seg = append(seg, text[last:])
+		isAdded = append(isAdded, false)
+	}
+	return
+}
+
 // Encode returns the token ids for text under the V4 BPE + pretokenization.
 func (l *loaded) Encode(text string) []int {
 	if text == "" {
@@ -82,26 +116,15 @@ func (l *loaded) Encode(text string) []int {
 		}
 	}
 
-	if l.addedPattern != nil {
-		last := 0
-		for m, err := l.addedPattern.FindStringMatch(text); m != nil; m, err = l.addedPattern.FindNextMatch(m) {
-			if err != nil {
-				break
-			}
-			idx := m.Index
-			if idx > last {
-				process(text[last:idx])
-			}
-			if id, ok := l.addedMap[m.String()]; ok {
+	segs, added := l.splitAddedTokens(text)
+	for i, s := range segs {
+		if added[i] {
+			if id, ok := l.addedMap[s]; ok {
 				ids = append(ids, id)
 			}
-			last = idx + len(m.String())
+		} else {
+			process(s)
 		}
-		if last < len(text) {
-			process(text[last:])
-		}
-	} else {
-		process(text)
 	}
 	return ids
 }

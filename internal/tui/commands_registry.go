@@ -46,6 +46,8 @@ func builtinCommands() []slashCmd {
 		{Name: "undo", Summary: "revert the last edit step", Kind: builtinCmd},
 		{Name: "compact", Summary: "force-compact the running message list", Kind: builtinCmd},
 		{Name: "reload-skills", Aliases: []string{"reload"}, Summary: "re-scan skills mid-session (mints a new cache epoch)", Kind: builtinCmd},
+		{Name: "mcp", Summary: "show MCP server status", Kind: builtinCmd},
+		{Name: "lsp", Summary: "show LSP server status", Kind: builtinCmd},
 	}
 }
 

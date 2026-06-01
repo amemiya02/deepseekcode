@@ -219,6 +219,18 @@ func (c *Client) Diagnostics(uri string) []Diagnostic {
 	return c.diagnosticsByURI[uri]
 }
 
+// DiagnosticCount returns the total number of cached diagnostics across
+// all URIs. Safe for concurrent use.
+func (c *Client) DiagnosticCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	n := 0
+	for _, diags := range c.diagnosticsByURI {
+		n += len(diags)
+	}
+	return n
+}
+
 // Close sends a shutdown request, an exit notification, and tears down
 // the transport. Each step has a 2s timeout so a hung server doesn't
 // block dsc exit.

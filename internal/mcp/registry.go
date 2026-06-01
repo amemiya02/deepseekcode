@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,7 @@ func (r *Registry) Connect(ctx context.Context, name, command string, args []str
 	if err != nil {
 		r.mu.Lock()
 		r.servers[name].State = StateFailed
+		r.servers[name].lastError = err.Error()
 		r.mu.Unlock()
 		return err
 	}
@@ -207,6 +209,7 @@ func (r *Registry) attemptReconnect(name string) {
 		if p, ok := r.servers[name]; ok && p.State == StateDegraded {
 			p.reconnectAttempted = true
 			p.backoffUntil = time.Now().Add(r.reconnectBackoff)
+			p.lastError = err.Error()
 		}
 		r.mu.Unlock()
 		return
@@ -301,6 +304,36 @@ func (r *Registry) Servers() []*ServerProxy {
 	for _, s := range r.servers {
 		out = append(out, s)
 	}
+	return out
+}
+
+// Snapshots returns a deterministic, read-only view of every registered
+// server's status. The returned slice is sorted by server name and each
+// Tools list is sorted by tool name so callers get stable ordering
+// without holding the registry lock. All slice fields are deep-copied.
+func (r *Registry) Snapshots() []ServerSnapshot {
+	if r == nil {
+		return []ServerSnapshot{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]ServerSnapshot, 0, len(r.servers))
+	for _, p := range r.servers {
+		names := make([]string, len(p.Tools))
+		for i, t := range p.Tools {
+			names[i] = t.Name
+		}
+		sort.Strings(names)
+		out = append(out, ServerSnapshot{
+			Name:         p.Name,
+			State:        p.State,
+			ToolCount:    len(p.Tools),
+			Tools:        names,
+			BackoffUntil: p.backoffUntil,
+			LastError:    p.lastError,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

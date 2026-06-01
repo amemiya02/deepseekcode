@@ -174,6 +174,92 @@ func TestThemesFilterNarrows(t *testing.T) {
 	}
 }
 
+func TestRenderMCPShowsBackoffAndOmitsZeroBackoff(t *testing.T) {
+	th := DarkTheme()
+
+	// Degraded server with backoff: "backoff 3:04PM" must appear.
+	out := renderMCP(th, []McpServerRow{{
+		Name: "fs", State: "degraded", ToolCount: 2, BackoffUntil: "3:04PM",
+	}}, []int{0}, 0, "", 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "backoff 3:04PM") {
+		t.Fatalf("renderMCP missing backoff text:\n%s", stripped)
+	}
+
+	// Connected server with no backoff: "backoff" must NOT appear.
+	out = renderMCP(th, []McpServerRow{{
+		Name: "fs", State: "connected", ToolCount: 2,
+	}}, []int{0}, 0, "", 100, 20)
+	stripped = stripANSI(out)
+	if strings.Contains(stripped, "backoff") {
+		t.Fatalf("renderMCP showed spurious backoff for connected server:\n%s", stripped)
+	}
+}
+
+func TestRenderMCPShowsErrorAndEmptyState(t *testing.T) {
+	th := DarkTheme()
+
+	// Server with last error.
+	out := renderMCP(th, []McpServerRow{{
+		Name: "fs", State: "failed", ToolCount: 0, LastError: "spawn: exec not found",
+	}}, []int{0}, 0, "", 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "spawn: exec not found") {
+		t.Fatalf("renderMCP missing error text:\n%s", stripped)
+	}
+
+	// Empty server list.
+	out = renderMCP(th, nil, nil, 0, "", 100, 20)
+	stripped = stripANSI(out)
+	if !strings.Contains(stripped, "no MCP servers configured") {
+		t.Fatalf("renderMCP missing empty state:\n%s", stripped)
+	}
+}
+
+func TestRenderLSPShowsCommandAndZeroDiagnostics(t *testing.T) {
+	th := DarkTheme()
+
+	// Connected server with command and zero diagnostics. Name and Command
+	// are distinct so the test proves Command is actually rendered.
+	out := renderLSP(th, []LspServerRow{{
+		Name: "go", Command: "gopls-custom", Connected: true, DiagnosticCount: 0,
+	}}, []int{0}, 0, "", 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "go") {
+		t.Fatalf("renderLSP missing server name:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "gopls-custom") {
+		t.Fatalf("renderLSP missing Command text:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "0 diagnostics") {
+		t.Fatalf("renderLSP missing zero diagnostics:\n%s", stripped)
+	}
+}
+
+func TestRenderLSPShowsErrorAndEmptyState(t *testing.T) {
+	th := DarkTheme()
+
+	// Failed server with error.
+	out := renderLSP(th, []LspServerRow{{
+		Name: "rust-analyzer", Command: "rust-analyzer", Connected: false,
+		LastError: "exec: not found",
+	}}, []int{0}, 0, "", 100, 20)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "rust-analyzer") {
+		t.Fatalf("renderLSP missing server name:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "exec: not found") {
+		t.Fatalf("renderLSP missing error text:\n%s", stripped)
+	}
+
+	// Empty server list.
+	out = renderLSP(th, nil, nil, 0, "", 100, 20)
+	stripped = stripANSI(out)
+	if !strings.Contains(stripped, "no LSP servers detected") {
+		t.Fatalf("renderLSP missing empty state:\n%s", stripped)
+	}
+}
+
 func TestRenderThemesPickerListsAll(t *testing.T) {
 	th := DarkTheme()
 	rows := availableThemes()

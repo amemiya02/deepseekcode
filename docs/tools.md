@@ -59,12 +59,10 @@ args = ["/path/to/server.js"]
 env = { FOO = "bar" }
 ```
 
-Servers are spawned lazily on first tool-call referencing them. **None
-are enabled by default** — the binary ships with the surface above.
-
-> MCP integration ships partially in v0.1 — configuration is parsed but
-> the runtime bridge is on the v0.2 roadmap. Until then, the built-in
-> tool surface is the working set.
+Configured servers are connected at startup. **None are enabled by
+default** — the binary ships with the surface above.
+See [docs/mcp.md](mcp.md) for full configuration, lifecycle, and
+troubleshooting details.
 
 ## Fuzzy matching in edit_file
 

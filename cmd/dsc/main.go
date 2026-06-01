@@ -627,6 +627,39 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		HistoryPath:           projectHistoryPath(home, cwd),
 		Language:              cfg.UI.Language,
 		LSPReady:              len(lspReg.Servers()) > 0,
+		MCPStatus: func() []tui.McpServerRow {
+			snaps := mcpReg.Snapshots()
+			rows := make([]tui.McpServerRow, len(snaps))
+			for i, s := range snaps {
+				backoff := ""
+				if !s.BackoffUntil.IsZero() {
+					backoff = s.BackoffUntil.Format(time.Kitchen)
+				}
+				rows[i] = tui.McpServerRow{
+					Name:         s.Name,
+					State:        s.State.String(),
+					ToolCount:    s.ToolCount,
+					Tools:        s.Tools,
+					BackoffUntil: backoff,
+					LastError:    s.LastError,
+				}
+			}
+			return rows
+		},
+		LSPStatus: func() []tui.LspServerRow {
+			snaps := lspReg.Snapshots()
+			rows := make([]tui.LspServerRow, len(snaps))
+			for i, s := range snaps {
+				rows[i] = tui.LspServerRow{
+					Name:            s.Name,
+					Command:         s.Command,
+					Connected:       s.Connected,
+					DiagnosticCount: s.DiagnosticCount,
+					LastError:       s.LastError,
+				}
+			}
+			return rows
+		},
 	})
 	return app.Run()
 }

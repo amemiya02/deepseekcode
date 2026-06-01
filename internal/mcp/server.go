@@ -59,6 +59,22 @@ type ServerProxy struct {
 	// attempted until it elapses. Zero means no gate. Guarded by
 	// Registry.mu.
 	backoffUntil time.Time
+	// lastError holds the human-readable error string from the most
+	// recent failed connect or reconnect. Empty on success.
+	// Guarded by Registry.mu.
+	lastError string
+}
+
+// ServerSnapshot is a read-only, lock-free view of a single MCP server's
+// status, suitable for TUI overlays and tests. All slice/map fields are
+// deep-copied so callers cannot mutate registry state.
+type ServerSnapshot struct {
+	Name         string
+	State        LifecycleState
+	ToolCount    int
+	Tools        []string
+	BackoffUntil time.Time
+	LastError    string
 }
 
 // Close tears down the proxy's transport.

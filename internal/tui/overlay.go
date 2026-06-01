@@ -21,6 +21,8 @@ const (
 	modePalette              // ctrl+p — fuzzy command palette (G5)
 	modeHelp                 // ? / ctrl+g / /help — keybinding + command overlay (G7)
 	modeThemes               // /theme — theme picker (filterable, live preview)
+	modeMCP                  // /mcp — MCP server status overlay
+	modeLSP                  // /lsp — LSP server status overlay
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -50,7 +52,28 @@ type Overlay struct {
 	sessionsRows []sessionRow
 	palette      []paletteAction
 	themes       []themeOption
+	mcpServers   []McpServerRow
+	lspServers   []LspServerRow
 	filter       filterableList
+}
+
+// McpServerRow is one row in the /mcp status overlay.
+type McpServerRow struct {
+	Name         string
+	State        string // "connected", "degraded", "failed", etc.
+	ToolCount    int
+	Tools        []string
+	BackoffUntil string // human-readable, or empty
+	LastError    string
+}
+
+// LspServerRow is one row in the /lsp status overlay.
+type LspServerRow struct {
+	Name            string
+	Command         string
+	Connected       bool
+	DiagnosticCount int
+	LastError       string
 }
 
 // NewOverlay returns an idle Overlay (mode = chat, nothing open).
@@ -148,7 +171,7 @@ func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % 
 // keys. modeTape and modeHelp are not filterable.
 func (o *Overlay) Filterable() bool {
 	switch o.mode {
-	case modeModels, modeSessions, modePalette, modeThemes:
+	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP:
 		return true
 	}
 	return false
@@ -260,6 +283,40 @@ func (o *Overlay) SelectedThemeID() string {
 
 // Themes returns the picker rows (read-only).
 func (o *Overlay) Themes() []themeOption { return o.themes }
+
+// OpenMCP switches to the /mcp status overlay.
+func (o *Overlay) OpenMCP(rows []McpServerRow) {
+	o.mcpServers = rows
+	o.mode = modeMCP
+	o.cursor = 0
+	labels := make([]string, len(rows))
+	for i, r := range rows {
+		labels[i] = r.Name + " " + r.State
+	}
+	o.filter.SetRows(labels)
+}
+
+// MCPServers returns the MCP server rows (read-only).
+func (o *Overlay) MCPServers() []McpServerRow { return o.mcpServers }
+
+// OpenLSP switches to the /lsp status overlay.
+func (o *Overlay) OpenLSP(rows []LspServerRow) {
+	o.lspServers = rows
+	o.mode = modeLSP
+	o.cursor = 0
+	labels := make([]string, len(rows))
+	for i, r := range rows {
+		conn := "disconnected"
+		if r.Connected {
+			conn = "connected"
+		}
+		labels[i] = r.Name + " " + conn
+	}
+	o.filter.SetRows(labels)
+}
+
+// LSPServers returns the LSP server rows (read-only).
+func (o *Overlay) LSPServers() []LspServerRow { return o.lspServers }
 
 // modelOption is one row in the /models picker.
 type modelOption struct {
@@ -887,6 +944,111 @@ func renderHelp(t Theme, commandRows []slashCmd, tab, offset, width, height int)
 	}
 	header := fmt.Sprintf("%s · %d lines · tab/←→ switch · j/k scroll", title, len(lines))
 	return wrapPane(t, "help", header, bodyOut, width, height)
+}
+
+// renderMCP draws the /mcp status overlay. Each row shows server name,
+// lifecycle state, tool count, and last error if any.
+func renderMCP(t Theme, rows []McpServerRow, visible []int, cursor int, filter string, width, height int) string {
+	if len(rows) == 0 {
+		body := t.Hint.Render("(no MCP servers configured)")
+		return wrapPane(t, "/mcp", "0 servers", body, width, height)
+	}
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no servers match the filter)"))
+		header := fmt.Sprintf("%d servers · type to filter · esc cancel", len(rows))
+		return wrapPane(t, "/mcp", header, b.String(), width, height)
+	}
+
+	for vi, idx := range visible {
+		r := rows[idx]
+		stateStyle := t.Status
+		switch r.State {
+		case "connected":
+			stateStyle = t.StatusGood
+		case "degraded", "failed":
+			stateStyle = t.StatusBad
+		}
+		backoffText := ""
+		if r.BackoffUntil != "" {
+			backoffText = "  backoff " + r.BackoffUntil
+		}
+		errText := ""
+		if r.LastError != "" {
+			errText = "  " + t.StatusBad.Render(truncateCells(r.LastError, 30))
+		}
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s  %s  %d tools%s%s", r.Name, r.State, r.ToolCount, backoffText, errText)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			line := fmt.Sprintf("  %s  %s  %s%s%s",
+				t.StatusModel.Render(r.Name),
+				stateStyle.Render(r.State),
+				t.Hint.Render(fmt.Sprintf("%d tools", r.ToolCount)),
+				backoffText, errText)
+			b.WriteString(truncateCells(line, rowW) + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d servers · type to filter · esc cancel", len(rows))
+	return wrapPane(t, "/mcp", header, b.String(), width, height)
+}
+
+// renderLSP draws the /lsp status overlay. Each row shows server name,
+// command, connection state, diagnostic count, and last error if any.
+func renderLSP(t Theme, rows []LspServerRow, visible []int, cursor int, filter string, width, height int) string {
+	if len(rows) == 0 {
+		body := t.Hint.Render("(no LSP servers detected)")
+		return wrapPane(t, "/lsp", "0 servers", body, width, height)
+	}
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no servers match the filter)"))
+		header := fmt.Sprintf("%d servers · type to filter · esc cancel", len(rows))
+		return wrapPane(t, "/lsp", header, b.String(), width, height)
+	}
+
+	for vi, idx := range visible {
+		r := rows[idx]
+		connStr := "disconnected"
+		connStyle := t.Status
+		if r.Connected {
+			connStr = "connected"
+			connStyle = t.StatusGood
+		}
+		cmdText := ""
+		if r.Command != "" {
+			cmdText = "  " + r.Command
+		}
+		diagText := fmt.Sprintf("  %d diagnostics", r.DiagnosticCount)
+		errText := ""
+		if r.LastError != "" {
+			errText = "  " + t.StatusBad.Render(truncateCells(r.LastError, 30))
+		}
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s  %s%s%s%s", r.Name, connStr, cmdText, diagText, errText)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			line := fmt.Sprintf("  %s  %s%s%s%s",
+				t.StatusModel.Render(r.Name),
+				connStyle.Render(connStr),
+				t.Hint.Render(cmdText),
+				t.Hint.Render(diagText),
+				errText)
+			b.WriteString(truncateCells(line, rowW) + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d servers · type to filter · esc cancel", len(rows))
+	return wrapPane(t, "/lsp", header, b.String(), width, height)
 }
 
 // selectedRow renders a picker's focused row as a filled selection band: a

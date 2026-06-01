@@ -129,6 +129,10 @@ type App struct {
 	// rather than four flat ones.
 	session sessionIntegration
 
+	// MCP/LSP status callbacks for the /mcp and /lsp overlays.
+	mcpStatus func() []McpServerRow
+	lspStatus func() []LspServerRow
+
 	// Wiring back to the tea.Program for callbacks running off the UI loop.
 	send func(tea.Msg)
 
@@ -208,6 +212,12 @@ type Config struct {
 	// LSPReady reports whether at least one LSP server is attached.
 	LSPReady bool
 
+	// MCPStatus returns MCP server snapshots for the /mcp overlay.
+	MCPStatus func() []McpServerRow
+
+	// LSPStatus returns LSP server snapshots for the /lsp overlay.
+	LSPStatus func() []LspServerRow
+
 	// InitialBalance seeds the status-line account balance display.
 	// Populated from llm.Client.GetUserBalance at TUI launch. Empty
 	// means balance unavailable or not a DeepSeek provider.
@@ -268,6 +278,8 @@ func New(cfg Config) *App {
 		question:       NewQuestionFlow(),
 		customCmds:     cfg.Commands,
 		startupNotices: cfg.StartupNotices,
+		mcpStatus:      cfg.MCPStatus,
+		lspStatus:      cfg.LSPStatus,
 		session: sessionIntegration{
 			id:       cfg.SessionID,
 			undo:     cfg.UndoFn,
@@ -899,6 +911,12 @@ func (a *App) renderOverlay() string {
 	case modeThemes:
 		body = renderThemesPicker(a.theme, a.overlay.Themes(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.theme.Name, a.width, h)
 		footerText = "j/k move · ⏎ apply · esc cancel · live preview"
+	case modeMCP:
+		body = renderMCP(a.theme, a.overlay.MCPServers(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
+		footerText = "type to filter · esc close"
+	case modeLSP:
+		body = renderLSP(a.theme, a.overlay.LSPServers(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
+		footerText = "type to filter · esc close"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -1627,6 +1645,20 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			rows = append(rows, sessionRow{Sess: s})
 		}
 		a.overlay.OpenSessions(rows)
+	case "/mcp":
+		if a.mcpStatus == nil {
+			a.scrollback.AppendInfo("/mcp unavailable (no MCP servers configured)")
+			a.refreshView()
+			return nil
+		}
+		a.overlay.OpenMCP(a.mcpStatus())
+	case "/lsp":
+		if a.lspStatus == nil {
+			a.scrollback.AppendInfo("/lsp unavailable (no LSP servers detected)")
+			a.refreshView()
+			return nil
+		}
+		a.overlay.OpenLSP(a.lspStatus())
 	case "/export", "/scrollback":
 		// Same as `P` in Normal mode — dump scrollback to $PAGER so
 		// the user gets terminal-native drag-select across the whole

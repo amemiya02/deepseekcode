@@ -3,14 +3,10 @@
 `deepseekcode` supports the [Model Context Protocol](https://modelcontextprotocol.io/)
 for extending its tool surface with user-provided servers.
 
-> v0.1 status: configuration is parsed; the runtime bridge is on the
-> v0.2 roadmap. Until then, this document records the planned shape so
-> you can stage `[mcp_servers]` entries in your config in advance.
-
 ## Configuration
 
 Servers are declared in `~/.deepseek/config.toml`. None are enabled by
-default — the built-in 12-tool surface is what ships.
+default — the built-in tool surface ships without MCP.
 
 ```toml
 [mcp_servers.example]
@@ -23,40 +19,79 @@ command = "uvx"
 args = ["mcp-server-git", "--repository", "."]
 ```
 
-## Lifecycle (v0.2)
+## Shipped behavior
 
-- Servers spawn **lazily** on first tool-call referencing them (not at
-  startup). This keeps `dsc`'s cold-start latency under 100ms.
-- Stdio transport only. SSE/HTTP transports come later.
-- Tools provided by an MCP server appear in the registry under their
-  declared names. Conflicts with built-ins are resolved in favor of MCP
-  (the user explicitly enabled it; presumably they meant it to win).
+The following MCP features are implemented and available today:
+
+### Stdio transport
+
+MCP servers are spawned as subprocesses and communicate over
+stdin/stdout using JSON-RPC 2.0 with Content-Length framing. This is
+the only transport currently supported.
+
+### Startup connection
+
+Configured MCP servers are connected during `dsc` startup. DeepSeekCode
+spawns the server process, runs the MCP `initialize` handshake, calls
+`tools/list`, and bridges the resulting tools into the session registry
+before the first model turn.
+
+### Tool bridge
+
+Tools provided by an MCP server appear in the registry under their
+declared names, prefixed as `mcp__<server>__<tool>`. The model calls
+them like any built-in tool. Conflicts with built-ins are resolved in
+favor of MCP (the user explicitly enabled it).
+
+### Lifecycle management
+
 - Server processes inherit `deepseekcode`'s working directory and a
   reduced environment derived from `[mcp_servers.X.env]`.
+- If a server process dies, the registry detects it, marks the server
+  as **degraded**, and attempts one automatic reconnect with a 10-second
+  timeout. On failure, a 30-second backoff is applied before further
+  attempts are allowed.
+- `dsc` monitors for MCP tool-list drift between reconnections (tools
+  added, removed, or schema changed) and surfaces changes to the agent
+  loop so the model's tool list stays current.
 
-## HTTP transport
-
-`HTTPTransport` speaks JSON-RPC 2.0 over HTTP POST to remote MCP servers.
-It replaces the stdio process spawn when the server URL is an `http://` or
-`https://` endpoint rather than a local command.
-
-- **Framing**: each `Send` posts a single JSON-RPC request envelope
-  (`jsonrpc: "2.0"`, monotonic `id`, `method`, `params`) and expects a
-  single JSON-RPC response.
-- **Notifications**: `Notify` posts a JSON-RPC notification (no `id`,
-  fire-and-forget).
-- **Timeout**: 30 seconds per request (configurable on the underlying
-  `http.Client`).
-- **Concurrency**: request IDs are assigned via `atomic.Int64`, so
-  concurrent `Send` calls are safe.
-- **Errors**: non-2xx HTTP status returns an error with status code and
-  body; a JSON-RPC `error` object returns an error with `code` and
-  `message`.
-
-## Permissions
+### Permissions
 
 MCP tools go through the same permission tier as built-ins. Each MCP
 tool is treated as a non-read-only tool unless it explicitly declares
 its safety in the MCP `tools/list` response. The Duet validator
 considers MCP tool calls the same way it considers built-ins — paths
 inside `affected_paths` and matching destructive patterns trigger Pro.
+
+### Per-call timeout
+
+Each MCP tool call is subject to a 60-second default timeout, which
+can be overridden per server via the registry's `SetTimeout` API.
+
+### `/mcp` status overlay
+
+Type `/mcp` in the TUI to open a fullscreen overlay showing all
+configured MCP servers: name, lifecycle state (connected/degraded/
+failed), tool count, backoff timer, and last error. The list is
+filterable — type to narrow by server name.
+
+## Troubleshooting
+
+- **Server fails to start:** Check that the `command` binary is on
+  your PATH and that `args` point to a valid server script. The TUI
+  status bar shows the total count of connected MCP tools.
+- **Tools not appearing:** The server must complete the MCP initialize
+  handshake and respond to `tools/list`. Check the server's stderr
+  output for errors.
+- **Degraded state:** If a server process crashes, `dsc` will attempt
+  one reconnect. If that also fails, the server enters a backoff
+  period. Restart `dsc` to reset.
+
+## Roadmap
+
+The following MCP features are planned but not yet shipped:
+
+- **HTTP/SSE transport** — connect to remote MCP servers over HTTP
+  with Server-Sent Events for streaming.
+- **Per-tool enable/disable** — selectively enable or disable
+  individual MCP tools without removing the server config.

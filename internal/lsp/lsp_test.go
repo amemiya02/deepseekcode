@@ -714,3 +714,172 @@ func writeLSPTestMessage(w io.Writer, body []byte) error {
 	_, err := w.Write(body)
 	return err
 }
+
+// ---------- Task-003: LSP Status Snapshots ----------
+
+func TestSnapshotsEmpty(t *testing.T) {
+	reg := NewRegistry()
+	snaps := reg.Snapshots()
+	if snaps == nil {
+		t.Fatal("Snapshots() should return non-nil slice")
+	}
+	if len(snaps) != 0 {
+		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
+	}
+}
+
+func TestSnapshotsConnectedWithDiagnostics(t *testing.T) {
+	reg := NewRegistry()
+
+	// Inject a connected client with diagnostics.
+	c := &Client{
+		Name:             "gopls",
+		opened:           make(map[string]bool),
+		diagnosticsByURI: make(map[string][]Diagnostic),
+	}
+	c.diagnosticsByURI["file:///a.go"] = []Diagnostic{
+		{Message: "err1", Severity: 1},
+		{Message: "err2", Severity: 1},
+	}
+	c.diagnosticsByURI["file:///b.go"] = []Diagnostic{
+		{Message: "warn1", Severity: 2},
+	}
+
+	reg.mu.Lock()
+	reg.clients["gopls"] = c
+	reg.commands["gopls"] = "gopls"
+	reg.mu.Unlock()
+
+	snaps := reg.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.Name != "gopls" {
+		t.Errorf("Name = %q, want gopls", s.Name)
+	}
+	if s.Command != "gopls" {
+		t.Errorf("Command = %q, want gopls", s.Command)
+	}
+	if !s.Connected {
+		t.Error("expected Connected true")
+	}
+	if s.DiagnosticCount != 3 {
+		t.Errorf("DiagnosticCount = %d, want 3", s.DiagnosticCount)
+	}
+	if s.LastError != "" {
+		t.Errorf("LastError should be empty for connected server, got %q", s.LastError)
+	}
+}
+
+func TestSnapshotsFailedStartup(t *testing.T) {
+	reg := NewRegistry()
+
+	// Record a failed server directly.
+	reg.mu.Lock()
+	reg.failedServers = append(reg.failedServers, failedServer{
+		Name:      "rust-analyzer",
+		Command:   "rust-analyzer",
+		LastError: "lsp rust-analyzer: exec: not found",
+	})
+	reg.mu.Unlock()
+
+	snaps := reg.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.Name != "rust-analyzer" {
+		t.Errorf("Name = %q, want rust-analyzer", s.Name)
+	}
+	if s.Command != "rust-analyzer" {
+		t.Errorf("Command = %q, want rust-analyzer", s.Command)
+	}
+	if s.Connected {
+		t.Error("expected Connected false for failed server")
+	}
+	if s.DiagnosticCount != 0 {
+		t.Errorf("DiagnosticCount = %d, want 0 for failed server", s.DiagnosticCount)
+	}
+	if s.LastError == "" {
+		t.Error("expected non-empty LastError for failed server")
+	}
+}
+
+func TestSnapshotsSorted(t *testing.T) {
+	reg := NewRegistry()
+
+	// Inject connected and failed servers with names that test sort order.
+	c := &Client{
+		Name:             "gopls",
+		opened:           make(map[string]bool),
+		diagnosticsByURI: make(map[string][]Diagnostic),
+	}
+	reg.mu.Lock()
+	reg.clients["gopls"] = c
+	reg.commands["gopls"] = "gopls"
+	reg.failedServers = append(reg.failedServers, failedServer{
+		Name:      "rust-analyzer",
+		Command:   "rust-analyzer",
+		LastError: "not found",
+	})
+	reg.failedServers = append(reg.failedServers, failedServer{
+		Name:      "pylsp",
+		Command:   "pylsp",
+		LastError: "not found",
+	})
+	reg.mu.Unlock()
+
+	snaps := reg.Snapshots()
+	if len(snaps) != 3 {
+		t.Fatalf("expected 3 snapshots, got %d", len(snaps))
+	}
+	// Should be sorted: gopls < pylsp < rust-analyzer
+	expected := []string{"gopls", "pylsp", "rust-analyzer"}
+	for i, want := range expected {
+		if snaps[i].Name != want {
+			t.Errorf("snaps[%d].Name = %q, want %q", i, snaps[i].Name, want)
+		}
+	}
+}
+
+func TestDiagnosticCountEmpty(t *testing.T) {
+	c := &Client{
+		Name:             "test",
+		opened:           make(map[string]bool),
+		diagnosticsByURI: make(map[string][]Diagnostic),
+	}
+	if got := c.DiagnosticCount(); got != 0 {
+		t.Errorf("DiagnosticCount() = %d, want 0", got)
+	}
+}
+
+func TestDiagnosticCountMultipleURIs(t *testing.T) {
+	c := &Client{
+		Name:             "test",
+		opened:           make(map[string]bool),
+		diagnosticsByURI: make(map[string][]Diagnostic),
+	}
+	// Simulate publishDiagnostics via handleNotification.
+	notif1 := PublishDiagnosticsParams{
+		URI: "file:///a.go",
+		Diagnostics: []Diagnostic{
+			{Message: "e1", Severity: 1},
+			{Message: "e2", Severity: 1},
+		},
+	}
+	notif2 := PublishDiagnosticsParams{
+		URI: "file:///b.go",
+		Diagnostics: []Diagnostic{
+			{Message: "w1", Severity: 2},
+		},
+	}
+	body1, _ := json.Marshal(notif1)
+	body2, _ := json.Marshal(notif2)
+	c.handleNotification("textDocument/publishDiagnostics", body1)
+	c.handleNotification("textDocument/publishDiagnostics", body2)
+
+	if got := c.DiagnosticCount(); got != 3 {
+		t.Errorf("DiagnosticCount() = %d, want 3", got)
+	}
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "arm": "dsc",
+    "total": 16,
+    "passed": 15,
+    "passRate": 0.9375,
+    "totalCostUsd": 0.005651794444444446,
+    "costPerSolvedUsd": 0.00037678629629629636
+  },
+  {
+    "arm": "reasonix-flash",
+    "total": 16,
+    "passed": 16,
+    "passRate": 1,
+    "totalCostUsd": 0.006121740800000001,
+    "costPerSolvedUsd": 0.00038260880000000005
+  },
+  {
+    "arm": "reasonix-pro",
+    "total": 16,
+    "passed": 16,
+    "passRate": 1,
+    "totalCostUsd": 0.020312354,
+    "costPerSolvedUsd": 0.001269522125
+  }
+]

@@ -18,9 +18,9 @@
   字节和缓存指纹，二者构造级一致不可能发散；`dsc trace inspect` 的
   `prefixes==1` 可证明整次会话缓存稳定
   （[docs/prefix-cache.md](docs/prefix-cache.md)）。
-- **真实的多模型路由** -- Duet pro 校验器在破坏性工具调用时触发，
-  `<<<NEEDS_PRO>>>` / 错误升级已实装到 agent 循环中，而非仅停留在文档
-  （[docs/duet.md](docs/duet.md)）。
+- **真实的信号驱动 Flash→Pro 路由** -- 通过 `--auto-route` 选择启用
+  （在歧义或反复修复时自动升级），而非仅是 prompt 指令；破坏性工具调用
+  始终触发 Duet pro 校验器（[docs/duet.md](docs/duet.md)）。
 - **真实的 OS 沙箱** -- sandbox-exec (macOS) / Landlock (Linux) 真隔离 +
   真 PTY，不只是路径围栏
   （[docs/SANDBOX.md](docs/SANDBOX.md)）。
@@ -32,8 +32,8 @@
 DeepSeekCode 专为 DeepSeek V4 模型构建，相比通用编码 Agent 具有可验证的优势：
 
 > **实测，而非声称。** 在一次可复现的 12 回合 `deepseek-v4-flash` 会话中，
-> deepseekcode 维持 **86.8% 前缀缓存命中率**，而缓存不稳定的 Agent 为 **0%**
-> —— **便宜 3.8×**，每个数字都取自 DeepSeek 自己的 `prompt_cache_hit_tokens`。
+> deepseekcode 维持 **94.7% 前缀缓存命中率**，而缓存不稳定的 Agent 为 **0%**
+> —— **便宜 4.5×**，每个数字都取自 DeepSeek 自己的 `prompt_cache_hit_tokens`。
 > 自行验证：`make demo-cache`（实测）或 `make demo-cache-offline`（无需 API
 > key）。方法学：[bench/cache-demo](bench/cache-demo/)。
 
@@ -53,6 +53,8 @@ DeepSeekCode 专为 DeepSeek V4 模型构建，相比通用编码 Agent 具有�
 
 基准证据：
 [bench/README.md](bench/README.md)
+
+工具调用基准（tau-bench-lite，8 个任务）：dsc 在每次解题成本（~$0.00038）上与强 DeepSeek 原生 flash 基线持平——我们如实报告持平，不在简单工具调用任务上声称能力领先（路由优势需要更难的任务集才能体现）。见 [bench/taubench](bench/taubench/)。
 
 ## 功能
 

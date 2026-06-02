@@ -12,11 +12,22 @@ import (
 	"strings"
 )
 
+// defaultWholeReadLineCap bounds how many lines a *whole-file* read (no
+// explicit range) emits. Whole-file reads of large files bloat the
+// conversation body; once the body is large, API-side prompt-cache eviction
+// becomes very expensive to recover from (a single evicted turn re-sends the
+// whole body as a cache miss). Capping whole reads and nudging the model
+// toward grep / a narrow start_line+end_line keeps the cacheable body small —
+// the same surgical-read discipline that keeps steady-state cost low. Ranged
+// reads are never capped: an explicit start_line/end_line is honored exactly.
+const defaultWholeReadLineCap = 500
+
 // ReadFile reads a UTF-8 text file and returns it with cat -n style line
 // numbers. Models do better at reasoning about positions when they see
 // numbers next to lines.
 type ReadFile struct {
 	MaxBytes int64  // default 5_242_880 (5 MiB); 0 means use default
+	MaxLines int    // whole-file read line cap; 0 means defaultWholeReadLineCap
 	CWD      string // project root for path safety; empty means os.Getwd
 	// Tracker, when set, records the file's on-disk state on a successful read
 	// so the write tools can detect out-of-band changes before editing (T3.2).
@@ -31,6 +42,9 @@ func (ReadFile) Description() string {
 		"with cat -n style line numbers (e.g. '  42\\tcontent'). " +
 		"Optional start_line and end_line (1-indexed, inclusive) restrict the range. " +
 		"If end_line exceeds the file length, returns up to the last line. " +
+		"A whole-file read (no range) is capped at the first 500 lines to keep context " +
+		"small; for larger files, grep for the symbol you need and read a narrow " +
+		"start_line/end_line range around it. " +
 		"On binary files or non-UTF8 content, returns an error result describing the situation."
 }
 
@@ -142,10 +156,20 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 		start = 1
 	}
 
+	// A whole-file read (no explicit range) is capped at lineCap lines so a
+	// large file cannot flood the cacheable conversation body. An explicit
+	// range (any end_line, or a start_line past line 1) opts out of the cap.
+	lineCap := r.MaxLines
+	if lineCap <= 0 {
+		lineCap = defaultWholeReadLineCap
+	}
+	wholeRead := p.EndLine == 0 && p.StartLine <= 1
+
 	var out strings.Builder
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNum := 0
+	capped := false
 	for sc.Scan() {
 		lineNum++
 		if lineNum < start {
@@ -153,6 +177,12 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 		}
 		if end != 0 && lineNum > end {
 			break
+		}
+		if wholeRead && lineNum > lineCap {
+			// Stop emitting but keep scanning so the notice can report the
+			// true total line count.
+			capped = true
+			continue
 		}
 		// cat -n format: 6-wide right-aligned line number, tab, content.
 		fmt.Fprintf(&out, "%6d\t%s\n", lineNum, sc.Text())
@@ -178,5 +208,12 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	// between this read and a subsequent edit (T3.2). A partial (ranged) read
 	// still counts — the stamp tracks disk freshness, not coverage.
 	r.Tracker.RecordRead(p.Path)
-	return Result{Content: out.String()}, nil
+	content := out.String()
+	if capped {
+		content += fmt.Sprintf(
+			"\n... (showing lines 1-%d of %d. File truncated to keep the context small. "+
+				"Read a specific region with start_line/end_line, or use grep to locate symbols.) ...\n",
+			lineCap, lineNum)
+	}
+	return Result{Content: content}, nil
 }

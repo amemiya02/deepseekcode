@@ -27,8 +27,13 @@ coverage.html
 go.work
 go.work.sum
 
-# Per-project Claude state (parent dir uses this; we don't ship it)
+# Claude Code / AI assistant local state
+.claude/
+.codegraph/
 .omc/
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
 
 .pxr/
 docs/superpowers/

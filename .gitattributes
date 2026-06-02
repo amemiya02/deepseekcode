@@ -1,0 +1,13 @@
+# Force LF line endings on checkout for every platform.
+#
+# Go tooling assumes LF, and several conformance tests embed golden fixtures
+# via go:embed and byte-compare them against raw-string constants. On a Windows
+# checkout, core.autocrlf rewrites text files to CRLF: the Go compiler discards
+# the \r from raw-string literals, but go:embed keeps the embedded bytes' \r, so
+# the two diverge and the conformance gate fails only on the windows-latest CI
+# leg. Pinning LF keeps the fixtures byte-stable across all runners.
+* text=auto eol=lf
+
+# Belt-and-suspenders: never line-ending-convert the embedded golden fixtures,
+# regardless of git's text/binary heuristic — go:embed needs the exact bytes.
+bench/cmd/taubench/golden/** -text

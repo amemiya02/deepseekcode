@@ -48,6 +48,25 @@ const (
 // at a single constant so both arms share one conversion.
 const cnyPerUsd = 7.2
 
+// Claude Sonnet reference pricing in USD per 1M tokens, mirroring the Reasonix
+// CLAUDE_SONNET_PRICING constant (telemetry/stats.ts). claudeEquivalentCost
+// values prompt tokens at input rate and completion tokens at output rate with
+// no cache discount — the synthetic "what would Claude have cost" gauge the
+// report surfaces alongside the real DeepSeek costUsd.
+const (
+	claudeInputUsdPerMTok  = 3.0
+	claudeOutputUsdPerMTok = 15.0
+)
+
+// claudeEquivalentUsd prices one aggregate usage record at Claude Sonnet rates
+// in USD. It is linear in prompt/completion tokens, so summing per-turn (as the
+// TS reference does) and pricing the aggregate once yield the same figure.
+func claudeEquivalentUsd(u llm.Usage) float64 {
+	const million = 1_000_000.0
+	return (float64(u.PromptTokens)*claudeInputUsdPerMTok +
+		float64(u.CompletionTokens)*claudeOutputUsdPerMTok) / million
+}
+
 // RunResult is the per-run record. Field names / JSON tags are byte-compatible
 // with the Reasonix types.ts RunResult so both arms aggregate into one report.
 type RunResult struct {
@@ -133,6 +152,10 @@ func runDSCArm(ctx context.Context, cfg dscArmConfig) (RunResult, error) {
 					tally.usage.TotalTokens += e.Usage.TotalTokens
 					tally.usage.PromptCacheHitTokens += e.Usage.PromptCacheHitTokens
 					tally.usage.PromptCacheMissTokens += e.Usage.PromptCacheMissTokens
+					// Price this step at the model that actually served it
+					// (e.Model is the post-escalation model when AutoRoute
+					// promoted the turn to pro), not a flat flash rate.
+					tally.costCNY += llm.Cost(e.Model, e.Usage)
 				case agent.EventToolCallResult:
 					tally.toolCalls++
 				case agent.EventDone:
@@ -174,8 +197,14 @@ func runDSCArm(ctx context.Context, cfg dscArmConfig) (RunResult, error) {
 		transcript = append(transcript, Turn{Role: "user", Content: *userMsg})
 
 		nBefore := len(a.Messages)
+		// Count the run as started BEFORE a.Run: the agent's EventDone is
+		// emitted from a defer, so it fires once even if a.Run panics (the
+		// defer runs as the panic unwinds), keeping the drainer's doneTarget
+		// accurate. safeRun recovers any panic into an error so the orderly
+		// drain shutdown below (wantDone <- runsStarted; <-usageCh) still runs
+		// — a bare a.Run panic would skip it and deadlock the drain goroutine.
 		runsStarted++
-		if _, err := a.Run(ctx, *userMsg); err != nil {
+		if err := safeRun(ctx, a, *userMsg); err != nil {
 			errMessage = err.Error()
 			break
 		}
@@ -209,29 +238,54 @@ func runDSCArm(ctx context.Context, cfg dscArmConfig) (RunResult, error) {
 		})
 	}
 
-	costCNY := llm.Cost(dscFlashModel, tally.usage)
+	// costCNY was summed per step at each serving model's price (flash, or pro
+	// after an escalation), so it already reflects AutoRoute promotions — unlike
+	// a flat llm.Cost(dscFlashModel, …) over the aggregate, which would price
+	// escalated turns at flash rates and understate cost.
 	rr := RunResult{
-		TaskID:            cfg.task.ID,
-		Mode:              "dsc",
-		Pass:              pass,
-		Turns:             turns,
-		ToolCalls:         tally.toolCalls,
-		CacheHitRatio:     llm.CacheHitRate(tally.usage),
-		CostUsd:           costCNY / cnyPerUsd,
-		PromptTokens:      tally.usage.PromptTokens,
-		CompletionTokens:  tally.usage.CompletionTokens,
-		Truncated:         truncated,
-		FinalAgentMessage: lastAgentMsg,
-		ErrorMessage:      errMessage,
+		TaskID:              cfg.task.ID,
+		Mode:                "dsc",
+		Pass:                pass,
+		Turns:               turns,
+		ToolCalls:           tally.toolCalls,
+		CacheHitRatio:       llm.CacheHitRate(tally.usage),
+		CostUsd:             tally.costCNY / cnyPerUsd,
+		ClaudeEquivalentUsd: claudeEquivalentUsd(tally.usage),
+		PromptTokens:        tally.usage.PromptTokens,
+		CompletionTokens:    tally.usage.CompletionTokens,
+		Truncated:           truncated,
+		FinalAgentMessage:   lastAgentMsg,
+		ErrorMessage:        errMessage,
 	}
 	return rr, nil
 }
 
 // dscUsageTally accumulates the per-run usage and tool-call count drained off
-// the agent event stream.
+// the agent event stream. costCNY is summed per EventStepFinish at the price of
+// the model that actually served that step (deepseek-v4-pro after an AutoRoute
+// escalation, deepseek-v4-flash otherwise), mirroring the TS reference's
+// loop.stats.totalCost which prices each call at its serving model rather than
+// flat-rating every token at flash.
 type dscUsageTally struct {
 	usage     llm.Usage
+	costCNY   float64
 	toolCalls int
+}
+
+// safeRun calls a.Run and recovers any panic into an error so a single panicky
+// turn can't unwind past runDSCArm's drain-shutdown (wantDone <- runsStarted;
+// <-usageCh) and leave the drain goroutine blocked forever. The agent's
+// EventDone is emitted from a defer, so it still fires as the panic unwinds —
+// the drainer therefore sees one EventDone for this run regardless, and the
+// caller treats the panic exactly like any other run error.
+func safeRun(ctx context.Context, a *agent.Agent, userMsg string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("agent run panicked: %v", r)
+		}
+	}()
+	_, err = a.Run(ctx, userMsg)
+	return err
 }
 
 // safeCheck runs task.Check, treating a panic as a failed check (mirrors

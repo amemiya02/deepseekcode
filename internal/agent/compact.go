@@ -370,6 +370,36 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 	return true, 0, len(messages) - preserve
 }
 
+// ShouldCompactBody reports whether a cost-driven body compaction should fire:
+// the body exceeds BodyTokenBudget AND at least MinTurnsBetweenBodyCompactions
+// turns have elapsed since the last one. It deliberately ignores
+// AutoCompactInputTokens — this is the cache-cost tier, not the overflow tier.
+// summaryPresent is informational; the collapse range is identical either way.
+func ShouldCompactBody(messages []llm.Message, cfg CompactionConfig, charsPerToken float64, turnsSinceLast int, summaryPresent bool) (ok bool, fromIdx, toIdx int) {
+	budget := cfg.BodyTokenBudget
+	if budget <= 0 {
+		return false, 0, 0
+	}
+	minGap := cfg.MinTurnsBetweenBodyCompactions
+	if minGap <= 0 {
+		minGap = 3
+	}
+	if turnsSinceLast < minGap {
+		return false, 0, 0
+	}
+	preserve := cfg.PreserveRecentMessages
+	if preserve <= 0 {
+		preserve = 4
+	}
+	if len(messages) <= preserve*2 {
+		return false, 0, 0
+	}
+	if EstimateInputTokens(messages, charsPerToken) < budget {
+		return false, 0, 0
+	}
+	return true, 0, len(messages) - preserve
+}
+
 // reconcileCompactThreshold returns the effective absolute token threshold for
 // the deterministic compaction fallback: the STRICTER (smaller) of the
 // configured absolute trigger and the ratio-derived semantic trigger

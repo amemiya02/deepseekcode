@@ -260,6 +260,13 @@ type Agent struct {
 	// refuses to undo to a step below it. Session-scoped (NOT reset per Run).
 	compactionFloor int
 
+	// lastBodyCompactTurn is the loop turn index (len(a.steps)) at which the
+	// cost-driven body compaction last fired. ShouldCompactBody compares the
+	// gap (curTurn-lastBodyCompactTurn) against MinTurnsBetweenBodyCompactions
+	// so a body rewrite never out-paces the cache eviction it replaces. Per-Run
+	// in effect but session-scoped storage; touched only on the run goroutine.
+	lastBodyCompactTurn int
+
 	// loopNudged records that the one-shot loop-break nudge has been spent in
 	// the current Run. loopFloor is the step index from which loop detection
 	// counts *after* a nudge: without it the pre-nudge repeats stay inside the
@@ -587,7 +594,11 @@ agentLoop:
 		// runStep will rebuild the wire request). A failure here is
 		// reported but never aborts the loop — compaction is an
 		// optimization, not a correctness requirement.
-		a.maybeCompact(ctx)
+		//
+		// len(a.steps) is the canonical loop turn index: it was just incremented
+		// by the append above and is the same counter compactionFloor tracks, so
+		// it is the turn value ShouldCompactBody throttles against.
+		a.maybeCompact(ctx, len(a.steps))
 	}
 }
 
@@ -599,7 +610,11 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 	saved := a.CompactionCfg
 	defer func() { a.CompactionCfg = saved }()
 	a.CompactionCfg.AutoCompactInputTokens = 1
-	a.maybeCompact(ctx)
+	// Pass lastBodyCompactTurn as the current turn so the cost-driven body
+	// path sees a zero gap (< MinTurnsBetweenBodyCompactions) and stays out of
+	// the way: a forced /compact must run the deterministic overflow collapse
+	// regardless of BodyTokenBudget, exactly as before this tier existed.
+	a.maybeCompact(ctx, a.lastBodyCompactTurn)
 }
 
 // compactForOverflow runs a forced compaction for context-overflow recovery.
@@ -679,10 +694,61 @@ func (a *Agent) learnStaticResidual(usagePromptTokens int, sentMessages []llm.Me
 // summary, swaps the in-memory message list and persists the
 // collapse. Errors surface via EventInfo so the user sees them
 // without crashing the Run.
-func (a *Agent) maybeCompact(ctx context.Context) {
+func (a *Agent) maybeCompact(ctx context.Context, curTurn int) {
 	maxCtx := a.MaxContextTokens
 	if maxCtx <= 0 {
 		maxCtx = MaxContextTokens
+	}
+
+	// Cost-driven body compaction: keep the carried body small so DeepSeek's
+	// periodic body-cache eviction re-sends few tokens. Runs the SAME
+	// deterministic collapse as overflow compaction (CompactSession) but on a
+	// much smaller trigger; throttled by MinTurnsBetweenBodyCompactions so it
+	// can't out-pace the eviction it replaces. Independent of the overflow path:
+	// it fires far below AutoCompactInputTokens and returns on success so the
+	// overflow/semantic checks below don't double-compact the same turn.
+	if ok, _, _ := ShouldCompactBody(a.Messages, a.CompactionCfg, a.charsPerToken, curTurn-a.lastBodyCompactTurn, false); ok {
+		// CompactSession re-gates on AutoCompactInputTokens (the 800K overflow
+		// threshold). The body tier deliberately fires far below that, so run the
+		// identical deterministic collapse with that gate lowered to the body
+		// budget — ShouldCompactBody just decided the collapse should happen, and
+		// both predicates yield the same [0, len-preserve) window. Same trick
+		// ForceCompact uses (AutoCompactInputTokens=1) to force the collapse.
+		bodyCfg := a.CompactionCfg
+		bodyCfg.AutoCompactInputTokens = a.CompactionCfg.BodyTokenBudget
+		res := CompactSession(a.Messages, bodyCfg, a.charsPerToken)
+		if res.Summary != "" {
+			if a.Persister != nil {
+				if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
+					a.bus.Publish(EventInfo{Text: "body compaction persistence failed: " + err.Error()})
+					return
+				}
+			}
+			a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+			a.lastBodyCompactTurn = curTurn
+			a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
+			// See the overflow path below: invalidate read stamps on fold (T3.2).
+			a.Tools.FileTracker().Clear()
+			a.bus.Publish(EventCompaction{
+				FromIdx:      res.FromIdx,
+				ToIdx:        res.ToIdx,
+				Summary:      res.Summary,
+				RemovedCount: res.RemovedCount,
+			})
+			// Same MEASURED-record discipline as the deterministic overflow path:
+			// body compaction only collapses messages and never rebuilds the
+			// static prefix, so before/after come from the same frozen baseline
+			// and are equal by construction; the gate still measures them.
+			before, after := a.compactionPrefixHashes()
+			a.bus.Publish(EventSemanticCompaction{
+				FromIdx:                res.FromIdx,
+				ToIdx:                  res.ToIdx,
+				UsedSemantic:           false,
+				StaticPrefixHashBefore: before,
+				StaticPrefixHashAfter:  after,
+			})
+			return
+		}
 	}
 
 	if !a.DisableSemanticCompaction {

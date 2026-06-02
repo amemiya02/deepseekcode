@@ -42,7 +42,7 @@ func TestCompactionClearsFileTracker(t *testing.T) {
 		})
 	}
 	before := len(a.Messages)
-	a.maybeCompact(context.Background())
+	a.maybeCompact(context.Background(), 0)
 	if len(a.Messages) >= before {
 		t.Fatalf("expected compaction to shrink messages; before=%d after=%d", before, len(a.Messages))
 	}

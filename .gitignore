@@ -36,3 +36,4 @@ docs/superpowers/
 # Benchmark output
 bench/traces/
 bench/reports/
+bench/cache-demo/results.json

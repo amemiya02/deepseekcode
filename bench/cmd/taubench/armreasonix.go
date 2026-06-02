@@ -57,10 +57,11 @@ func parseReasonixReport(data []byte) ([]RunResult, error) {
 //
 //	npx tsx benchmarks/tau-bench/runner.ts --task <taskID> --mode reasonix --repeats 1
 //
-// run with Dir set to repoDir (the Reasonix repository root). It does NOT start
-// the command; the caller is responsible for Cmd.Output() / Cmd.Run().
-func buildReasonixCmd(repoDir, taskID string) *exec.Cmd {
-	cmd := exec.Command("npx", "tsx", "benchmarks/tau-bench/runner.ts",
+// run with Dir set to repoDir (the Reasonix repository root). ctx is wired
+// directly so a cancelled/timed-out benchmark loop can abort the subprocess
+// without leaking it. The caller is responsible for Cmd.Output() / Cmd.Run().
+func buildReasonixCmd(ctx context.Context, repoDir, taskID string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "npx", "tsx", "benchmarks/tau-bench/runner.ts",
 		"--task", taskID,
 		"--mode", "reasonix",
 		"--repeats", "1",
@@ -76,15 +77,9 @@ func buildReasonixCmd(repoDir, taskID string) *exec.Cmd {
 // repoDir must point to the root of the Reasonix repository (the directory
 // that contains benchmarks/tau-bench/runner.ts and a valid package.json).
 func RunReasonixArmLive(ctx context.Context, repoDir, taskID string) ([]RunResult, error) {
-	cmd := buildReasonixCmd(repoDir, taskID)
-	cmd.Args = append([]string{cmd.Args[0]}, cmd.Args[1:]...)
+	cmd := buildReasonixCmd(ctx, repoDir, taskID)
 
-	// Attach context so a cancelled/timed-out benchmark loop can abort the
-	// subprocess without leaking it.
-	cmdCtx := exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...)
-	cmdCtx.Dir = repoDir
-
-	out, err := cmdCtx.Output()
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("reasonix runner [task=%s]: %w", taskID, err)
 	}

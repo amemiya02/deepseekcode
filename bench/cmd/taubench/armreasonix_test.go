@@ -1,6 +1,7 @@
 package taubench
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -116,7 +117,7 @@ func TestParseReasonixReport_EmptyResults(t *testing.T) {
 func TestBuildReasonixCmd_Flags(t *testing.T) {
 	repoDir := "/some/reasonix/repo"
 	taskID := "t03_cancel_processing"
-	cmd := buildReasonixCmd(repoDir, taskID)
+	cmd := buildReasonixCmd(context.Background(), repoDir, taskID)
 
 	if cmd.Dir != repoDir {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, repoDir)

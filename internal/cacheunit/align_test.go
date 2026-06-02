@@ -16,3 +16,17 @@ func TestAlignPadding(t *testing.T) {
 		}
 	}
 }
+
+func TestPadText_DeterministicAndBoundaryAligned(t *testing.T) {
+	count := func(s string) int { return len(s) }
+	got := PadText(5, 8, count)
+	if (5+count(got))%8 != 0 {
+		t.Fatalf("padded count %d not a multiple of 8", 5+count(got))
+	}
+	if PadText(5, 8, count) != got {
+		t.Fatal("PadText is not deterministic")
+	}
+	if PadText(5, 0, count) != "" {
+		t.Fatal("unit<=0 must return empty padding")
+	}
+}

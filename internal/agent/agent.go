@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/cacheunit"
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -142,6 +143,14 @@ type Agent struct {
 
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
+
+	// cacheUnit, when > 0, pads the static system prompt so the frozen prefix
+	// ends on a DeepSeek cache-unit boundary (§3.4). The padding is injected at
+	// the EpochComponents build site, BEFORE the epoch is created/hashed, so it
+	// lives inside the frozen, fingerprinted prefix and stays byte-stable across
+	// turns. The value comes from a bench/cmd/cacheprobe measurement; 0 (the
+	// default) disables padding entirely — zero behavior change, no wire bytes.
+	cacheUnit int
 
 	// PromptBuilder, when non-nil, overrides System with the builder's
 	// output at the start of Run. The builder owns the static + dynamic
@@ -905,8 +914,19 @@ func (a *Agent) buildEpochComponents() EpochComponents {
 		a.schemaAdapters = make(map[string]repair.SchemaAdapter)
 	}
 
+	// §3.4: pad the static system so the prefix ends on a DeepSeek cache-unit
+	// boundary. Applied HERE, before the epoch is created/hashed, so the padding
+	// is inside the frozen, fingerprinted prefix and stays byte-stable across
+	// turns. unit comes from a cacheprobe measurement; 0 (default) = disabled, in
+	// which case staticSystem is exactly a.staticSystem() — zero behavior change.
+	staticSystem := a.staticSystem()
+	if a.cacheUnit > 0 {
+		pre := tokenizer.Count(staticSystem)
+		staticSystem += cacheunit.PadText(pre, a.cacheUnit, tokenizer.Count)
+	}
+
 	return EpochComponents{
-		StaticSystem:   a.staticSystem(),
+		StaticSystem:   staticSystem,
 		ToolSpecs:      epochTools,
 		Model:          a.Model,
 		AgentProfileID: a.currentProfileID(),

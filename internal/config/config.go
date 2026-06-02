@@ -32,6 +32,8 @@ type Config struct {
 	Active      ActiveConfig                  `toml:"active"`
 	Providers   map[string]ProviderConfigTOML `toml:"providers"`
 	UI          UIConfig                      `toml:"ui"`
+	Routing     RoutingConfig                 `toml:"routing"`
+	Clarify     ClarifyConfig                 `toml:"clarify"`
 
 	LegacyAPIUsed         bool `toml:"-"`
 	DefaultsModelExplicit bool `toml:"-"`
@@ -103,6 +105,27 @@ type DefaultsConfig struct {
 	// to enable/disable thinking each turn using keyword heuristics.
 	// Default: false (opt-in).
 	AutoReasoning bool `toml:"auto_reasoning"`
+}
+
+// RoutingConfig exposes the per-turn cost-aware router (internal/routing).
+// All fields default to the zero value (off), so omitting the [routing]
+// section preserves today's behavior exactly.
+type RoutingConfig struct {
+	// AutoRoute enables Flash-first routing: mechanical turns stay on the
+	// cheap model + Non-think; reasoning/ambiguity/repeated-repair turns
+	// escalate to EscalationModel at high/max effort. Default false (opt-in).
+	AutoRoute bool `toml:"auto_route"`
+	// EscalationModel is the pro-tier model AutoRoute escalates to. When
+	// AutoRoute is true and this is empty, the wiring layer defaults it to
+	// deepseek-v4-pro so escalation is actually reachable.
+	EscalationModel string `toml:"escalation_model"`
+}
+
+// ClarifyConfig exposes the intent-clarify gate (internal/routing.NeedsClarification).
+type ClarifyConfig struct {
+	// AutoClarify asks one clarifying question on an under-specified prompt
+	// before spending a (possibly pro/max) model turn. Default false (opt-in).
+	AutoClarify bool `toml:"auto_clarify"`
 }
 
 type DuetConfig struct {
@@ -279,6 +302,16 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	// overlayHasKey dance that Thinking/VimKeybindings require (those
 	// default true and need "false means explicit disable" logic).
 	base.Defaults.AutoReasoning = ov.Defaults.AutoReasoning || base.Defaults.AutoReasoning
+
+	// Routing/Clarify: opt-in bools use OR-merge (either source enabling is
+	// sufficient); EscalationModel is a non-empty-wins string. Mirrors the
+	// AutoReasoning handling — these default false, so no "explicit false"
+	// dance is needed.
+	base.Routing.AutoRoute = ov.Routing.AutoRoute || base.Routing.AutoRoute
+	if ov.Routing.EscalationModel != "" {
+		base.Routing.EscalationModel = ov.Routing.EscalationModel
+	}
+	base.Clarify.AutoClarify = ov.Clarify.AutoClarify || base.Clarify.AutoClarify
 
 	if ov.Defaults.ReasoningEffort != "" {
 		base.Defaults.ReasoningEffort = ov.Defaults.ReasoningEffort

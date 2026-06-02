@@ -29,5 +29,26 @@ Primary: cost-per-solved-task ($). Secondary: pass-rate. n small (3-5 tasks x
 repeats) -> DIRECTIONAL only; state this in every report.
 
 ## Tasks (frozen here before running)
-- [ ] hardbug-<name1> — source URL, bug class
-- [ ] ... (3-5 total)
+
+### Worked example (committed; format reference only)
+- [x] hardbug-race-counter — synthetic worked-example, bug class: concurrency
+      data race on a map. NOT a sourced public bug; exists only to make the
+      fixture format (`go.mod` + `<pkg>.go` + `<pkg>_test.go` + prompt + task
+      yaml) unambiguous. Reproduces under `go test -race ./...`. Do NOT count
+      this toward the 3-5 real tasks below.
+
+### TODO — HUMAN-SOURCED real public-bug fixtures (REQUIRED before the experiment runs)
+Honesty gate: these MUST be documented, real bugs from public Go projects
+(issue / CVE / commit), each reproduced by a failing test. They MUST be sourced
+by a human and recorded with a real source URL here AND in the task yaml
+`# source:` comment. They MUST NOT be invented, paraphrased from memory, or
+hand-tuned beyond the inclusion rule. Until this list is filled with real URLs,
+the routing experiment (Tasks 1.3 / 1.4) must NOT run.
+
+- [ ] hardbug-<name1> — source URL: <real issue/CVE/commit URL>; bug class: <class>
+- [ ] hardbug-<name2> — source URL: <real issue/CVE/commit URL>; bug class: <class>
+- [ ] hardbug-<name3> — source URL: <real issue/CVE/commit URL>; bug class: <class>
+- [ ] (optional) hardbug-<name4> — source URL: <real issue/CVE/commit URL>; bug class: <class>
+      (2-4 total real fixtures; bug classes per the sourcing rule above:
+      concurrency races, parser off-by-one, nil-deref edge, wrong error-path
+      logic, multi-file cross-package refactor.)

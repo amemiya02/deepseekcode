@@ -1,0 +1,9 @@
+id: hardbug-race-counter
+# source: synthetic worked-example (data race). Replace with sourced public bugs.
+fixture_repo: fixtures/hardbug-race-counter
+commit: "HEAD"
+prompt_file: prompts/hardbug-race-counter.md
+timeout_seconds: 600
+success:
+  tests:
+    - go test -race ./...

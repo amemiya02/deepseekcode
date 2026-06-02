@@ -12,7 +12,7 @@ func TestStablePrefixFingerprintConstantAcrossTurns(t *testing.T) {
 		t.Fatal("stable prefix fingerprint is not constant")
 	}
 	// Sanity-check: the stable fingerprint must differ from the naive prefix.
-	if fp1 == naivePrefix(1).Fingerprint() {
+	if fp1 == naivePrefix(1, "nonce1").Fingerprint() {
 		t.Fatal("stable prefix fingerprint must differ from naive prefix fingerprint")
 	}
 }
@@ -20,8 +20,26 @@ func TestStablePrefixFingerprintConstantAcrossTurns(t *testing.T) {
 func TestNaivePrefixFingerprintChangesEachTurn(t *testing.T) {
 	// The cache-naive arm mutates the prefix each turn (the generic-agent
 	// failure mode), so consecutive turns must differ -> cache miss.
-	if naivePrefix(1).Fingerprint() == naivePrefix(2).Fingerprint() {
+	if naivePrefix(1, "nonce1").Fingerprint() == naivePrefix(2, "nonce1").Fingerprint() {
 		t.Fatal("naive prefix fingerprint did not change between turns")
+	}
+}
+
+// TestNaivePrefixDiffersAcrossNonces verifies that the same turn with
+// different nonces produces different bytes — each run is a genuine cache miss.
+func TestNaivePrefixDiffersAcrossNonces(t *testing.T) {
+	if naivePrefix(1, "nonceA").Fingerprint() == naivePrefix(1, "nonceB").Fingerprint() {
+		t.Fatal("naivePrefix(1,nonceA) must differ from naivePrefix(1,nonceB)")
+	}
+}
+
+// TestStablePrefixHasNoNonce verifies stablePrefix() is byte-identical across
+// calls (no nonce injected) — cross-session warmth is a feature.
+func TestStablePrefixHasNoNonce(t *testing.T) {
+	fp1 := stablePrefix().Fingerprint()
+	fp2 := stablePrefix().Fingerprint()
+	if fp1 != fp2 {
+		t.Fatal("stablePrefix must be byte-identical across calls (no nonce)")
 	}
 }
 

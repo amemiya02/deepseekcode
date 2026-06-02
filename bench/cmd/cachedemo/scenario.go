@@ -39,8 +39,11 @@ func stablePrefix() llm.StaticPrefix {
 // driftPrefix models Reasonix's append-only tool growth: the prefix is
 // byte-identical to stablePrefix() while turn < driftAt; from driftAt onward a
 // "notify" tool is appended, changing the serialized tool bytes and busting the
-// DeepSeek prompt cache for every subsequent turn.
-func driftPrefix(turn, driftAt int) llm.StaticPrefix {
+// DeepSeek prompt cache for every subsequent turn. The nonce is embedded in the
+// appended tool's description so each run produces a never-before-seen post-drift
+// prefix (genuine cache miss), while pre-drift turns remain nonce-free and
+// byte-identical to stablePrefix().
+func driftPrefix(turn, driftAt int, nonce string) llm.StaticPrefix {
 	if turn < driftAt {
 		return stablePrefix()
 	}
@@ -48,20 +51,22 @@ func driftPrefix(turn, driftAt int) llm.StaticPrefix {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "notify",
-			Description: "Send a notification",
+			Description: fmt.Sprintf("Send a notification [run:%s]", nonce),
 			Parameters:  []byte(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}`),
 		},
 	})
 	return llm.StaticPrefix{System: baseSystemPrompt, Tools: tools}
 }
 
-// naivePrefix mutates the system prompt per turn (a volatile counter), so the
-// prefix bytes — and the DeepSeek cache key — change every turn. This is the
-// failure mode most generic agents fall into (timestamps, turn counters,
-// reordered tools).
-func naivePrefix(turn int) llm.StaticPrefix {
+// naivePrefix mutates the system prompt per turn and per run (a volatile
+// counter + per-run nonce), so the prefix bytes — and the DeepSeek cache key —
+// change every turn AND every run. This is the failure mode most generic agents
+// fall into (timestamps, turn counters, reordered tools). The nonce ensures
+// that even across re-runs the naive arm always produces genuine cache misses,
+// keeping the naive-vs-stable contrast intact.
+func naivePrefix(turn int, nonce string) llm.StaticPrefix {
 	return llm.StaticPrefix{
-		System: fmt.Sprintf("Session turn %d.\n%s", turn, baseSystemPrompt),
+		System: fmt.Sprintf("Session %s turn %d.\n%s", nonce, turn, baseSystemPrompt),
 		Tools:  fixedTools(),
 	}
 }

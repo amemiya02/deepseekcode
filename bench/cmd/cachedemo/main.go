@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +34,19 @@ func main() {
 	}
 }
 
+// runNonce generates a short random hex string to uniquely identify this
+// process run. It is injected into cache-busting arms (naive, drift) so their
+// prefixes are never-before-seen on every execution, preventing cross-run
+// cache warmth from collapsing the naive-vs-stable contrast.
+func runNonce() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: non-crypto uniqueness is still better than nothing.
+		return fmt.Sprintf("%d", os.Getpid())
+	}
+	return hex.EncodeToString(b)
+}
+
 func run(model string, turns int, live bool, baseURL, out, fixture string, driftAt int) error {
 	script := demoTurns(turns)
 
@@ -39,6 +54,10 @@ func run(model string, turns int, live bool, baseURL, out, fixture string, drift
 	if driftAt == 0 {
 		driftAt = turns / 2
 	}
+
+	// One nonce per process run: injected into naive and drift (busting) arms
+	// so each run's prefixes are never-before-seen. The stable arm is nonce-free.
+	nonce := runNonce()
 
 	var naiveUsage, stableUsage, driftUsage []llm.Usage
 	if live {
@@ -53,9 +72,9 @@ func run(model string, turns int, live bool, baseURL, out, fixture string, drift
 		stableReqs := make([]llm.Request, len(script))
 		driftReqs := make([]llm.Request, len(script))
 		for i, u := range script {
-			naiveReqs[i] = buildRequest(model, naivePrefix(i+1), u)
+			naiveReqs[i] = buildRequest(model, naivePrefix(i+1, nonce), u)
 			stableReqs[i] = buildRequest(model, stablePrefix(), u)
-			driftReqs[i] = buildRequest(model, driftPrefix(i+1, driftAt), u)
+			driftReqs[i] = buildRequest(model, driftPrefix(i+1, driftAt, nonce), u)
 		}
 		var err error
 		if naiveUsage, err = runArmLive(ctx, c, naiveReqs); err != nil {

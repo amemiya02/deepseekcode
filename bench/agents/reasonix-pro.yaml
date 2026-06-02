@@ -1,0 +1,8 @@
+id: reasonix-pro
+command: reasonix
+args: [run, -m, deepseek-v4-pro]
+input_mode: prompt_arg
+env: { DEEPSEEK_API_KEY: required }
+trace_path: bench/traces/reasonix-pro/
+usage_parser: reasonix
+enforce_cache_gate: false

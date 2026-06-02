@@ -144,7 +144,13 @@ func runOne(parent context.Context, arm string, task TaskDef, client *llm.Client
 		}
 		return []RunResult{rr}
 	case strings.HasPrefix(arm, "reasonix"):
-		rrs, runErr := RunReasonixArmLive(rctx, reasonixDir, task.ID)
+		// Pin the model so the harness comparison holds the tier constant:
+		// reasonix-pro -> pro, everything else (reasonix-flash) -> flash.
+		model := "deepseek-v4-flash"
+		if strings.Contains(arm, "pro") {
+			model = "deepseek-v4-pro"
+		}
+		rrs, runErr := RunReasonixArmLive(rctx, reasonixDir, task.ID, model)
 		if runErr != nil {
 			return []RunResult{{TaskID: task.ID, Mode: arm, ErrorMessage: runErr.Error()}}
 		}

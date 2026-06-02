@@ -1,15 +1,20 @@
 // Package taubench — the Reasonix arm.
 //
-// RunReasonixArm shells out to Reasonix's own tau-bench runner:
+// RunReasonixArmLive shells out to Reasonix's own tau-bench runner:
 //
-//	npx tsx benchmarks/tau-bench/runner.ts --task <id> --mode reasonix --repeats 1
+//	npx tsx benchmarks/tau-bench/runner.ts --task <id> --mode reasonix \
+//	    --model <model> --repeats 1 --out <tmpfile>
 //
-// in the Reasonix repository directory, captures stdout, and parses the
-// BenchReport JSON into a []RunResult. The design is faithful to plan 4 §7:
-// "shell to their runner, parse JSON → RunResult."
+// in the Reasonix repository directory. Reasonix writes its BenchReport to the
+// FILE named by --out (printing only "wrote <path>" to stdout), so we read that
+// file and parse it — NOT stdout. The model is pinned per arm so the harness
+// comparison holds the underlying model constant (reasonix-flash ->
+// deepseek-v4-flash, matching dsc's flash tier; reasonix-pro -> deepseek-v4-pro)
+// instead of using Reasonix's default (deepseek-chat), which would confound a
+// harness comparison with a model difference.
 //
-// The JSON parser (parseReasonixReport / buildReasonixCmd) is the only logic
-// tested in the unit suite; live exec is gated behind RunReasonixArmLive, which
+// The JSON parser (parseReasonixReport) and the command builder
+// (buildReasonixCmd) are the only logic exercised by the unit suite; live exec
 // is reached solely from the -live CLI flow.
 package main
 
@@ -17,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -52,41 +58,65 @@ func parseReasonixReport(data []byte) ([]RunResult, error) {
 	return report.Results, nil
 }
 
-// buildReasonixCmd constructs the exec.Cmd that shells to Reasonix's runner.
-// The command is:
+// buildReasonixCmd constructs the exec.Cmd that shells to Reasonix's runner:
 //
-//	npx tsx benchmarks/tau-bench/runner.ts --task <taskID> --mode reasonix --repeats 1
+//	npx tsx benchmarks/tau-bench/runner.ts --task <taskID> --mode reasonix \
+//	    --model <model> --repeats 1 --out <outPath>
 //
 // run with Dir set to repoDir (the Reasonix repository root). ctx is wired
 // directly so a cancelled/timed-out benchmark loop can abort the subprocess
-// without leaking it. The caller is responsible for Cmd.Output() / Cmd.Run().
-func buildReasonixCmd(ctx context.Context, repoDir, taskID string) *exec.Cmd {
+// without leaking it. The caller runs the Cmd and reads outPath.
+func buildReasonixCmd(ctx context.Context, repoDir, taskID, model, outPath string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "npx", "tsx", "benchmarks/tau-bench/runner.ts",
 		"--task", taskID,
 		"--mode", "reasonix",
+		"--model", model,
 		"--repeats", "1",
+		"--out", outPath,
 	)
 	cmd.Dir = repoDir
 	return cmd
 }
 
-// RunReasonixArmLive runs a single tau-bench task through Reasonix's own
-// runner and returns the parsed results. It is the only function that actually
+// RunReasonixArmLive runs a single tau-bench task through Reasonix's own runner
+// on the given model and returns the parsed results. It directs the report to a
+// temp file via --out and reads THAT file: Reasonix prints only "wrote <path>"
+// to stdout, so parsing stdout yields no report. It is the only function that
 // executes the subprocess; unit tests and `go build` never call it.
 //
 // repoDir must point to the root of the Reasonix repository (the directory
-// that contains benchmarks/tau-bench/runner.ts and a valid package.json).
-func RunReasonixArmLive(ctx context.Context, repoDir, taskID string) ([]RunResult, error) {
-	cmd := buildReasonixCmd(ctx, repoDir, taskID)
-
-	out, err := cmd.Output()
+// containing benchmarks/tau-bench/runner.ts and a valid package.json).
+func RunReasonixArmLive(ctx context.Context, repoDir, taskID, model string) ([]RunResult, error) {
+	f, err := os.CreateTemp("", "reasonix-taubench-*.json")
 	if err != nil {
-		return nil, fmt.Errorf("reasonix runner [task=%s]: %w", taskID, err)
+		return nil, fmt.Errorf("reasonix runner [task=%s]: temp file: %w", taskID, err)
+	}
+	outPath := f.Name()
+	_ = f.Close()
+	defer func() { _ = os.Remove(outPath) }()
+
+	cmd := buildReasonixCmd(ctx, repoDir, taskID, model, outPath)
+	// CombinedOutput captures stderr too, so a runner crash surfaces with its
+	// diagnostics rather than an opaque exit-status error.
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		return nil, fmt.Errorf("reasonix runner [task=%s]: %w\n%s", taskID, runErr, truncBytes(out, 600))
 	}
 
-	results, err := parseReasonixReport(out)
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, fmt.Errorf("reasonix runner [task=%s]: read report %s: %w", taskID, outPath, err)
+	}
+	results, err := parseReasonixReport(data)
 	if err != nil {
 		return nil, fmt.Errorf("reasonix runner [task=%s] parse: %w", taskID, err)
 	}
 	return results, nil
+}
+
+// truncBytes renders up to n bytes of b for error context.
+func truncBytes(b []byte, n int) string {
+	if len(b) > n {
+		return string(b[:n]) + "…"
+	}
+	return string(b)
 }

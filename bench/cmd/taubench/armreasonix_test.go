@@ -117,7 +117,9 @@ func TestParseReasonixReport_EmptyResults(t *testing.T) {
 func TestBuildReasonixCmd_Flags(t *testing.T) {
 	repoDir := "/some/reasonix/repo"
 	taskID := "t03_cancel_processing"
-	cmd := buildReasonixCmd(context.Background(), repoDir, taskID)
+	model := "deepseek-v4-flash"
+	outPath := "/tmp/reasonix-out.json"
+	cmd := buildReasonixCmd(context.Background(), repoDir, taskID, model, outPath)
 
 	if cmd.Dir != repoDir {
 		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, repoDir)
@@ -125,7 +127,7 @@ func TestBuildReasonixCmd_Flags(t *testing.T) {
 	args := cmd.Args
 	// args[0] is the executable path; the rest are the arguments.
 	wantArgs := []string{"npx", "tsx", "benchmarks/tau-bench/runner.ts",
-		"--task", taskID, "--mode", "reasonix", "--repeats", "1"}
+		"--task", taskID, "--mode", "reasonix", "--model", model, "--repeats", "1", "--out", outPath}
 	if len(args) != len(wantArgs) {
 		t.Fatalf("len(args) = %d, want %d; got %v", len(args), len(wantArgs), args)
 	}

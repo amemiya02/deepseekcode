@@ -607,6 +607,28 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 	}
 
+	// Cross-session cache-warmth notice (best-effort: any error must not
+	// break startup). Load the prior sidecar, compute whether the prefix is
+	// likely still warm, append a notice when it is, then save the current
+	// fingerprint so the next session can check against it.
+	func() {
+		prior := loadWarmth(cwd)
+		curFP := a.StaticPrefixFingerprint()
+		if curFP != "" {
+			var sinceLastUse time.Duration
+			if prior.LastUsedUnix > 0 {
+				sinceLastUse = time.Since(time.Unix(prior.LastUsedUnix, 0))
+			}
+			if msg := agent.WarmthNotice(
+				agent.IsLikelyWarm(prior.Fingerprint, curFP, sinceLastUse, 24*time.Hour),
+				sinceLastUse,
+			); msg != "" {
+				notices = append(notices, msg)
+			}
+			_ = saveWarmth(cwd, curFP, time.Now().Unix())
+		}
+	}()
+
 	notices = append(mcpNotices, notices...)
 	home, _ := os.UserHomeDir()
 	customCmds, _ := commands.Load(cwd, home)

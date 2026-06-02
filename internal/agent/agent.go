@@ -927,13 +927,15 @@ func (a *Agent) SwitchProfile(p agents.AgentProfile) *PrefixEpoch {
 func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.refreshGitContext(ctx)
 
+	lastUserText := a.lastUserText()
 	thinking := a.Thinking
 	if a.AutoReasoning {
-		thinking = llm.SelectThinking(a.IsSubagent, a.lastUserText(), a.Thinking)
+		thinking = llm.SelectThinking(a.IsSubagent, lastUserText, a.Thinking)
 	}
+	turnModel, _, _ := a.routeTurn(lastUserText, 0)
 
 	req := llm.Request{
-		Model:           a.Model,
+		Model:           turnModel,
 		Messages:        a.fullMessages(),
 		Tools:           a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
 		Thinking:        llm.ThinkingEnabled(thinking),

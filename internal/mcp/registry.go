@@ -49,6 +49,12 @@ type Registry struct {
 	done          chan struct{}
 	closeDoneOnce sync.Once
 
+	// ctx is cancelled by Shutdown so in-flight dial attempts in
+	// attemptReconnect abort promptly instead of blocking until their
+	// own timeout expires.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// reconnectBackoff is the negative-result cooldown applied after a
 	// failed reconnect; a flapping server must not re-dial within it.
 	reconnectBackoff time.Duration
@@ -66,10 +72,13 @@ type Registry struct {
 
 // NewRegistry returns an empty Registry.
 func NewRegistry() *Registry {
+	ctx, cancel := context.WithCancel(context.Background())
 	r := &Registry{
 		servers:          make(map[string]*ServerProxy),
 		timeouts:         make(map[string]int),
 		done:             make(chan struct{}),
+		ctx:              ctx,
+		cancel:           cancel,
 		reconnectBackoff: 30 * time.Second,
 		reconnectTimeout: 10 * time.Second,
 	}
@@ -280,7 +289,7 @@ func (r *Registry) attemptReconnect(name string) {
 
 	// Dial without holding r.mu so the spawn/handshake can't block the
 	// lock and stall the rest of the registry.
-	dialCtx, cancel := context.WithTimeout(context.Background(), r.reconnectTimeout)
+	dialCtx, cancel := context.WithTimeout(r.ctx, r.reconnectTimeout)
 	defer cancel()
 
 	var res dialResult
@@ -356,7 +365,7 @@ func (r *Registry) attemptReconnect(name string) {
 // Double Shutdown is safe: closeDoneOnce guards close(r.done).
 func (r *Registry) Shutdown() {
 	// Signal watchers to exit. Guarded so a double Shutdown is safe.
-	r.closeDoneOnce.Do(func() { close(r.done) })
+	r.closeDoneOnce.Do(func() { close(r.done); r.cancel() })
 
 	r.mu.RLock()
 	proxies := make([]*ServerProxy, 0, len(r.servers))

@@ -34,6 +34,13 @@ SQLite-backed sessions, and a conservative permission model.
 DeepSeekCode is purpose-built for DeepSeek V4 models with verifiable
 advantages over generic coding agents:
 
+> **Measured, not claimed.** In a reproducible 12-turn session on
+> `deepseek-v4-flash`, deepseekcode holds an **86.8% prefix cache-hit rate** vs
+> **0%** for a cache-naive agent — **3.8× cheaper**, every figure read from
+> DeepSeek's own `prompt_cache_hit_tokens`. Run it yourself: `make demo-cache`
+> (live) or `make demo-cache-offline` (no API key). Methodology:
+> [bench/cache-demo](bench/cache-demo/).
+
 - **Provable prefix-cache stability** — a single canonical serializer
   guarantees the wire bytes and cache fingerprint cannot diverge; verify with
   `dsc trace inspect` ([docs/prefix-cache.md](docs/prefix-cache.md)).

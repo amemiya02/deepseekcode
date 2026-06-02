@@ -21,6 +21,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/repair"
+	"github.com/amemiya02/deepseekcode/internal/routing"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/skills"
@@ -112,6 +113,19 @@ type Agent struct {
 	// level (low, medium, high, max). Carried into every main-loop
 	// request when thinking is enabled. Empty means omit from wire.
 	ReasoningEffort llm.ReasoningEffort
+
+	// AutoRoute enables the pre-turn cost-aware router (internal/routing):
+	// per-turn model + effort chosen from the user message and repair signal.
+	// It never moves the Prefix Fingerprint (model/effort are not in the static
+	// prefix). Requires EscalationModel set for the pro tier to be reachable.
+	AutoRoute bool
+
+	// AutoClarify gates vague prompts through internal/routing.NeedsClarification
+	// before spending a (possibly pro/max) turn.
+	AutoClarify bool
+
+	// lastRoute carries routing stickiness across turns.
+	lastRoute routing.Decision
 
 	// UserID is an optional DeepSeek field for abuse monitoring and
 	// enterprise attribution. Empty means omitted from wire.
@@ -432,6 +446,23 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		if a.Persister != nil {
 			_, _ = a.Persister.AppendUserMessage(ctx, userBlocks)
 		}
+	}
+
+	// Intent-clarify gate (off by default via AutoClarify): if the fresh prompt
+	// is too vague to act on, ask one clarifying question and yield the turn
+	// rather than spending a (possibly pro/max) model call on a guess. Pre-loop,
+	// so no model request is issued. shouldClarify returns false unless
+	// AutoClarify is enabled, so default behavior is unchanged.
+	if userPrompt != "" && a.shouldClarify(userPrompt) {
+		_, questions := routing.NeedsClarification(userPrompt)
+		q := "Before I start: " + questions[0]
+		blocks := []llm.ContentBlock{llm.TextBlock{Text: q}}
+		a.bus.Publish(EventTextDelta{Text: q})
+		a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: blocks})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendAssistant(ctx, blocks, a.Model, llm.Usage{})
+		}
+		return StopModelDone, nil
 	}
 
 	// overflowRetried gates the context-overflow recovery to a single attempt
@@ -913,17 +944,15 @@ func (a *Agent) SwitchProfile(p agents.AgentProfile) *PrefixEpoch {
 func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.refreshGitContext(ctx)
 
-	thinking := a.Thinking
-	if a.AutoReasoning {
-		thinking = llm.SelectThinking(a.IsSubagent, a.lastUserText(), a.Thinking)
-	}
+	lastUserText := a.lastUserText()
+	turnModel, turnThinking, turnEffort := a.routeTurn(lastUserText, 0)
 
 	req := llm.Request{
-		Model:           a.Model,
+		Model:           turnModel,
 		Messages:        a.fullMessages(),
 		Tools:           a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
-		Thinking:        llm.ThinkingEnabled(thinking),
-		ReasoningEffort: a.effectiveReasoningEffort(thinking),
+		Thinking:        llm.ThinkingEnabled(turnThinking),
+		ReasoningEffort: turnEffort,
 		UserID:          a.UserID,
 		Temperature:     a.Temperature,
 		TopP:            a.TopP,
@@ -1928,6 +1957,39 @@ func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
 		return a.ReasoningEffort
 	}
 	return llm.ReasoningEffortMax
+}
+
+// routeTurn returns the per-turn (model, thinking, effort) to use. When
+// AutoRoute is off (or no escalation target) it returns the loop defaults
+// unchanged. It updates a.lastRoute for stickiness. Model/effort never affect
+// the Static Prefix, so this cannot cause prefix drift.
+func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bool, llm.ReasoningEffort) {
+	if !a.AutoRoute || a.EscalationModel == "" {
+		thinking := a.Thinking
+		if a.AutoReasoning {
+			thinking = llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
+		}
+		return a.Model, thinking, a.effectiveReasoningEffort(thinking)
+	}
+	d := routing.Classify(
+		routing.Signals{UserText: userText, RepairErrorsLastTurn: repairErrorsLastTurn},
+		routing.Config{FlashModel: a.Model, ProModel: a.EscalationModel, StickyTurns: 2},
+		a.lastRoute,
+	)
+	a.lastRoute = d
+	effort, _ := llm.ParseReasoningEffort(d.Effort) // "" stays invalid → field omitted
+	return d.Model, d.Thinking, effort
+}
+
+// shouldClarify reports whether the agent should ask a clarifying question
+// before acting on userText. Returns false when AutoClarify is disabled
+// (the default) so legacy behavior is unchanged.
+func (a *Agent) shouldClarify(userText string) bool {
+	if !a.AutoClarify {
+		return false
+	}
+	need, _ := routing.NeedsClarification(userText)
+	return need
 }
 
 // publishRepairEvent publishes an EventRepair and persists a repair receipt

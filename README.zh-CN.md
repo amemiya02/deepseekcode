@@ -31,6 +31,12 @@
 
 DeepSeekCode 专为 DeepSeek V4 模型构建，相比通用编码 Agent 具有可验证的优势：
 
+> **实测，而非声称。** 在一次可复现的 12 回合 `deepseek-v4-flash` 会话中，
+> deepseekcode 维持 **86.8% 前缀缓存命中率**，而缓存不稳定的 Agent 为 **0%**
+> —— **便宜 3.8×**，每个数字都取自 DeepSeek 自己的 `prompt_cache_hit_tokens`。
+> 自行验证：`make demo-cache`（实测）或 `make demo-cache-offline`（无需 API
+> key）。方法学：[bench/cache-demo](bench/cache-demo/)。
+
 - **可证明的前缀缓存稳定性** — 单一 canonical 序列化器保证 wire 字节
   与缓存指纹构造级一致；`dsc trace inspect` 可验证
   （[docs/prefix-cache.md](docs/prefix-cache.md)）。

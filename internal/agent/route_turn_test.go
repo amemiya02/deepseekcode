@@ -24,7 +24,7 @@ func TestRouteTurnEscalatesHardPrompt(t *testing.T) {
 }
 
 func TestRouteTurnDefaultKeepsConfiguredEffort(t *testing.T) {
-	a := &Agent{Model: "deepseek-v4-flash", ReasoningEffort: llm.ReasoningEffortHigh}
+	a := &Agent{Model: "deepseek-v4-flash", Thinking: true, ReasoningEffort: llm.ReasoningEffortHigh}
 	model, thinking, effort := a.routeTurn("read a file", 0)
 	if model != "deepseek-v4-flash" || !thinking || effort != llm.ReasoningEffortHigh {
 		t.Fatalf("default route changed legacy behavior: %q %v %q", model, thinking, effort)

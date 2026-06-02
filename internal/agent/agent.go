@@ -928,18 +928,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.refreshGitContext(ctx)
 
 	lastUserText := a.lastUserText()
-	thinking := a.Thinking
-	if a.AutoReasoning {
-		thinking = llm.SelectThinking(a.IsSubagent, lastUserText, a.Thinking)
-	}
-	turnModel, _, _ := a.routeTurn(lastUserText, 0)
+	turnModel, turnThinking, turnEffort := a.routeTurn(lastUserText, 0)
 
 	req := llm.Request{
 		Model:           turnModel,
 		Messages:        a.fullMessages(),
 		Tools:           a.Tools.AsLLMToolsFiltered(a.ActiveTiers...),
-		Thinking:        llm.ThinkingEnabled(thinking),
-		ReasoningEffort: a.effectiveReasoningEffort(thinking),
+		Thinking:        llm.ThinkingEnabled(turnThinking),
+		ReasoningEffort: turnEffort,
 		UserID:          a.UserID,
 		Temperature:     a.Temperature,
 		TopP:            a.TopP,
@@ -1952,7 +1948,10 @@ func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
 // the Static Prefix, so this cannot cause prefix drift.
 func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bool, llm.ReasoningEffort) {
 	if !a.AutoRoute || a.EscalationModel == "" {
-		thinking := a.ReasoningEffort.Valid() || a.AutoReasoning
+		thinking := a.Thinking
+		if a.AutoReasoning {
+			thinking = llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
+		}
 		return a.Model, thinking, a.effectiveReasoningEffort(thinking)
 	}
 	d := routing.Classify(

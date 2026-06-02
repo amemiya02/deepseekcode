@@ -56,10 +56,25 @@ func renderComparison(arms []ArmResult) string {
 		fmt.Fprintf(&b, "%-8s %6d %10d %10d %7.1f%% %10.5f %10.5f\n",
 			a.Name, a.Turns, a.HitTokens, a.MissTokens, a.HitRate*100, a.CostCNY, a.SavingsCNY)
 	}
-	if len(arms) == 2 && arms[1].CostCNY > 0 {
+	// Two-arm headline: naive vs stable ratio.
+	if len(arms) >= 2 && arms[1].CostCNY > 0 {
 		ratio := arms[0].CostCNY / arms[1].CostCNY
 		fmt.Fprintf(&b, "\ndeepseekcode (%s) is %.1f× cheaper than the cache-naive baseline (%s) on %s.\n",
 			arms[1].Name, ratio, arms[0].Name, arms[1].Model)
+	}
+	// Drift arm headline: extra cost paid due to one mid-session tool addition.
+	var stableArm, driftArm *ArmResult
+	for i := range arms {
+		switch arms[i].Name {
+		case "stable":
+			stableArm = &arms[i]
+		case "drift":
+			driftArm = &arms[i]
+		}
+	}
+	if stableArm != nil && driftArm != nil {
+		extra := driftArm.CostCNY - stableArm.CostCNY
+		fmt.Fprintf(&b, "drift arm paid ¥%.5f extra vs stable — stems from ONE mid-session tool addition busting the prefix cache.\n", extra)
 	}
 	return b.String()
 }

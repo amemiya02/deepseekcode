@@ -36,6 +36,25 @@ func stablePrefix() llm.StaticPrefix {
 	return llm.StaticPrefix{System: baseSystemPrompt, Tools: fixedTools()}
 }
 
+// driftPrefix models Reasonix's append-only tool growth: the prefix is
+// byte-identical to stablePrefix() while turn < driftAt; from driftAt onward a
+// "notify" tool is appended, changing the serialized tool bytes and busting the
+// DeepSeek prompt cache for every subsequent turn.
+func driftPrefix(turn, driftAt int) llm.StaticPrefix {
+	if turn < driftAt {
+		return stablePrefix()
+	}
+	tools := append(fixedTools(), llm.Tool{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "notify",
+			Description: "Send a notification",
+			Parameters:  []byte(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}`),
+		},
+	})
+	return llm.StaticPrefix{System: baseSystemPrompt, Tools: tools}
+}
+
 // naivePrefix mutates the system prompt per turn (a volatile counter), so the
 // prefix bytes — and the DeepSeek cache key — change every turn. This is the
 // failure mode most generic agents fall into (timestamps, turn counters,

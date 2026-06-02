@@ -22,19 +22,25 @@ func main() {
 		baseURL = flag.String("base-url", "https://api.deepseek.com", "DeepSeek base URL")
 		out     = flag.String("out", "bench/cache-demo/results.json", "results JSON path")
 		fixture = flag.String("fixture", "bench/cache-demo/results.sample.json", "offline usage fixture")
+		driftAt = flag.Int("drift-at", 0, "turn at which the drift arm appends a tool (0 = turns/2)")
 	)
 	flag.Parse()
 
-	if err := run(*model, *turns, *live, *baseURL, *out, *fixture); err != nil {
+	if err := run(*model, *turns, *live, *baseURL, *out, *fixture, *driftAt); err != nil {
 		fmt.Fprintln(os.Stderr, "cachedemo:", err)
 		os.Exit(1)
 	}
 }
 
-func run(model string, turns int, live bool, baseURL, out, fixture string) error {
+func run(model string, turns int, live bool, baseURL, out, fixture string, driftAt int) error {
 	script := demoTurns(turns)
 
-	var naiveUsage, stableUsage []llm.Usage
+	// Resolve driftAt: 0 means turns/2.
+	if driftAt == 0 {
+		driftAt = turns / 2
+	}
+
+	var naiveUsage, stableUsage, driftUsage []llm.Usage
 	if live {
 		key := os.Getenv("DEEPSEEK_API_KEY")
 		if key == "" {
@@ -45,9 +51,11 @@ func run(model string, turns int, live bool, baseURL, out, fixture string) error
 
 		naiveReqs := make([]llm.Request, len(script))
 		stableReqs := make([]llm.Request, len(script))
+		driftReqs := make([]llm.Request, len(script))
 		for i, u := range script {
 			naiveReqs[i] = buildRequest(model, naivePrefix(i+1), u)
 			stableReqs[i] = buildRequest(model, stablePrefix(), u)
+			driftReqs[i] = buildRequest(model, driftPrefix(i+1, driftAt), u)
 		}
 		var err error
 		if naiveUsage, err = runArmLive(ctx, c, naiveReqs); err != nil {
@@ -56,23 +64,38 @@ func run(model string, turns int, live bool, baseURL, out, fixture string) error
 		if stableUsage, err = runArmLive(ctx, c, stableReqs); err != nil {
 			return fmt.Errorf("stable arm: %w", err)
 		}
+		if driftUsage, err = runArmLive(ctx, c, driftReqs); err != nil {
+			return fmt.Errorf("drift arm: %w", err)
+		}
 	} else {
 		// Offline: replay the committed sample so the demo runs without a key.
 		// The sample stores the naive turns first, then the stable turns.
+		// A third drift arm is optional; skip gracefully if the fixture has only 2 arms.
 		all, err := loadUsageFixture(fixture)
 		if err != nil {
 			return fmt.Errorf("offline fixture (%s): %w", fixture, err)
 		}
-		if len(all)%2 != 0 {
-			return fmt.Errorf("fixture has odd entry count %d", len(all))
+		if len(all)%2 != 0 && len(all)%3 != 0 {
+			return fmt.Errorf("fixture has entry count %d (expected multiple of 2 or 3)", len(all))
 		}
-		half := len(all) / 2
-		naiveUsage, stableUsage = all[:half], all[half:]
+		if len(all)%3 == 0 && len(all)/3*3 == len(all) && len(all) >= 3 {
+			third := len(all) / 3
+			naiveUsage = all[:third]
+			stableUsage = all[third : 2*third]
+			driftUsage = all[2*third:]
+		} else {
+			half := len(all) / 2
+			naiveUsage = all[:half]
+			stableUsage = all[half:]
+		}
 	}
 
 	arms := []ArmResult{
 		aggregate("naive", model, naiveUsage),
 		aggregate("stable", model, stableUsage),
+	}
+	if len(driftUsage) > 0 {
+		arms = append(arms, aggregate("drift", model, driftUsage))
 	}
 	fmt.Print(renderComparison(arms))
 	if err := writeJSON(out, arms); err != nil {

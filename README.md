@@ -19,9 +19,10 @@ SQLite-backed sessions, and a conservative permission model.
   both the wire bytes and the cache fingerprint; they cannot diverge by
   construction, and `dsc trace inspect` shows `prefixes==1` to prove a stable
   run ([docs/prefix-cache.md](docs/prefix-cache.md)).
-- **Real multi-model routing** -- the Duet pro-validator fires on destructive
-  tool calls and `<<<NEEDS_PRO>>>` / error escalation is wired into the agent
-  loop, not just documented ([docs/duet.md](docs/duet.md)).
+- **Real, signal-driven Flash→Pro routing** -- opt-in via `--auto-route`
+  (escalates on ambiguity / repeated repair), not just a prompt instruction;
+  always-on Duet pro-validator fires on destructive tool calls
+  ([docs/duet.md](docs/duet.md)).
 - **Real OS sandbox** -- sandbox-exec (macOS) / Landlock (Linux) with a real
   PTY, not just path containment
   ([docs/SANDBOX.md](docs/SANDBOX.md)).
@@ -35,8 +36,8 @@ DeepSeekCode is purpose-built for DeepSeek V4 models with verifiable
 advantages over generic coding agents:
 
 > **Measured, not claimed.** In a reproducible 12-turn session on
-> `deepseek-v4-flash`, deepseekcode holds an **86.8% prefix cache-hit rate** vs
-> **0%** for a cache-naive agent — **3.8× cheaper**, every figure read from
+> `deepseek-v4-flash`, deepseekcode holds a **94.7% prefix cache-hit rate** vs
+> **0%** for a cache-naive agent — **4.5× cheaper**, every figure read from
 > DeepSeek's own `prompt_cache_hit_tokens`. Run it yourself: `make demo-cache`
 > (live) or `make demo-cache-offline` (no API key). Methodology:
 > [bench/cache-demo](bench/cache-demo/).
@@ -59,6 +60,8 @@ Full story with local verification commands:
 
 Benchmark evidence:
 [bench/README.md](bench/README.md)
+
+Tool-use benchmark (tau-bench-lite, 8 tasks): dsc is at parity on cost-per-solved (~$0.00038) with a strong DeepSeek-native flash baseline — we report parity and do not claim a capability win on easy tool-use tasks (a routing advantage needs a harder task set to surface). See [bench/taubench](bench/taubench/).
 
 ## Features
 

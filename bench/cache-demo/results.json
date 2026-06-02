@@ -1,0 +1,35 @@
+[
+  {
+    "name": "naive",
+    "model": "deepseek-v4-flash",
+    "turns": 12,
+    "hit_tokens": 0,
+    "miss_tokens": 16340,
+    "out_tokens": 1470,
+    "hit_rate": 0,
+    "cost_cny": 0.01928,
+    "savings_cny": 0
+  },
+  {
+    "name": "stable",
+    "model": "deepseek-v4-flash",
+    "turns": 12,
+    "hit_tokens": 15360,
+    "miss_tokens": 860,
+    "out_tokens": 1573,
+    "hit_rate": 0.9469790382244143,
+    "cost_cny": 0.0043132,
+    "savings_cny": 0.0150528
+  },
+  {
+    "name": "drift",
+    "model": "deepseek-v4-flash",
+    "turns": 12,
+    "hit_tokens": 15360,
+    "miss_tokens": 1217,
+    "out_tokens": 1335,
+    "hit_rate": 0.9265850274476685,
+    "cost_cny": 0.0041941999999999995,
+    "savings_cny": 0.0150528
+  }
+]

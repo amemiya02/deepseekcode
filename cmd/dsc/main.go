@@ -130,6 +130,21 @@ func applyToolTiersFromEnv(a *agent.Agent) {
 	slog.Info("feature flag: tool_tiers set via env", "active_tiers", tiers)
 }
 
+// applyRoutingConfig wires the opt-in cost-routing + clarify-gate settings
+// from config onto the agent. Both the TUI and one-shot paths call it so the
+// runtime behavior is identical. When AutoRoute is enabled without an explicit
+// escalation model we default the pro tier to deepseek-v4-pro, because
+// routeTurn no-ops whenever EscalationModel is empty (agent.go:1967) — leaving
+// it empty would silently make --auto-route do nothing.
+func applyRoutingConfig(a *agent.Agent, cfg config.Config) {
+	a.AutoRoute = cfg.Routing.AutoRoute
+	a.EscalationModel = cfg.Routing.EscalationModel
+	if a.AutoRoute && a.EscalationModel == "" {
+		a.EscalationModel = "deepseek-v4-pro"
+	}
+	a.AutoClarify = cfg.Clarify.AutoClarify
+}
+
 func run() error {
 	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
 	if len(os.Args) > 1 && os.Args[1] == "init" {
@@ -176,19 +191,22 @@ func run() error {
 	}
 
 	var (
-		showVersion bool
-		yolo        bool
-		readOnly    bool
-		askAll      bool
-		noDuet      bool
-		model       string
-		effort      string
-		newSession  bool
-		continueSes bool
-		resumeSes   string
-		prompt      string
-		debug       bool
-		traceJSONL  string
+		showVersion     bool
+		yolo            bool
+		readOnly        bool
+		askAll          bool
+		noDuet          bool
+		model           string
+		effort          string
+		newSession      bool
+		continueSes     bool
+		resumeSes       string
+		prompt          string
+		debug           bool
+		traceJSONL      string
+		autoRoute       bool
+		autoClarify     bool
+		escalationModel string
 	)
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&yolo, "yolo", false, "auto-approve all tool calls (DANGEROUS)")
@@ -203,6 +221,9 @@ func run() error {
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
 	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
 	flag.StringVar(&traceJSONL, "trace-jsonl", "", "one-shot: write epoch/usage/compaction/drift trace as JSONL to PATH (used by the benchmark harness)")
+	flag.BoolVar(&autoRoute, "auto-route", false, "enable per-turn Flash-first cost-aware routing (escalates hard turns to the pro tier)")
+	flag.BoolVar(&autoClarify, "auto-clarify", false, "ask one clarifying question on a vague prompt before spending a turn")
+	flag.StringVar(&escalationModel, "escalation-model", "", "pro-tier model --auto-route escalates to (default deepseek-v4-pro when --auto-route is set)")
 	flag.Parse()
 
 	// Env fallback so the benchmark harness can request a trace without
@@ -240,6 +261,15 @@ func run() error {
 	}
 	if noDuet {
 		cfg.Duet.Enabled = false
+	}
+	if autoRoute {
+		cfg.Routing.AutoRoute = true
+	}
+	if autoClarify {
+		cfg.Clarify.AutoClarify = true
+	}
+	if escalationModel != "" {
+		cfg.Routing.EscalationModel = escalationModel
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -380,6 +410,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
+	applyRoutingConfig(a, cfg)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
@@ -575,6 +606,28 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 			}
 		}
 	}
+
+	// Cross-session cache-warmth notice (best-effort: any error must not
+	// break startup). Load the prior sidecar, compute whether the prefix is
+	// likely still warm, append a notice when it is, then save the current
+	// fingerprint so the next session can check against it.
+	func() {
+		prior := loadWarmth(cwd)
+		curFP := a.StaticPrefixFingerprint()
+		if curFP != "" {
+			var sinceLastUse time.Duration
+			if prior.LastUsedUnix > 0 {
+				sinceLastUse = time.Since(time.Unix(prior.LastUsedUnix, 0))
+			}
+			if msg := agent.WarmthNotice(
+				agent.IsLikelyWarm(prior.Fingerprint, curFP, sinceLastUse, 24*time.Hour),
+				sinceLastUse,
+			); msg != "" {
+				notices = append(notices, msg)
+			}
+			_ = saveWarmth(cwd, curFP, time.Now().Unix())
+		}
+	}()
 
 	notices = append(mcpNotices, notices...)
 	home, _ := os.UserHomeDir()
@@ -895,6 +948,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
+	applyRoutingConfig(a, cfg)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait

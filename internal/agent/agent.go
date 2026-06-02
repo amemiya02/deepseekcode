@@ -842,6 +842,20 @@ func staticPrefixHash(system string, toolSpecs []llm.Tool) string {
 	return llm.StaticPrefix{System: system, Tools: toolSpecs}.Fingerprint().CombinedSHA256
 }
 
+// StaticPrefixFingerprint returns the combined SHA-256 fingerprint of the
+// agent's current static prefix (system prompt + tool schemas). It is the
+// same value that feeds the DeepSeek cache key and the prefix-epoch hash, so
+// it can be persisted cross-session to detect whether the cache is still warm.
+// Returns "" before the first Run (no tools resolved yet) — callers must
+// treat an empty string as "unknown / cold".
+func (a *Agent) StaticPrefixFingerprint() string {
+	var toolSpecs []llm.Tool
+	if a.Tools != nil {
+		toolSpecs = a.Tools.AsLLMToolsFiltered(a.ActiveTiers...)
+	}
+	return llm.StaticPrefix{System: a.staticSystem(), Tools: toolSpecs}.Fingerprint().CombinedSHA256
+}
+
 // CurrentEpochID returns the current epoch's ID, or "" when no epoch has been
 // initialized yet. Used to stamp a subagent's child trace with the parent
 // epoch it ran under.

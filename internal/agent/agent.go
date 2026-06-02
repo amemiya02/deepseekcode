@@ -448,6 +448,23 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 		}
 	}
 
+	// Intent-clarify gate (off by default via AutoClarify): if the fresh prompt
+	// is too vague to act on, ask one clarifying question and yield the turn
+	// rather than spending a (possibly pro/max) model call on a guess. Pre-loop,
+	// so no model request is issued. shouldClarify returns false unless
+	// AutoClarify is enabled, so default behavior is unchanged.
+	if userPrompt != "" && a.shouldClarify(userPrompt) {
+		_, questions := routing.NeedsClarification(userPrompt)
+		q := "Before I start: " + questions[0]
+		blocks := []llm.ContentBlock{llm.TextBlock{Text: q}}
+		a.bus.Publish(EventTextDelta{Text: q})
+		a.Messages = append(a.Messages, llm.Message{Role: "assistant", Blocks: blocks})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendAssistant(ctx, blocks, a.Model, llm.Usage{})
+		}
+		return StopModelDone, nil
+	}
+
 	// overflowRetried gates the context-overflow recovery to a single attempt
 	// per fresh overflow: a 400 "context too long" triggers one compaction and
 	// re-attempt, and is reset after any step that completes, so a later

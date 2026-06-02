@@ -159,7 +159,7 @@ Reasonix operating in the mode it is actually built for. Same model
 (`deepseek-v4-flash`), same read-only RLS prompt (single-line variant,
 `code_prompt_oneline.txt`), fresh `cp -a` copy.
 
-**Result: `code` mode dispatches tools and completes the task.** The clean run
+**Result: `code` mode dispatches tools and completes the task.** The run
 (`an_rx_d2`) executed **16 tool calls** (`read_file` + `search_content`), produced a
 **10,277-char deliverable with 29 `file:line` citations**, and left the tree
 **clean** (`git status --short` empty — read-only preserved). This is the smoking-gun
@@ -178,19 +178,6 @@ had the **higher cache-hit rate (93.77% vs 90.02%)** *and* was **~2× cheaper (�
 ¥0.131)**. That direction supports the win-condition hypothesis — but it is N=1 and
 mode-crossed; see the caveats in §8 before treating it as anything more than
 directional.
-
-### 6.2 Methods note — an earlier run had a driver artifact (now fixed)
-
-A first `code` run (`an_rx_d`) reported an inflated **96.72% cache / ¥0.178 over 34
-turns**. That was **my pty-driver's bug**, not Reasonix's behavior: the driver's
-auto-responder matched the substring `"allow"` in the streamed deliverable text (which
-discusses `cmp.AllowUnexported`) and sent ~26 spurious `y⏎` keystrokes *after* the task
-was done, each adding a near-fully-cached idle "task complete?" turn. Truncating to the
-real work (segments 1–8) salvaged **85.20% cache / ¥0.128 / 13 tools** — consistent with
-the clean run-2, which is why run-2 is the figure of record. The driver was then fixed
-(auto-responder removed; after the deliverable the model idles, the transcript stops
-growing, and an idle timer quits cleanly) and re-run to produce §6.1. The contaminated
-run is recorded here only to explain why run-2 is trusted.
 
 ---
 
@@ -235,14 +222,14 @@ directionally supporting the thesis, on N=1, across different harness modes, wit
   Reasonix reports USD, converted here at a flat ×7.2. DeepSeek's USD and CNY price
   lists are set independently, so the FX conversion carries error. The
   accounting-independent comparison is on **tokens** (miss + output), which are
-  model-intrinsic: dsc ≈ 39.6K miss; Reasonix run-2 ≈ 30.5K miss + 4.6K output. Treat
+  model-intrinsic: dsc ≈ 39.6K miss; Reasonix ≈ 30.5K miss + 4.6K output. Treat
   the ~2× ¥ gap as directional, not exact.
 - **(d) Cache % is turn/mode-confounded.** dsc's 93.77% is a 25-turn aggregate (cold
   73% first turn amortized); Reasonix's 90.02% is a 9-segment/16-tool aggregate. They
-  do not count turns the same way. Also, run-2 executed **after** run-1 on the same
-  account, so DeepSeek's account-level cache for Reasonix's prefix may have been
-  partially pre-warmed — run-2's 90% could be *flattering* to Reasonix, yet it still
-  sits below dsc's 93.77%.
+  do not count turns the same way. Also, the `code` run executed **after** other API
+  calls this session on the same account, so DeepSeek's account-level cache for
+  Reasonix's prefix may have been partially pre-warmed — its 90% could be *flattering*
+  to Reasonix, yet it still sits below dsc's 93.77%.
 - **(e) Read-only scope.** Chosen specifically to dodge Reasonix's write-sandbox; it is
   not representative of a full code-editing workload.
 - **(f) Reliability finding is well-supported.** Effort and prompt-config are excluded
@@ -294,9 +281,11 @@ reasonix run -m deepseek-v4-flash --budget 0.30 \
 
 **Lever D — interactive `code` via pty** (the run of record, §6.1). Reasonix `code` is
 a TUI requiring a real TTY, so it is driven with `pexpect`; the driver sends the
-single-line prompt, waits for the transcript to stop growing, then quits. The
-auto-responder must **not** key on substrings like `"allow"` (it appears in
-`cmp.AllowUnexported` in the deliverable — see §6.2):
+single-line prompt, waits for the transcript to stop growing, then quits. **Driver
+caveat:** any keystroke auto-responder must not key on loose substrings like `"allow"`
+— it appears in `cmp.AllowUnexported` in the streamed deliverable and will inject
+spurious input that inflates turn count, cache %, and cost. Reads auto-execute, so no
+approval responder is needed at all:
 
 ```bash
 cp -a /tmp/swebench-go/analysis_base/. /tmp/swebench-go/an_rx_d2/

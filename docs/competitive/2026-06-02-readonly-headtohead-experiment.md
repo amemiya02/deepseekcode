@@ -1,11 +1,13 @@
 # Experiment Record — dsc vs Reasonix, Read-Only Multi-Turn Analysis (2026-06-02)
 
-> **摘要（中文）：** 在同一个仓库、同一段只读分析任务、同一个模型（`deepseek-v4-flash`，也是 Reasonix 官方宣传的默认模型）下做 dsc 与 Reasonix 的头对头对比。dsc 干净完成 25 轮真实读取、产出完整交付物，缓存命中 93.77%、花费 ¥0.0634。Reasonix 在 headless `run` 模式下**没有执行任何工具**——它把"Read file: …"当作普通文本叙述输出，1 轮即停，未产出任何分析。因此本次"缓存更高、成本更低"的命题判定为 **INCONCLUSIVE（无法判定）**：不能拿"完成的运行"和"中途未执行的运行"比数字。唯一可靠的观察是：**在本环境的 headless 模式下，dsc 能可靠驱动多轮 agent 任务，Reasonix-flash 只叙述不执行**——这是一个集成/可靠性观察，**不是**对 Reasonix 能力的断言。
+> **摘要（中文）：** 在同一个仓库、同一段只读分析任务、同一个模型（`deepseek-v4-flash`，也是 Reasonix 官方宣传的默认模型）下做 dsc 与 Reasonix 的头对头对比。dsc 干净完成 25 轮真实读取、产出完整交付物，缓存命中 93.77%、花费 ¥0.0634。Reasonix 在 headless `run` 模式下**没有执行任何工具**——它把"Read file: …"当作普通文本叙述输出，1 轮即停，未产出任何分析。因此 **headless `run` 这条线判定为 INCONCLUSIVE**：不能拿"完成的运行"和"未执行的运行"比数字。**但通过 Lever D（用 pty 驱动 Reasonix 的交互式 `code` 模式——它确实会派发工具，§6），我们拿到了一次两边都完成的同模型对比**：dsc（headless）93.77% 缓存 / ¥0.063，Reasonix（`code`，干净跑）90.02% 缓存 / ¥0.131 —— **dsc 缓存更高且成本约便宜 2×，方向性支持本命题**。注意这是**被迫的跨模式**对比（Reasonix headless `run` 的派发坏了，`code` 是它唯一能跑的模式），且 ¥ 口径不同、N 很小——见 §8 警告。全文不对 Reasonix 数字做"造假"指控。
 
-This is a factual record of one experiment. It deliberately makes **no competitive
-capability claim**: one arm did not complete, so the run is inconclusive (see §6).
-It exists so the result is reproducible and so future runs do not silently repeat
-the same setup.
+This is a factual record. The headless-`run` head-to-head (§4) is **inconclusive**
+because one arm never dispatched a tool. A follow-up via Reasonix's interactive `code`
+mode (§6) did complete and yields a directional, heavily-caveated result. The record
+makes **no statistically-grounded capability claim** (N is tiny, modes differ); it
+exists so the result is reproducible and so future runs do not silently repeat the
+same setup.
 
 ---
 
@@ -72,8 +74,8 @@ cross-contamination).
 | **dsc** | ✅ yes | 25 | **93.77** | 0.0634 |
 | **reasonix** | ❌ **no** | 1 | 81.5 | 0.0012 |
 
-> The two numeric columns are **not comparable** (see §6). They are recorded for
-> completeness, not as a score.
+> The two numeric columns are **not comparable** (see §7). They are recorded for
+> completeness, not as a score. The *completed* head-to-head is in §6.
 
 ### 4.1 dsc arm — completed
 
@@ -144,62 +146,117 @@ dispatch-layer problem.
 are fake — the model format is fine and the API billed real tokens. The defect is
 localized to the headless `run` dispatch path in this version/environment. Reasonix's
 interactive `code`/`chat` TUI modes are presumed to wire the executor differently and
-remain **untested** — confirming whether they dispatch where `run` does not is the
-designated next step (Lever D).
-
-**What this is NOT:** this is not evidence that Reasonix is incapable, nor that its
-numbers are fake. Reasonix connected to the API, billed real tokens, and returned
-real usage. The observation is specifically about **`reasonix run` headless tool
-dispatch with `deepseek-v4-flash`, version 0.53.2, in this environment.** Its
-interactive `code`/`chat` TUI modes and its hosted product are out of scope here and
-may behave entirely differently.
+remain **untested by `run`** — confirming whether they dispatch where `run` does not
+is Lever D (§6, now done).
 
 ---
 
-## 6. Conclusion
+## 6. Lever D — interactive `code` mode DOES dispatch; the real head-to-head
 
-**On the cache/cost thesis: INCONCLUSIVE. No win is claimed for either side.**
+Lever D drove Reasonix's **interactive** `reasonix code` mode (not `run`) through a
+pty (`pexpect`), with its **own** filesystem tools rooted at the checkout copy — i.e.
+Reasonix operating in the mode it is actually built for. Same model
+(`deepseek-v4-flash`), same read-only RLS prompt (single-line variant,
+`code_prompt_oneline.txt`), fresh `cp -a` copy.
 
-- You cannot compare a completed 25-turn run to an aborted 1-turn run. On raw numbers
-  dsc had the higher cache % and Reasonix the lower ¥, but the lower ¥ is an artifact
-  of Reasonix doing nothing, not of efficiency. Reporting it as a dsc win would be
-  dishonest; reporting it as a Reasonix win would be absurd.
+**Result: `code` mode dispatches tools and completes the task.** The clean run
+(`an_rx_d2`) executed **16 tool calls** (`read_file` + `search_content`), produced a
+**10,277-char deliverable with 29 `file:line` citations**, and left the tree
+**clean** (`git status --short` empty — read-only preserved). This is the smoking-gun
+contrast to §5: **the exact same model and prompt that `reasonix run` refused to
+dispatch, `reasonix code` dispatches end-to-end.** The defect is `run`-specific.
 
-- **The one reliable observation:** in this environment's headless mode, **dsc
-  completes a multi-turn dependent-read agent task cleanly (25 turns, 93.77% cache,
-  ¥0.0634, read-only preserved), while `reasonix run` (v0.53.2) does not dispatch the
-  tool calls `deepseek-v4-flash` emits** — even when, at `--effort max`, the model
-  produces a syntactically valid DSML `Read` invoke (§5, attempt #4), the headless loop
-  records it as final text and stops. This is a **headless-`run` dispatch reliability**
-  data point, explicitly *not* a capability or quality claim about Reasonix (its
-  interactive modes are untested).
+### 6.1 The head-to-head (both arms completed, same model, read-only-verified)
+
+| arm | mode | tools / turns | cache % | cost (¥) |
+|---|---|---|---|---|
+| **dsc** | headless `-p` | 25 turns | **93.77** | **0.063** |
+| **reasonix** | interactive `code` (pty) | 16 tools | 90.02 | 0.131 |
+
+**Directional reading:** on this single same-model, same-task, both-completed run, dsc
+had the **higher cache-hit rate (93.77% vs 90.02%)** *and* was **~2× cheaper (¥0.063 vs
+¥0.131)**. That direction supports the win-condition hypothesis — but it is N=1 and
+mode-crossed; see the caveats in §8 before treating it as anything more than
+directional.
+
+### 6.2 Methods note — an earlier run had a driver artifact (now fixed)
+
+A first `code` run (`an_rx_d`) reported an inflated **96.72% cache / ¥0.178 over 34
+turns**. That was **my pty-driver's bug**, not Reasonix's behavior: the driver's
+auto-responder matched the substring `"allow"` in the streamed deliverable text (which
+discusses `cmp.AllowUnexported`) and sent ~26 spurious `y⏎` keystrokes *after* the task
+was done, each adding a near-fully-cached idle "task complete?" turn. Truncating to the
+real work (segments 1–8) salvaged **85.20% cache / ¥0.128 / 13 tools** — consistent with
+the clean run-2, which is why run-2 is the figure of record. The driver was then fixed
+(auto-responder removed; after the deliverable the model idles, the transcript stops
+growing, and an idle timer quits cleanly) and re-run to produce §6.1. The contaminated
+run is recorded here only to explain why run-2 is trusted.
 
 ---
 
-## 7. Threats to validity / honesty caveats
+## 7. Conclusion
 
-- **(a) N = 1.** One task, one run per arm. Directional at most; not a benchmark.
-- **(b) Cache % is confounded by turn count.** dsc's 93.77% is a 25-turn aggregate
-  amortizing a cold 73% first turn; Reasonix's 81.5% is a single-turn ratio. They do
-  not measure the same thing. Any real comparison must anchor on **cost (¥)** — and
-  even ¥ is unusable here because one arm didn't complete.
-- **(c) Read-only scope.** Chosen specifically to dodge Reasonix's write-sandbox; it
-  is not representative of a full code-editing workload.
-- **(d) Confound now largely ruled out.** We used the documented headless entry
-  (`reasonix run`), the API connected and billed, the default config kept the system
-  prompt, and `--effort` was swept to `max` (attempt #4) — the model then emitted a
-  valid DSML tool call and `run` *still* did not dispatch it. So effort and
-  prompt-config are excluded; the defect sits in the headless `run` dispatch path. What
-  remains untested is whether Reasonix's **interactive** `code`/`chat` modes dispatch
-  correctly (Lever D) and whether this is specific to **v0.53.2**.
-- **(e) No "fake" claim.** Reasonix's emitted numbers are real per-run usage. The
-  critique is "the run didn't do the task," not "the numbers are fabricated."
-- **(f) dsc is not flawless either** — its symlink guard blocked the native
+Two separate findings, at two different confidence levels:
+
+1. **Reliability (high confidence, reproducible):** in headless mode `reasonix run`
+   (v0.53.2) **does not dispatch** the tool calls `deepseek-v4-flash` emits — even a
+   syntactically valid DSML `Read` invoke at `--effort max` (§5) is recorded as final
+   text. The **same model + prompt runs end-to-end in `reasonix code`** (§6), so the
+   defect is `run`-specific, not a model or capability problem. dsc drives the same
+   task headlessly without issue. This is a dispatch-reliability observation, **not** a
+   claim Reasonix is incapable.
+
+2. **Cache/cost thesis (directional only, N=1, mode-crossed):** in the one comparison
+   where **both** arms completed (dsc headless vs Reasonix `code`, §6.1), dsc had both
+   the **higher cache rate (93.77% vs 90.02%)** and **~2× lower cost (¥0.063 vs
+   ¥0.131)** — the direction the win-condition predicts. But the two arms ran in
+   **different modes** (forced: Reasonix headless can't dispatch), with different
+   turn/tool counts, and the ¥ figures use different accounting (§8). So this is a
+   **directional data point, not a proven win.** The `run`-mode head-to-head (§4)
+   remains INCONCLUSIVE on its own (Reasonix did nothing there).
+
+**Honest one-liner:** *dsc completes this task headlessly and, in the only completed
+comparison, did so with higher cache and ~2× lower cost than Reasonix's `code` mode —
+directionally supporting the thesis, on N=1, across different harness modes, with no
+"fake-number" claim against Reasonix.*
+
+---
+
+## 8. Threats to validity / honesty caveats
+
+- **(a) N = 1.** One completed comparison (§6.1), one task. Directional at most; not a
+  benchmark. Do not generalize.
+- **(b) Mode-crossed comparison.** dsc ran headless (`-p`); Reasonix ran interactive
+  (`code` via pty). This is **forced**, not chosen: Reasonix's headless `run` does not
+  dispatch tools (§5), so `code` is the only mode in which it completes. Each harness
+  therefore ran in a *working* configuration, but **not the same** configuration — a
+  real confound on both cache and cost.
+- **(c) ¥ figures use different accounting.** dsc reports cost natively in CNY;
+  Reasonix reports USD, converted here at a flat ×7.2. DeepSeek's USD and CNY price
+  lists are set independently, so the FX conversion carries error. The
+  accounting-independent comparison is on **tokens** (miss + output), which are
+  model-intrinsic: dsc ≈ 39.6K miss; Reasonix run-2 ≈ 30.5K miss + 4.6K output. Treat
+  the ~2× ¥ gap as directional, not exact.
+- **(d) Cache % is turn/mode-confounded.** dsc's 93.77% is a 25-turn aggregate (cold
+  73% first turn amortized); Reasonix's 90.02% is a 9-segment/16-tool aggregate. They
+  do not count turns the same way. Also, run-2 executed **after** run-1 on the same
+  account, so DeepSeek's account-level cache for Reasonix's prefix may have been
+  partially pre-warmed — run-2's 90% could be *flattering* to Reasonix, yet it still
+  sits below dsc's 93.77%.
+- **(e) Read-only scope.** Chosen specifically to dodge Reasonix's write-sandbox; it is
+  not representative of a full code-editing workload.
+- **(f) Reliability finding is well-supported.** Effort and prompt-config are excluded
+  as causes (§5 attempt #4 + §6 contrast). What remains untested: whether this is
+  specific to **v0.53.2** and whether Reasonix's hosted product behaves differently.
+- **(g) No "fake" claim.** Every Reasonix number here is real per-run usage. The
+  `run`-mode critique is "it didn't dispatch the task," not "the numbers are
+  fabricated."
+- **(h) dsc is not flawless either** — its symlink guard blocked the native
   `read_file` tool and forced a bash fallback (§4.1). File and fix.
 
 ---
 
-## 8. Reproduction
+## 9. Reproduction
 
 **Prompt** (`/tmp/swebench-go/analysis_prompt.txt`, abridged here; forces ≥5 dependent
 reads, read-only):
@@ -235,20 +292,40 @@ reasonix run -m deepseek-v4-flash --budget 0.30 \
   "$(cat /tmp/swebench-go/analysis_prompt.txt)"
 ```
 
-**Artifacts (scratch, not committed):** `/tmp/swebench-go/an_dsc.log`,
-`/tmp/swebench-go/an_rx.log`, `/tmp/swebench-go/an_rx.transcript.jsonl`.
+**Lever D — interactive `code` via pty** (the run of record, §6.1). Reasonix `code` is
+a TUI requiring a real TTY, so it is driven with `pexpect`; the driver sends the
+single-line prompt, waits for the transcript to stop growing, then quits. The
+auto-responder must **not** key on substrings like `"allow"` (it appears in
+`cmp.AllowUnexported` in the deliverable — see §6.2):
+
+```bash
+cp -a /tmp/swebench-go/analysis_base/. /tmp/swebench-go/an_rx_d2/
+cd /tmp/swebench-go/an_rx_d2
+# pexpect spawns: reasonix code <dir> --no-dashboard --no-mouse -n \
+#   --transcript <path> --budget 0.30 ; send prompt; idle-detect on transcript; /exit
+python3 /tmp/swebench-go/drive_code2.py
+```
+
+**Artifacts (scratch, not committed):** `/tmp/swebench-go/an_dsc.log` (dsc),
+`/tmp/swebench-go/an_rx.transcript.jsonl` (run-mode fail),
+`/tmp/swebench-go/an_rx_eff1.transcript.jsonl` (`--effort max` fail),
+`/tmp/swebench-go/an_rx_d2.transcript.jsonl` (`code`-mode pass, run of record),
+`/tmp/swebench-go/drive_code2.py` (pty driver).
 
 ---
 
-## 9. What would make a future run conclusive
+## 10. What would make this conclusive
 
-1. **Get Reasonix to actually execute.** Establish at least one configuration in which
-   `reasonix run` (or `code` driven via a pty) dispatches tools on a DeepSeek V4 model
-   and completes the deliverable. Until then, no head-to-head number means anything.
-2. **Then hold the model constant** and compare cost (¥) on the completed deliverable,
-   with cache % reported as secondary/contextual (it is turn-count-confounded).
-3. **Raise N** to several tasks before any directional statement becomes a claim.
+Lever D is **done** — Reasonix completes the task in `code` mode (§6), so a head-to-head
+is now possible. To upgrade from "directional, N=1" to a real claim:
 
-See the discussion that follows this record for the open question of *which* Reasonix
-model to use once dispatch works (flash vs. a stronger DeepSeek V4 / "pro" tier) and
-the fairness implications of each.
+1. **Close the mode gap.** Either (a) fix/escalate `reasonix run` so both arms are
+   headless, or (b) run dsc through *its* interactive path too, so both arms share a
+   mode. Without this, §6.1's gap stays mode-confounded.
+2. **Anchor on tokens, not ¥.** Report miss-tokens + output-tokens per completed
+   deliverable (model-intrinsic, FX-free); show ¥ only as a secondary, clearly-labeled
+   conversion (§8c).
+3. **Control cache pre-warming.** Run arms in randomized/alternating order, or flush
+   between, so account-level cache warmth (§8d) does not favor whichever ran second.
+4. **Raise N** to several distinct tasks (and ≥2 runs each) before any directional
+   statement becomes a claim.

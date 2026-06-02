@@ -130,6 +130,21 @@ func applyToolTiersFromEnv(a *agent.Agent) {
 	slog.Info("feature flag: tool_tiers set via env", "active_tiers", tiers)
 }
 
+// applyRoutingConfig wires the opt-in cost-routing + clarify-gate settings
+// from config onto the agent. Both the TUI and one-shot paths call it so the
+// runtime behavior is identical. When AutoRoute is enabled without an explicit
+// escalation model we default the pro tier to deepseek-v4-pro, because
+// routeTurn no-ops whenever EscalationModel is empty (agent.go:1967) — leaving
+// it empty would silently make --auto-route do nothing.
+func applyRoutingConfig(a *agent.Agent, cfg config.Config) {
+	a.AutoRoute = cfg.Routing.AutoRoute
+	a.EscalationModel = cfg.Routing.EscalationModel
+	if a.AutoRoute && a.EscalationModel == "" {
+		a.EscalationModel = "deepseek-v4-pro"
+	}
+	a.AutoClarify = cfg.Clarify.AutoClarify
+}
+
 func run() error {
 	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
 	if len(os.Args) > 1 && os.Args[1] == "init" {
@@ -395,6 +410,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
+	applyRoutingConfig(a, cfg)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
@@ -910,6 +926,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.UserID = cfg.API.UserID
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
+	applyRoutingConfig(a, cfg)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait

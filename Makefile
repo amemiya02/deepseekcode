@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean run fmt vet tidy bench-case-study
+.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -50,3 +50,11 @@ clean:
 bench-case-study: build
 	@echo "Running case-study benchmark..."
 	@go run ./bench/cmd/benchrunner/ --agent deepseekcode-current --task case-study
+
+demo-cache:
+	@echo "Running LIVE cache A/B demo on deepseek-v4-flash (needs DEEPSEEK_API_KEY)..."
+	@go run ./bench/cmd/cachedemo -live -out bench/cache-demo/results.json
+
+demo-cache-offline:
+	@echo "Running offline cache A/B demo (committed fixture, no API key)..."
+	@go run ./bench/cmd/cachedemo -fixture bench/cache-demo/results.sample.json -out bench/cache-demo/results.json

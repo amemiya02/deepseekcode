@@ -212,6 +212,10 @@ Issues and pull requests are welcome. Keep README changes synchronized between
 `README.md` and `README.zh-CN.md` with matching `##` structure. Document only
 features that are implemented and testable in this repository.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=amemiya02/deepseekcode&type=Date)](https://star-history.com/#amemiya02/deepseekcode&Date)
+
 ## License
 
 MIT

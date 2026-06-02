@@ -199,6 +199,10 @@ make test
 欢迎提交 issue 和 pull request。修改 README 时，请同步更新 `README.md` 和
 `README.zh-CN.md`，并保持匹配的 `##` 结构。只记录本仓库中已经实现且可测试的功能。
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=amemiya02/deepseekcode&type=Date)](https://star-history.com/#amemiya02/deepseekcode&Date)
+
 ## 许可证
 
 MIT

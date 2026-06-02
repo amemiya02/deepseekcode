@@ -25,8 +25,13 @@ func main() {
 		out     = flag.String("out", "bench/cache-demo/results.json", "results JSON path")
 		fixture = flag.String("fixture", "bench/cache-demo/results.sample.json", "offline usage fixture")
 		driftAt = flag.Int("drift-at", 0, "turn at which the drift arm appends a tool (0 = turns/2)")
+		prod    = flag.Bool("production", false, "use dsc's real ~8K-token static prefix (real default system prompt + real tool set) instead of the small synthetic one, so the mid-session drift penalty registers")
 	)
 	flag.Parse()
+
+	// productionScale gates the large prefix (scenario.go); set it before any
+	// prefix is built. Off by default so the fast unit tests stay deterministic.
+	productionScale = *prod
 
 	if err := run(*model, *turns, *live, *baseURL, *out, *fixture, *driftAt); err != nil {
 		fmt.Fprintln(os.Stderr, "cachedemo:", err)

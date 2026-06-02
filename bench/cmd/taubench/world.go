@@ -1,7 +1,7 @@
 // Package taubench is a Go port of the Reasonix tau-bench harness.
 // WorldState + retailSeed + DB helpers are ported verbatim from
 // benchmarks/tau-bench/db.ts and benchmarks/tau-bench/tasks.ts.
-package taubench
+package main
 
 import "encoding/json"
 

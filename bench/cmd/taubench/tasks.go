@@ -1,7 +1,7 @@
 // Package taubench — 8 tau-bench task definitions ported verbatim from
 // benchmarks/tau-bench/tasks.ts (Reasonix source-of-truth).
 // Personas (Style + Goal + Knowns) and Check predicates are exact translations.
-package taubench
+package main
 
 // Persona mirrors the per-task `user` field in tasks.ts:
 //

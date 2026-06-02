@@ -1,4 +1,4 @@
-package taubench
+package main
 
 import (
 	"testing"

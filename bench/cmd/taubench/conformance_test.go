@@ -4,7 +4,7 @@
 // benchmarks/tau-bench/tasks.ts and benchmarks/tau-bench/user-sim.ts.
 //
 // If this test fails, the harness is unfair and no live run should proceed.
-package taubench
+package main
 
 import (
 	_ "embed"

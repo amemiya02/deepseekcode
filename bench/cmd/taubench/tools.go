@@ -1,7 +1,7 @@
 // Package taubench — retail tool implementations over *WorldState.
 // Schemas are byte-equal to the TypeScript originals in
 // benchmarks/tau-bench/tasks.ts (ToolFactory definitions).
-package taubench
+package main
 
 import (
 	"context"

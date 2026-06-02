@@ -11,7 +11,7 @@
 // The JSON parser (parseReasonixReport / buildReasonixCmd) is the only logic
 // tested in the unit suite; live exec is gated behind RunReasonixArmLive, which
 // is reached solely from the -live CLI flow.
-package taubench
+package main
 
 import (
 	"context"

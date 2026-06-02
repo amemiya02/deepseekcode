@@ -23,7 +23,7 @@
 // scripted simClient and a mock agentClient (internal/llmtest), so no test or
 // `go build` touches the network. RunDSCArmLive is the only path that dials the
 // real DeepSeek endpoint, and it is reached solely from the -live CLI flow.
-package taubench
+package main
 
 import (
 	"context"

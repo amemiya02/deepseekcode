@@ -5,7 +5,7 @@
 //
 // The conformance_test.go byte-compares these against the committed golden
 // fixtures to guarantee the harness stays fair.
-package taubench
+package main
 
 const retailSystemPrompt = `You are a retail support agent. Use the tools to help the user.
 Rules:

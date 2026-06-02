@@ -2,7 +2,7 @@
 // Ported verbatim from benchmarks/tau-bench/user-sim.ts (Reasonix source-of-truth).
 // Model: deepseek-chat, temperature: 0.1, maxTokens: 200.
 // ##STOP## (substring) terminates the conversation; never terminates on the opening message.
-package taubench
+package main
 
 import (
 	"context"

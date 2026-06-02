@@ -1,6 +1,6 @@
 // Package taubench — unit tests for UserSimulator.
 // All tests use a mockChatClient; no live API calls are made.
-package taubench
+package main
 
 import (
 	"context"

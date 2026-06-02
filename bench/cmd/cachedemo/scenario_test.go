@@ -6,8 +6,14 @@ import "testing"
 func TestStablePrefixFingerprintConstantAcrossTurns(t *testing.T) {
 	// The cache-stable arm must present byte-identical system+tools every turn,
 	// so its Prefix Fingerprint (== DeepSeek cache key) never moves.
-	if stablePrefix().Fingerprint() != stablePrefix().Fingerprint() {
+	fp1 := stablePrefix().Fingerprint()
+	fp2 := stablePrefix().Fingerprint()
+	if fp1 != fp2 {
 		t.Fatal("stable prefix fingerprint is not constant")
+	}
+	// Sanity-check: the stable fingerprint must differ from the naive prefix.
+	if fp1 == naivePrefix(1).Fingerprint() {
+		t.Fatal("stable prefix fingerprint must differ from naive prefix fingerprint")
 	}
 }
 
@@ -16,6 +22,37 @@ func TestNaivePrefixFingerprintChangesEachTurn(t *testing.T) {
 	// failure mode), so consecutive turns must differ -> cache miss.
 	if naivePrefix(1).Fingerprint() == naivePrefix(2).Fingerprint() {
 		t.Fatal("naive prefix fingerprint did not change between turns")
+	}
+}
+
+func TestDemoTurns(t *testing.T) {
+	base := []string{
+		"List the Go files in internal/llm.",
+		"Read internal/llm/cache_metrics.go and summarize Cost().",
+		"What does CacheSavings compute?",
+		"Find where prompt_cache_hit_tokens is read.",
+		"Explain the prefix fingerprint in one sentence.",
+		"Which models are in the Prices table?",
+	}
+	cases := []struct {
+		n    int
+		want []string
+	}{
+		{n: 0, want: []string{}},
+		{n: 6, want: base[:6]},
+		{n: 7, want: append(base[:6:6], base[0])},
+	}
+	for _, tc := range cases {
+		got := demoTurns(tc.n)
+		if len(got) != len(tc.want) {
+			t.Errorf("demoTurns(%d): got len %d, want %d", tc.n, len(got), len(tc.want))
+			continue
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Errorf("demoTurns(%d)[%d]: got %q, want %q", tc.n, i, got[i], tc.want[i])
+			}
+		}
 	}
 }
 

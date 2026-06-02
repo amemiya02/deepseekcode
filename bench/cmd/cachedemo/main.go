@@ -63,6 +63,9 @@ func run(model string, turns int, live bool, baseURL, out, fixture string) error
 		if err != nil {
 			return fmt.Errorf("offline fixture (%s): %w", fixture, err)
 		}
+		if len(all)%2 != 0 {
+			return fmt.Errorf("fixture has odd entry count %d", len(all))
+		}
 		half := len(all) / 2
 		naiveUsage, stableUsage = all[:half], all[half:]
 	}

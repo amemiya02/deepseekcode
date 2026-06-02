@@ -1964,6 +1964,17 @@ func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bo
 	return d.Model, d.Thinking, effort
 }
 
+// shouldClarify reports whether the agent should ask a clarifying question
+// before acting on userText. Returns false when AutoClarify is disabled
+// (the default) so legacy behavior is unchanged.
+func (a *Agent) shouldClarify(userText string) bool {
+	if !a.AutoClarify {
+		return false
+	}
+	need, _ := routing.NeedsClarification(userText)
+	return need
+}
+
 // publishRepairEvent publishes an EventRepair and persists a repair receipt
 // if the persister supports ReceiptAppender.
 func (a *Agent) publishRepairEvent(ev EventRepair) {

@@ -202,13 +202,13 @@ func (r *Registry) ConnectSSE(ctx context.Context, name, sseURL string) error {
 
 	r.mu.Lock()
 	r.servers[name] = &ServerProxy{
-		Name:    name,
-		State:   StateConnected,
-		Caps:    res.caps,
-		Tools:   res.tools,
-		t:       res.t,
-		kind:    transportSSE,
-		sseURL:  sseURL,
+		Name:   name,
+		State:  StateConnected,
+		Caps:   res.caps,
+		Tools:  res.tools,
+		t:      res.t,
+		kind:   transportSSE,
+		sseURL: sseURL,
 	}
 	r.mu.Unlock()
 
@@ -604,4 +604,26 @@ func (r *Registry) PendingSchemaChanges(oldTools []McpToolMeta) []MCPChange {
 
 func schemasEqualBytes(a, b json.RawMessage) bool {
 	return schemasEqual(a, b)
+}
+
+// transportFor returns a Transport for the given kind. It is the single
+// dispatch point for transport construction so both Connect paths and tests
+// exercise the same selection logic.
+//   - "" or "stdio": NewStdioTransport (spawns command).
+//   - "sse": NewSSETransport (SSE stream; caller must call Start).
+//   - "http": NewHTTPTransport (plain HTTP JSON-RPC).
+//   - "streamable-http": NewStreamableHTTPTransport (MCP spec 2025-03-26).
+func transportFor(kind, url, command string, args []string, env map[string]string) (Transport, error) {
+	switch kind {
+	case "", "stdio":
+		return NewStdioTransport(context.Background(), command, args, env)
+	case "sse":
+		return NewSSETransport(sseURLFromServerURL(url)), nil
+	case "http":
+		return NewHTTPTransport(url), nil
+	case "streamable-http":
+		return NewStreamableHTTPTransport(url), nil
+	default:
+		return nil, fmt.Errorf("unknown mcp transport %q", kind)
+	}
 }

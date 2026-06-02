@@ -21,6 +21,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/prompt"
 	"github.com/amemiya02/deepseekcode/internal/repair"
+	"github.com/amemiya02/deepseekcode/internal/routing"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/skills"
@@ -112,6 +113,19 @@ type Agent struct {
 	// level (low, medium, high, max). Carried into every main-loop
 	// request when thinking is enabled. Empty means omit from wire.
 	ReasoningEffort llm.ReasoningEffort
+
+	// AutoRoute enables the pre-turn cost-aware router (internal/routing):
+	// per-turn model + effort chosen from the user message and repair signal.
+	// It never moves the Prefix Fingerprint (model/effort are not in the static
+	// prefix). Requires EscalationModel set for the pro tier to be reachable.
+	AutoRoute bool
+
+	// AutoClarify gates vague prompts through internal/routing.NeedsClarification
+	// before spending a (possibly pro/max) turn.
+	AutoClarify bool
+
+	// lastRoute carries routing stickiness across turns.
+	lastRoute routing.Decision
 
 	// UserID is an optional DeepSeek field for abuse monitoring and
 	// enterprise attribution. Empty means omitted from wire.
@@ -1928,6 +1942,25 @@ func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
 		return a.ReasoningEffort
 	}
 	return llm.ReasoningEffortMax
+}
+
+// routeTurn returns the per-turn (model, thinking, effort) to use. When
+// AutoRoute is off (or no escalation target) it returns the loop defaults
+// unchanged. It updates a.lastRoute for stickiness. Model/effort never affect
+// the Static Prefix, so this cannot cause prefix drift.
+func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bool, llm.ReasoningEffort) {
+	if !a.AutoRoute || a.EscalationModel == "" {
+		thinking := a.ReasoningEffort.Valid() || a.AutoReasoning
+		return a.Model, thinking, a.effectiveReasoningEffort(thinking)
+	}
+	d := routing.Classify(
+		routing.Signals{UserText: userText, RepairErrorsLastTurn: repairErrorsLastTurn},
+		routing.Config{FlashModel: a.Model, ProModel: a.EscalationModel, StickyTurns: 2},
+		a.lastRoute,
+	)
+	a.lastRoute = d
+	effort, _ := llm.ParseReasoningEffort(d.Effort) // "" stays invalid → field omitted
+	return d.Model, d.Thinking, effort
 }
 
 // publishRepairEvent publishes an EventRepair and persists a repair receipt

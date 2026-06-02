@@ -176,19 +176,22 @@ func run() error {
 	}
 
 	var (
-		showVersion bool
-		yolo        bool
-		readOnly    bool
-		askAll      bool
-		noDuet      bool
-		model       string
-		effort      string
-		newSession  bool
-		continueSes bool
-		resumeSes   string
-		prompt      string
-		debug       bool
-		traceJSONL  string
+		showVersion     bool
+		yolo            bool
+		readOnly        bool
+		askAll          bool
+		noDuet          bool
+		model           string
+		effort          string
+		newSession      bool
+		continueSes     bool
+		resumeSes       string
+		prompt          string
+		debug           bool
+		traceJSONL      string
+		autoRoute       bool
+		autoClarify     bool
+		escalationModel string
 	)
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&yolo, "yolo", false, "auto-approve all tool calls (DANGEROUS)")
@@ -203,6 +206,9 @@ func run() error {
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
 	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
 	flag.StringVar(&traceJSONL, "trace-jsonl", "", "one-shot: write epoch/usage/compaction/drift trace as JSONL to PATH (used by the benchmark harness)")
+	flag.BoolVar(&autoRoute, "auto-route", false, "enable per-turn Flash-first cost-aware routing (escalates hard turns to the pro tier)")
+	flag.BoolVar(&autoClarify, "auto-clarify", false, "ask one clarifying question on a vague prompt before spending a turn")
+	flag.StringVar(&escalationModel, "escalation-model", "", "pro-tier model --auto-route escalates to (default deepseek-v4-pro when --auto-route is set)")
 	flag.Parse()
 
 	// Env fallback so the benchmark harness can request a trace without
@@ -240,6 +246,15 @@ func run() error {
 	}
 	if noDuet {
 		cfg.Duet.Enabled = false
+	}
+	if autoRoute {
+		cfg.Routing.AutoRoute = true
+	}
+	if autoClarify {
+		cfg.Clarify.AutoClarify = true
+	}
+	if escalationModel != "" {
+		cfg.Routing.EscalationModel = escalationModel
 	}
 	if err := cfg.Validate(); err != nil {
 		return err

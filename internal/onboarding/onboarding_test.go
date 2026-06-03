@@ -1,6 +1,9 @@
 package onboarding_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,5 +87,39 @@ func TestNeedsOnboarding(t *testing.T) {
 				t.Fatalf("NeedsOnboarding() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidateKey_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Errorf("Authorization header = %q, want %q", got, "Bearer sk-test")
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type header = %q, want %q", got, "application/json")
+		}
+		// Minimal valid chat-completions response
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer srv.Close()
+
+	err := onboarding.ValidateKey(context.Background(), srv.URL, "sk-test", srv.Client())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateKey_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"Invalid API key","type":"invalid_request_error"}}`))
+	}))
+	defer srv.Close()
+
+	err := onboarding.ValidateKey(context.Background(), srv.URL, "sk-bad", srv.Client())
+	if err == nil {
+		t.Fatal("expected error for 401, got nil")
 	}
 }

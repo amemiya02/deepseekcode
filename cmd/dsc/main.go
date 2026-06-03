@@ -495,72 +495,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		a.Skills = skillStore
 	}
 
-	// Hooks: assemble configs from TOML, then add the Duet builtin
-	// when enabled. Only create a Runner if there is work for it.
-	var hookConfigs []hooks.HookConfig
-	for _, hi := range cfg.Hooks {
-		hc := hooks.HookConfig{
-			Event:   hooks.HookEvent(hi.Event),
-			Type:    hooks.HookType(hi.Type),
-			Command: hi.Command,
-			Name:    hi.Name,
-		}
-		if hc.Type == "" {
-			hc.Type = hooks.TypeSubprocess
-		}
-		if !validHookEvent(hc.Event) {
-			slog.Warn("skipping hook with unknown event", "event", hi.Event)
-			continue
-		}
-		if hi.Timeout > 0 {
-			hc.Timeout = time.Duration(hi.Timeout) * time.Second
-		}
-		hookConfigs = append(hookConfigs, hc)
-	}
-
-	if cfg.Duet.Enabled {
-		hasDuetPreTool := false
-		for _, hc := range hookConfigs {
-			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
-				hasDuetPreTool = true
-				break
-			}
-		}
-		if !hasDuetPreTool {
-			hookConfigs = append(hookConfigs, hooks.HookConfig{
-				Event: hooks.EventPreToolUse,
-				Type:  hooks.TypeBuiltin,
-				Name:  "duet",
-			})
-		}
-	}
-
-	// Auto-capture: always register memory-capture so tool outputs and session
-	// summaries flow into the long-term store without user configuration.
-	hookConfigs = append(hookConfigs,
-		hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
-		hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
-	)
-
-	if len(hookConfigs) > 0 {
-		hookRunner := hooks.NewRunner()
-		if cfg.Duet.Enabled {
-			hookRunner.Register("duet", hooks.NewDuetHook(
-				rt.Provider,
-				cfg.Duet.ExtraDestructive,
-				cwd,
-				cfg.Permissions.SecretPathPatterns,
-				func() string { return a.Model },
-				func() []byte { return a.Transcript() },
-			))
-		}
-		// Wire memory-capture when a store is available (best-effort).
-		if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
-			hookRunner.Register("memory-capture", mc)
-		}
-		hookRunner.Configure(hookConfigs)
-		a.HookRunner = hookRunner
-	}
+	// Hooks: assemble and wire all configured hooks + builtins.
+	a.HookRunner = buildHookRunner(cfg, cwd, rt, func() string { return a.Model }, func() []byte { return a.Transcript() })
 
 	// Route retry notices through agent.EmitInfo so they appear as
 	// chat items instead of stderr writes that would corrupt the TUI.
@@ -1079,66 +1015,8 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.Spawner = spawner
 	registerSpawnerTools(reg, spawner, wtMgr)
 
-	// Hooks: assemble configs from TOML, add Duet builtin when enabled, and
-	// always add memory-capture for EventPostToolUse + EventSessionEnd.
-	var oneShotHookConfigs []hooks.HookConfig
-	for _, hi := range cfg.Hooks {
-		hc := hooks.HookConfig{
-			Event:   hooks.HookEvent(hi.Event),
-			Type:    hooks.HookType(hi.Type),
-			Command: hi.Command,
-			Name:    hi.Name,
-		}
-		if hc.Type == "" {
-			hc.Type = hooks.TypeSubprocess
-		}
-		if !validHookEvent(hc.Event) {
-			slog.Warn("skipping hook with unknown event", "event", hi.Event)
-			continue
-		}
-		if hi.Timeout > 0 {
-			hc.Timeout = time.Duration(hi.Timeout) * time.Second
-		}
-		oneShotHookConfigs = append(oneShotHookConfigs, hc)
-	}
-	if cfg.Duet.Enabled {
-		hasDuetPreTool := false
-		for _, hc := range oneShotHookConfigs {
-			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
-				hasDuetPreTool = true
-				break
-			}
-		}
-		if !hasDuetPreTool {
-			oneShotHookConfigs = append(oneShotHookConfigs, hooks.HookConfig{
-				Event: hooks.EventPreToolUse,
-				Type:  hooks.TypeBuiltin,
-				Name:  "duet",
-			})
-		}
-	}
-	oneShotHookConfigs = append(oneShotHookConfigs,
-		hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
-		hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
-	)
-	{
-		hookRunner := hooks.NewRunner()
-		if cfg.Duet.Enabled {
-			hookRunner.Register("duet", hooks.NewDuetHook(
-				rt.Provider,
-				cfg.Duet.ExtraDestructive,
-				cwd,
-				cfg.Permissions.SecretPathPatterns,
-				func() string { return a.Model },
-				func() []byte { return a.Transcript() },
-			))
-		}
-		if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
-			hookRunner.Register("memory-capture", mc)
-		}
-		hookRunner.Configure(oneShotHookConfigs)
-		a.HookRunner = hookRunner
-	}
+	// Hooks: assemble and wire all configured hooks + builtins.
+	a.HookRunner = buildHookRunner(cfg, cwd, rt, func() string { return a.Model }, func() []byte { return a.Transcript() })
 
 	// --resume-at: resolve the named checkpoint or step index, then truncate
 	// the in-memory transcript to the boundary so the resumed session starts
@@ -1614,12 +1492,96 @@ func runCompactCmd(_ []string) error {
 	return agent.RunCompact(ctx, a, os.Stdout)
 }
 
+// buildHookRunner assembles a *hooks.Runner from the TOML config list, adds
+// the Duet builtin when enabled, and conditionally adds memory-capture
+// HookConfigs only when the store is available. This is the single
+// authoritative implementation shared by runTUI and runOneShot — extracting
+// it eliminates the verbatim copy-paste that existed before and prevents
+// the two paths from drifting apart.
+//
+// modelFn / transcriptFn are closures so the duet hook reads the live
+// values from the agent rather than a snapshot taken at wiring time.
+func buildHookRunner(
+	cfg config.Config,
+	cwd string,
+	rt providerRuntime,
+	modelFn func() string,
+	transcriptFn func() []byte,
+) *hooks.Runner {
+	var hookConfigs []hooks.HookConfig
+	for _, hi := range cfg.Hooks {
+		hc := hooks.HookConfig{
+			Event:   hooks.HookEvent(hi.Event),
+			Type:    hooks.HookType(hi.Type),
+			Command: hi.Command,
+			Name:    hi.Name,
+		}
+		if hc.Type == "" {
+			hc.Type = hooks.TypeSubprocess
+		}
+		if !validHookEvent(hc.Event) {
+			slog.Warn("skipping hook with unknown event", "event", hi.Event)
+			continue
+		}
+		if hi.Timeout > 0 {
+			hc.Timeout = time.Duration(hi.Timeout) * time.Second
+		}
+		hookConfigs = append(hookConfigs, hc)
+	}
+
+	if cfg.Duet.Enabled {
+		hasDuetPreTool := false
+		for _, hc := range hookConfigs {
+			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
+				hasDuetPreTool = true
+				break
+			}
+		}
+		if !hasDuetPreTool {
+			hookConfigs = append(hookConfigs, hooks.HookConfig{
+				Event: hooks.EventPreToolUse,
+				Type:  hooks.TypeBuiltin,
+				Name:  "duet",
+			})
+		}
+	}
+
+	// Auto-capture: only append memory-capture HookConfigs when the store is
+	// available. Appending them unconditionally would mean the Runner always has
+	// a config referencing a builtin that was never Register'd, which causes a
+	// fail-open hook error on every tool call.
+	runner := hooks.NewRunner()
+	if cfg.Duet.Enabled {
+		runner.Register("duet", hooks.NewDuetHook(
+			rt.Provider,
+			cfg.Duet.ExtraDestructive,
+			cwd,
+			cfg.Permissions.SecretPathPatterns,
+			modelFn,
+			transcriptFn,
+		))
+	}
+	if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
+		runner.Register("memory-capture", mc)
+		hookConfigs = append(hookConfigs,
+			hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+			hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+		)
+	}
+
+	runner.Configure(hookConfigs)
+	return runner
+}
+
 // openMemoryCaptureBuiltin opens the per-project JSONL memory store and
 // returns a BuiltinHook that wraps MemoryCapture.Handle. Returns nil when
 // the store cannot be opened (best-effort: a missing store must not break
 // the agent loop).
 func openMemoryCaptureBuiltin(cwd string) hooks.BuiltinHook {
-	_ = os.MkdirAll(filepath.Join(cwd, ".deepseek"), 0o755)
+	storeDir := filepath.Join(cwd, ".deepseek")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		slog.Warn("memory-capture: cannot create store directory", "path", storeDir, "err", err)
+	}
 	storePath := filepath.Join(cwd, ".deepseek", "memory.jsonl")
 	ms, err := memory.NewJSONLStore(storePath)
 	if err != nil {

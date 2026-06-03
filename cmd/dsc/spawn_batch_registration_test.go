@@ -3,20 +3,31 @@ package main
 import (
 	"testing"
 
+	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/tools"
+	"github.com/amemiya02/deepseekcode/internal/worktree"
 )
 
-// TestSpawnBatchRegistered verifies that spawn_batch is present in the tool
-// registry used by the agent. This test drives the requirement that
-// NewSpawnBatchTool is registered alongside NewSubagentTool in main.go.
-// The test directly exercises the registration call that must exist in the
-// production code: if the call is absent, the tool is invisible to the model.
-func TestSpawnBatchRegistered(t *testing.T) {
+// TestSpawnBatchRegisteredViaProductionHelper is an integration-level check
+// that the production registration path — registerSpawnerTools — includes
+// spawn_batch. It calls the same helper that runTUI and runOneShot call, so
+// deleting the reg.Register(tools.NewSpawnBatchTool(...)) line from
+// registerSpawnerTools will make this test fail.
+//
+// The previous unit-level test (which registered the tool directly) was
+// insufficient: it did not exercise the production path and would pass even
+// if both Registration calls were removed from main.go.
+func TestSpawnBatchRegisteredViaProductionHelper(t *testing.T) {
 	reg := tools.New()
-	reg.Register(tools.NewSpawnBatchTool(nil, 4))
+	spawner := &agent.LoopSpawner{} // nil fields are fine; registration only needs the value
+	wtMgr := worktree.NewManager(".")
 
-	if _, ok := reg.Get("spawn_batch"); !ok {
-		t.Fatal("spawn_batch tool not found in registry after registration; " +
-			"ensure NewSpawnBatchTool is registered in main.go alongside NewSubagentTool")
+	registerSpawnerTools(reg, spawner, wtMgr)
+
+	for _, name := range []string{"task", "spawn_batch", "worktree"} {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("registerSpawnerTools: tool %q not found in registry; "+
+				"ensure it is registered in registerSpawnerTools (main.go)", name)
+		}
 	}
 }

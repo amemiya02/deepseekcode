@@ -716,9 +716,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		Locks:    wtLocks,
 	}
 	a.Spawner = spawner
-	reg.Register(tools.NewSubagentTool(spawner))
-	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
-	reg.Register(tools.NewWorktreeTool(wtMgr))
+	registerSpawnerTools(reg, spawner, wtMgr)
 
 	// Fetch account balance (non-blocking on failure). Only meaningful
 	// for DeepSeek providers; other providers skip silently.
@@ -1052,9 +1050,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		Locks:    wtLocks,
 	}
 	a.Spawner = spawner
-	reg.Register(tools.NewSubagentTool(spawner))
-	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
-	reg.Register(tools.NewWorktreeTool(wtMgr))
+	registerSpawnerTools(reg, spawner, wtMgr)
 
 	// --resume-at: resolve the named checkpoint or step index, then truncate
 	// the in-memory transcript to the boundary so the resumed session starts
@@ -1296,6 +1292,17 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 			e.Reply <- tools.QuestionResponse{Answers: answers}
 		}
 	}
+}
+
+// registerSpawnerTools is the single authoritative place that registers the
+// spawner-related tools (task, spawn_batch, worktree) on a production
+// registry. Both runTUI and runOneShot call this so the registration surface
+// stays in sync and is exercised by the integration test in
+// spawn_batch_registration_test.go without duplicating the wiring logic.
+func registerSpawnerTools(reg *tools.Registry, spawner *agent.LoopSpawner, wtMgr *worktree.Manager) {
+	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
+	reg.Register(tools.NewWorktreeTool(wtMgr))
 }
 
 // registerSkillRead installs the skill_read lazy-body dispatcher as a core

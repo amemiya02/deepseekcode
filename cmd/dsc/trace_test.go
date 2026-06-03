@@ -29,3 +29,28 @@ func writeTestFile(t *testing.T, path, body string) {
 		t.Fatalf("write file: %v", err)
 	}
 }
+
+func TestRunTraceDiffBody_CleanPrefix(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "turn_0001.json")
+	b := filepath.Join(dir, "turn_0002.json")
+	if err := os.WriteFile(a, []byte("HEAD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("HEADtail"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runTraceDiffBody([]string{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "cache-stable") {
+		t.Fatalf("want cache-stable verdict, got: %s", out)
+	}
+}
+
+func TestRunTraceDiffBody_BadArgs(t *testing.T) {
+	if _, err := runTraceDiffBody([]string{"only-one"}); err == nil {
+		t.Fatal("expected usage error for 1 arg")
+	}
+}

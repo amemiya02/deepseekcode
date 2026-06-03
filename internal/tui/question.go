@@ -164,11 +164,19 @@ func (q *QuestionFlow) Render(t Theme, width int) string {
 		}
 	}
 
-	multiHint := ""
-	if qu.Multiple {
-		multiHint = " · space toggle"
+	var hint string
+	if len(qu.Options) == 0 {
+		// Free-text input: the confirm line already added above suffices;
+		// show the generic "type and press ⏎" hint here too so the hint
+		// line is always present (no layout shift when toggling modes).
+		hint = t.Hint.Render("  " + i18n.T("question.input.hint"))
+	} else {
+		multiHint := ""
+		if qu.Multiple {
+			multiHint = " · space toggle"
+		}
+		hint = t.Hint.Render("  " + i18n.T("question.nav.hint", multiHint))
 	}
-	hint := t.Hint.Render("  " + i18n.T("question.input.hint") + multiHint)
 	lines = append(lines, "", hint)
 
 	body := strings.Join(lines, "\n")

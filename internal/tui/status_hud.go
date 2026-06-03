@@ -31,6 +31,7 @@ func StatusLabel(phase string) string {
 type HUDData struct {
 	Model           string
 	Effort          string
+	Phase           string // agent phase: "thinking", "streaming", "idle", "error", "compacting"
 	ContextTokens   int
 	ContextLimit    int
 	CacheHitRatio   float64
@@ -61,6 +62,11 @@ func RenderHUD(data HUDData, width int) string {
 			model += " " + data.Effort
 		}
 		parts = append(parts, model)
+	}
+
+	// Agent phase (thinking, streaming, idle, error, compacting)
+	if data.Phase != "" {
+		parts = append(parts, StatusLabel(data.Phase))
 	}
 
 	// Cache ratio (only when hit+miss token data exists). The persistent

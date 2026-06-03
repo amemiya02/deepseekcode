@@ -136,7 +136,7 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 	const btnW = 20
 	btns := []struct{ key, label string }{
 		{"Y", i18n.T("permission.granted")},
-		{"S", i18n.T("permission.prompt")},
+		{"S", i18n.T("permission.session")},
 		{"A", i18n.T("permission.always")},
 		{"N", i18n.T("permission.denied")},
 	}

@@ -371,6 +371,39 @@ func TestHumanTokens(t *testing.T) {
 	}
 }
 
+// TestStatusLabel_KnownPhases guards StatusLabel wiring: each known phase must
+// return a non-empty string that is NOT the bare i18n key (e.g. "status.thinking").
+// Note: some English translations intentionally equal the phase name (e.g.
+// "streaming" → "streaming"); we only guard against the catalog missing the key
+// entirely, which would cause i18n.T to return the key string "status.<phase>".
+func TestStatusLabel_KnownPhases(t *testing.T) {
+	phases := []string{"thinking", "streaming", "idle", "error", "compacting"}
+	for _, phase := range phases {
+		got := StatusLabel(phase)
+		if got == "" {
+			t.Errorf("StatusLabel(%q) returned empty string", phase)
+		}
+		// If the catalog key is missing, i18n.T returns the key itself ("status.thinking" etc.).
+		// The StatusLabel default branch returns the raw phase, not "status.<phase>".
+		// So if got == "status."+phase it means the key lookup fell through to key-as-value.
+		if got == "status."+phase {
+			t.Errorf("StatusLabel(%q) returned the bare catalog key — i18n entry missing", phase)
+		}
+	}
+}
+
+// TestRenderHUD_Phase guards that a non-empty Phase field is rendered via
+// StatusLabel so the exported function is actually reachable from the HUD.
+func TestRenderHUD_Phase(t *testing.T) {
+	data := HUDData{Model: "flash", Phase: "thinking"}
+	result := RenderHUD(data, 80)
+	// StatusLabel("thinking") → "thinking…" (en) — must appear in the HUD output.
+	label := StatusLabel("thinking")
+	if !strings.Contains(result, label) {
+		t.Errorf("RenderHUD with Phase=%q must include StatusLabel output %q; got %q", "thinking", label, result)
+	}
+}
+
 func TestRenderHUDShowsCoreFields(t *testing.T) {
 	got := RenderHUD(HUDData{
 		Model:           "deepseek-v4-flash",

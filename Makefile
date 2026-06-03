@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop ci
+.PHONY: build build-web install install-web test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop ci
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -70,12 +70,24 @@ web:
 	rm -rf webapp/dist
 	cp -r web/dist webapp/dist
 
+# Build the dsc binary WITH the compiled SPA embedded (-tags withwebapp), so
+# `dsc serve --http` serves the real web UI at / instead of the "SPA not
+# embedded" stub. Depends on `web` to populate webapp/dist first.
+build-web: web
+	@mkdir -p $(BIN_DIR)
+	go build -tags withwebapp $(LDFLAGS) -o $(BIN_DIR)/$(BIN_NAME) ./cmd/dsc
+	@echo "Built $(BIN_DIR)/$(BIN_NAME) with embedded SPA. Run: ./$(BIN_DIR)/$(BIN_NAME) serve --http 127.0.0.1:7432"
+
+# Install the embedded-SPA dsc onto your PATH (go env GOPATH/bin).
+install-web: web
+	go install -tags withwebapp $(LDFLAGS) ./cmd/dsc
+
 web-test:
 	cd web && npm install --legacy-peer-deps && npm test
 
 # ---------- Wails desktop ----------
 desktop: web
-	cd desktop && wails build
+	cd desktop && wails build -tags withwebapp
 
 # ---------- CI gate ----------
 ci: web-test test

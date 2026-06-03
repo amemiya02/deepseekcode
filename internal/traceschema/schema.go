@@ -60,6 +60,14 @@ type Record struct {
 	AfterStaticPrefixHash  string   `json:"after_static_prefix_hash,omitempty"`
 	SummaryCostCNY         *float64 `json:"summary_cost_cny,omitempty"`
 
+	// TsUnixNano is the wall-clock emit time (Unix nanoseconds) of a usage
+	// record. Lets benchmark analysis correlate provider-side cache eviction
+	// with inter-turn latency (Layer-2 diagnosis). Pointer+omitempty so it is
+	// present only where set (usage records); trace-only, never sent to the
+	// model, so it cannot affect the prompt cache. Placed just before the
+	// explicitly-last SchemaVersion so no prior field's key order shifts.
+	TsUnixNano *int64 `json:"ts_unix_nano,omitempty"`
+
 	// SchemaVersion is stamped by the emitter (= Version) on every record.
 	// Absent on legacy traces predating T6.1 → decodes as 0. Placed last so
 	// the emitted key order of all prior fields is unchanged.

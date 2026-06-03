@@ -164,6 +164,7 @@ func (s *TraceSink) Handle(ev Event) {
 			stepModel = s.model
 		}
 		cost := llm.Cost(stepModel, e.Usage)
+		ts := time.Now().UnixNano() // wall-clock for eviction-vs-latency analysis
 		// One snapshot per turn lets the harness prove the static prefix
 		// hash is identical across every turn of an epoch.
 		s.write(traceRecord{
@@ -182,6 +183,7 @@ func (s *TraceSink) Handle(ev Event) {
 			CacheMissTokens: &miss,
 			OutputTokens:    &out,
 			CostCNY:         &cost,
+			TsUnixNano:      &ts,
 			Reason:          e.Reason.String(),
 		})
 	case EventSemanticCompaction:

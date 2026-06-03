@@ -31,9 +31,10 @@ const (
 	// fixture. Below this the gate fails and the developer must investigate.
 	// InspectFile computes CacheHitRate over warm turns only (turns 2+ of each
 	// epoch), excluding the expected cold-start first turn. With the 5-turn
-	// fixture (turns 2-5 hit=173 000, miss=7 000) the warm rate is ~0.961,
-	// comfortably above 0.90.
-	MinCacheHitRate = 0.90
+	// fixture (turns 2-5 hit=173 000, miss=7 000) the warm rate is ~0.961, so
+	// 0.95 leaves a small (~1.1pt) margin that stays green on the clean fixture
+	// yet trips on any meaningful cache regression.
+	MinCacheHitRate = 0.95
 )
 
 func TestCacheRegression_NoEvictions(t *testing.T) {

@@ -48,6 +48,9 @@ type HookInput struct {
 	ToolInput json.RawMessage `json:"tool_input,omitempty"`
 	CWD       string          `json:"cwd"`
 	SessionID string          `json:"session_id"`
+	// Extra holds event-specific metadata (e.g. tool output for PostToolUse,
+	// summary for SessionEnd). Keys vary by event; callers must type-assert.
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 // HookOutput is the structured response a hook must produce on stdout

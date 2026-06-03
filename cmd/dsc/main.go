@@ -717,6 +717,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 	a.Spawner = spawner
 	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
 	reg.Register(tools.NewWorktreeTool(wtMgr))
 
 	// Fetch account balance (non-blocking on failure). Only meaningful
@@ -1052,6 +1053,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	}
 	a.Spawner = spawner
 	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
 	reg.Register(tools.NewWorktreeTool(wtMgr))
 
 	// --resume-at: resolve the named checkpoint or step index, then truncate

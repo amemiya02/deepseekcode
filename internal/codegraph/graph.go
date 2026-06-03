@@ -117,19 +117,31 @@ func (s *Store) Node(id NodeID) *Node {
 
 // AllNodes returns a slice of all nodes in the store (order unspecified).
 func (s *Store) AllNodes() []*Node {
-	out := make([]*Node, 0, len(s.nodes))
+	nodes := make([]*Node, 0, len(s.nodes))
 	for _, n := range s.nodes {
-		out = append(out, n)
+		nodes = append(nodes, n)
 	}
-	return out
+	return nodes
 }
 
-// OutEdges returns the outgoing edges from the given node (read-only view).
+// OutEdges returns a copy of the outgoing edges from the given node.
+// Returns nil when the node has no outgoing edges.
+// Callers may freely modify the returned slice without affecting store internals.
 func (s *Store) OutEdges(from NodeID) []Edge {
-	return s.out[from]
+	src := s.out[from]
+	if len(src) == 0 {
+		return nil
+	}
+	return append([]Edge(nil), src...)
 }
 
-// InEdges returns the incoming edges to the given node (read-only view).
+// InEdges returns a copy of the incoming edges to the given node.
+// Returns nil when the node has no incoming edges.
+// Callers may freely modify the returned slice without affecting store internals.
 func (s *Store) InEdges(to NodeID) []Edge {
-	return s.in[to]
+	src := s.in[to]
+	if len(src) == 0 {
+		return nil
+	}
+	return append([]Edge(nil), src...)
 }

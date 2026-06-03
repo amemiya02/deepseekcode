@@ -41,16 +41,32 @@ func TestEdgeKindString(t *testing.T) {
 }
 
 // TestNodeIDFormat verifies that NodeID follows the "<pkg-path>.<Name>"
-// convention by checking that a well-formed ID contains a dot separator.
+// convention via a round-trip: a Node whose ID is built from the format
+// contract is added to a Store and retrieved via Node(); the ID field on
+// the returned node must survive intact.
 func TestNodeIDFormat(t *testing.T) {
-	id := codegraph.NodeID("github.com/amemiya02/deepseekcode/internal/foo.Bar")
-	if !strings.Contains(string(id), ".") {
-		t.Fatalf("NodeID %q does not contain a dot separator; expected format <pkg-path>.<Name>", id)
+	const pkgPath = "github.com/amemiya02/deepseekcode/internal/foo"
+	const name = "Bar"
+	id := codegraph.NodeID(pkgPath + "." + name)
+
+	s := codegraph.NewStore()
+	n := &codegraph.Node{ID: id, Kind: codegraph.KindType, Name: name, File: "internal/foo/bar.go", Line: 1}
+	s.AddNode(n)
+
+	got := s.Node(id)
+	if got == nil {
+		t.Fatalf("Node(%q) returned nil after AddNode", id)
 	}
-	parts := strings.Split(string(id), ".")
-	name := parts[len(parts)-1]
-	if name == "" {
-		t.Fatalf("NodeID %q has an empty symbol name after the last dot", id)
+	if got.ID != id {
+		t.Fatalf("Node(%q).ID = %q; want %q", id, got.ID, id)
+	}
+	// Structural checks: the ID must contain a dot and end with a non-empty name.
+	if !strings.Contains(string(got.ID), ".") {
+		t.Fatalf("NodeID %q does not contain a dot separator; expected format <pkg-path>.<Name>", got.ID)
+	}
+	parts := strings.Split(string(got.ID), ".")
+	if sym := parts[len(parts)-1]; sym == "" {
+		t.Fatalf("NodeID %q has an empty symbol name after the last dot", got.ID)
 	}
 }
 

@@ -98,6 +98,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
 		// Two-tier timeout mirrors Client.readSSE.
 		firstTimer := time.NewTimer(c.FirstTokenTimeout)
@@ -141,6 +142,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 					emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrFirstTokenTimeout, c.FirstTokenTimeout)})
 					return
 				}
+				continue
 			case <-stallTimer.C:
 				emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrChunkStall, c.ChunkStallTimeout)})
 				return
@@ -210,8 +212,6 @@ func parseAnthropicSSEData(eventType, data string) *Event {
 				return &Event{Type: EventFinish, FinishReason: reason}
 			}
 		}
-	case "message_stop":
-		return &Event{Type: EventFinish, FinishReason: "end_turn"}
 	}
 	return nil
 }

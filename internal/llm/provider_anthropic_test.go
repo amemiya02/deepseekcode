@@ -64,6 +64,9 @@ func TestAnthropicProviderStream(t *testing.T) {
 
 	var got []string
 	for ev := range ch {
+		if ev.Type == EventError {
+			t.Errorf("unexpected error event: %v", ev.Err)
+		}
 		// Adapt: spec used EventText; real codebase uses EventTextDelta
 		if ev.Type == EventTextDelta {
 			got = append(got, ev.Text)

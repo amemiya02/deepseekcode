@@ -3,9 +3,9 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
@@ -28,17 +28,17 @@ func buildToolIndex(t *testing.T) *codegraph.Index {
 	return idx
 }
 
+// TestCodegraphSearchTool_Name and TestCodegraphSearchTool_IsReadOnly test
+// constant-returning methods; no index walk needed.
 func TestCodegraphSearchTool_Name(t *testing.T) {
-	idx := buildToolIndex(t)
-	tool := tools.NewCodegraphSearchTool(idx)
+	tool := tools.NewCodegraphSearchTool(nil)
 	if tool.Name() != "codegraph_search" {
 		t.Errorf("Name() = %q, want codegraph_search", tool.Name())
 	}
 }
 
 func TestCodegraphSearchTool_IsReadOnly(t *testing.T) {
-	idx := buildToolIndex(t)
-	tool := tools.NewCodegraphSearchTool(idx)
+	tool := tools.NewCodegraphSearchTool(nil)
 	if !tool.IsReadOnly() {
 		t.Error("codegraph_search must be read-only")
 	}
@@ -56,8 +56,16 @@ func TestCodegraphSearchTool_Execute(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Execute returned error result: %s", result.Content)
 	}
-	if !containsString(result.Content, "Add") {
+	if !strings.Contains(result.Content, "Add") {
 		t.Errorf("result content does not mention Add; got: %s", result.Content)
+	}
+	// Assert that kind ("func") and a file:line token are present so that a
+	// broken output format does not silently pass.
+	if !strings.Contains(result.Content, "func") {
+		t.Errorf("result content missing kind 'func'; got: %s", result.Content)
+	}
+	if !strings.Contains(result.Content, ".go:") {
+		t.Errorf("result content missing file:line token (e.g. 'util.go:3'); got: %s", result.Content)
 	}
 }
 
@@ -75,17 +83,21 @@ func TestCodegraphSearchTool_ExecuteMissingParam(t *testing.T) {
 	}
 }
 
-func containsString(s, sub string) bool {
-	return len(s) > 0 && len(sub) > 0 && (s == sub || len(s) >= len(sub) && containsSubstr(s, sub))
-}
+// TestCodegraphSearchTool_ExecuteNotFound verifies the no-results path returns
+// a non-error result (not IsError=true) with informative content.
+func TestCodegraphSearchTool_ExecuteNotFound(t *testing.T) {
+	idx := buildToolIndex(t)
+	tool := tools.NewCodegraphSearchTool(idx)
 
-func containsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+	params, _ := json.Marshal(map[string]string{"name": "ZzzzDoesNotExistXxx"})
+	result, err := tool.Execute(context.Background(), params)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
 	}
-	return false
+	if result.IsError {
+		t.Errorf("no-match result should not be IsError=true; got: %s", result.Content)
+	}
+	if result.Content == "" {
+		t.Error("no-match result Content must not be empty")
+	}
 }
-
-var _ = os.DevNull // suppress unused import

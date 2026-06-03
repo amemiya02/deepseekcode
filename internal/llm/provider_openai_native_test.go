@@ -2,8 +2,13 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -97,4 +102,55 @@ func TestOpenAINativeGenGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %d bytes", len(b))
+}
+
+func TestOpenAINativeProviderStream(t *testing.T) {
+	// OpenAI SSE: data: {"choices":[{"delta":{"content":"4"}}]}
+	sse := strings.Join([]string{
+		`data: {"id":"x","object":"chat.completion.chunk","choices":[{"delta":{"content":"4"},"finish_reason":null}]}`,
+		``,
+		`data: {"id":"x","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			t.Error("missing Authorization header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sse)
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider("openai", ProviderConfig{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	ctx := context.Background()
+	ch, err := p.Stream(ctx, Request{
+		Model:     "gpt-4o",
+		Messages:  []Message{{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "2+2?"}}}},
+		MaxTokens: 16,
+		Stream:    true,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var got []string
+	for ev := range ch {
+		if ev.Type == EventTextDelta {
+			got = append(got, ev.Text)
+		}
+	}
+	if len(got) == 0 {
+		t.Error("expected at least one text event")
+	}
 }

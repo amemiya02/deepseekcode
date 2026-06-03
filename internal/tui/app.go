@@ -18,6 +18,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/commands"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
@@ -863,7 +864,7 @@ func (a *App) View() tea.View {
 		)
 	default:
 		hint = a.theme.Hint.Render(
-			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help",
+			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · " + i18n.T("app.help.hint"),
 		)
 	}
 

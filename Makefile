@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache
+.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -62,3 +62,14 @@ demo-cache-offline:
 cover-cache:
 	go test -cover -coverprofile=coverage-cache.out ./internal/llm/ ./internal/repair/ ./internal/routing/ ./internal/agent/
 	go tool cover -func=coverage-cache.out | tail -1
+
+# ---------- Web SPA ----------
+web:
+	cd web && npm install --legacy-peer-deps && npm run build
+
+web-test:
+	cd web && npm install --legacy-peer-deps && npm test
+
+# ---------- Wails desktop ----------
+desktop: web
+	cd desktop && wails build

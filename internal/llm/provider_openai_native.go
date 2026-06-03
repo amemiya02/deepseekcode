@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,7 +130,7 @@ func (p *OpenAINativeProvider) Stream(ctx context.Context, req Request) (<-chan 
 	if err != nil {
 		return nil, fmt.Errorf("openai native do: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode/100 != 2 {
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		return nil, &APIError{Status: resp.StatusCode, Body: string(buf)}
@@ -205,7 +206,7 @@ func (p *OpenAINativeProvider) readOpenAINativeSSE(ctx context.Context, body io.
 		}
 
 		if !sr.ok {
-			if sr.err != nil {
+			if sr.err != nil && !errors.Is(sr.err, io.EOF) {
 				emit(Event{Type: EventError, Err: sr.err})
 				return
 			}
@@ -235,15 +236,14 @@ func (p *OpenAINativeProvider) readOpenAINativeSSE(ctx context.Context, body io.
 			emit(Event{Type: EventFinish, FinishReason: finishReason})
 			return
 		}
-		ev := parseOpenAINativeSSEData(data)
-		if ev != nil {
-			if ev.Type == EventFinish {
-				// Capture finish_reason but do NOT emit yet; [DONE] will emit.
-				finishReason = ev.FinishReason
-			} else {
-				if !emit(*ev) {
-					return
-				}
+		text, fr := parseOpenAINativeSSEData(data)
+		if fr != "" {
+			// Capture finish_reason but do NOT emit yet; [DONE] will emit.
+			finishReason = fr
+		}
+		if text != "" {
+			if !emit(Event{Type: EventTextDelta, Text: text}) {
+				return
 			}
 		}
 	}
@@ -254,10 +254,10 @@ func (p *OpenAINativeProvider) readOpenAINativeSSE(ctx context.Context, body io.
 }
 
 // parseOpenAINativeSSEData decodes one OpenAI SSE data line.
-// It returns EventTextDelta for content deltas, and EventFinish (FinishReason
-// only, not to be emitted directly) when finish_reason=="stop" is seen.
-// The caller (readOpenAINativeSSE) controls when EventFinish is actually sent.
-func parseOpenAINativeSSEData(data string) *Event {
+// It returns (text, finishReason): text is non-empty for content deltas,
+// finishReason is non-empty when finish_reason is set in the chunk.
+// The caller (readOpenAINativeSSE) decides when and how to emit Events.
+func parseOpenAINativeSSEData(data string) (text, finishReason string) {
 	var raw struct {
 		Choices []struct {
 			Delta struct {
@@ -267,17 +267,14 @@ func parseOpenAINativeSSEData(data string) *Event {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal([]byte(data), &raw); err != nil {
-		return nil
+		return "", ""
 	}
 	if len(raw.Choices) == 0 {
-		return nil
+		return "", ""
 	}
 	c := raw.Choices[0]
-	if c.Delta.Content != "" {
-		return &Event{Type: EventTextDelta, Text: c.Delta.Content}
-	}
 	if c.FinishReason != nil && *c.FinishReason != "" {
-		return &Event{Type: EventFinish, FinishReason: *c.FinishReason}
+		finishReason = *c.FinishReason
 	}
-	return nil
+	return c.Delta.Content, finishReason
 }

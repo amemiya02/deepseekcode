@@ -50,7 +50,7 @@ func (t *CodegraphNodeTool) Execute(ctx context.Context, params json.RawMessage)
 	if p.ID == "" {
 		return Errf("id parameter is required"), nil
 	}
-	n := t.idx.Store().Node(codegraph.NodeID(p.ID))
+	n := t.idx.Lookup(codegraph.NodeID(p.ID))
 	if n == nil {
 		return Result{Content: fmt.Sprintf("no node found with id %q", p.ID)}, nil
 	}

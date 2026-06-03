@@ -164,13 +164,24 @@ func (idx *Index) Impact(symID NodeID) []*Node {
 	return out
 }
 
+// Lookup returns the Node with the given id, or nil if not present.
+// It holds idx.mu.RLock for both the store dereference and the map lookup,
+// preventing a data race with a concurrent Rebuild that atomically swaps
+// idx.store.
+func (idx *Index) Lookup(id NodeID) *Node {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.store.Node(id)
+}
+
 // Store returns a snapshot pointer to the underlying Store at the instant of
 // the call. The pointer is valid for READ-ONLY use only. It carries no
 // durability guarantee: a concurrent Rebuild may atomically replace idx.store
 // at any time after Store() returns, making the returned pointer stale.
 // Callers must NOT retain the pointer across yield points and must NOT call
 // AddNode / AddEdge through it; doing so introduces a data race. Use the
-// Index query methods (Search, Callers, Callees, Impact) for safe access.
+// Index query methods (Search, Callers, Callees, Impact, Lookup) for safe
+// access.
 func (idx *Index) Store() *Store {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()

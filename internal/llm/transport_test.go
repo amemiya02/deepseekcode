@@ -3,7 +3,6 @@ package llm_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -102,18 +101,22 @@ func TestNewClientWithEnv_DefaultBaseURL(t *testing.T) {
 }
 
 // TestMirrorRetry_FailoverToSecond verifies that StreamWithMirrors falls over
-// to the second mirror when the first returns a 5xx.
+// to the second mirror when the first returns a 5xx, and that the successful
+// mirror's SSE stream is actually delivered to the caller.
 func TestMirrorRetry_FailoverToSecond(t *testing.T) {
-	callCount := 0
+	badCallCount := 0
+	goodCallCount := 0
+
 	// First server: always 503.
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		badCallCount++
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer bad.Close()
 
 	// Second server: return a minimal SSE done stream.
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodCallCount++
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// Write a minimal finish event so the SSE reader terminates cleanly.
@@ -124,8 +127,6 @@ func TestMirrorRetry_FailoverToSecond(t *testing.T) {
 	mirrors := []string{bad.URL, good.URL}
 	c := llm.NewClientWithMirrors("test-key", mirrors)
 
-	// A real Stream call would parse SSE; here we just confirm no error after
-	// failover by checking that StreamWithMirrors eventually succeeds.
 	ctx := t.Context()
 	ch, err := c.StreamWithMirrors(ctx, llm.Request{
 		Model:    "deepseek-chat",
@@ -134,11 +135,83 @@ func TestMirrorRetry_FailoverToSecond(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamWithMirrors returned error: %v", err)
 	}
-	// Drain the channel.
+	// Drain the channel so the goroutine finishes.
 	for range ch {
 	}
-	if callCount == 0 {
+
+	if badCallCount == 0 {
 		t.Error("bad server was never called; mirrors not tried in order")
 	}
-	_ = url.Parse // keep import
+	if goodCallCount == 0 {
+		t.Error("good server was never called; failover did not happen")
+	}
+}
+
+// TestMirrorRetry_FailoverOnNetworkError verifies that StreamWithMirrors falls
+// over to the next mirror when the first mirror is unreachable (network error),
+// which is the dominant failure mode in China/GFW deployments.
+func TestMirrorRetry_FailoverOnNetworkError(t *testing.T) {
+	goodCallCount := 0
+
+	// Good server: return a minimal SSE done stream.
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodCallCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer good.Close()
+
+	// Use a TCP address that is guaranteed to refuse connections (port 1 is
+	// reserved and never has a listener in test environments).
+	unreachable := "http://127.0.0.1:1"
+
+	mirrors := []string{unreachable, good.URL}
+	c := llm.NewClientWithMirrors("test-key", mirrors)
+
+	ctx := t.Context()
+	ch, err := c.StreamWithMirrors(ctx, llm.Request{
+		Model:    "deepseek-chat",
+		Messages: []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}}}},
+	}, mirrors)
+	if err != nil {
+		t.Fatalf("StreamWithMirrors returned error after network failover: %v", err)
+	}
+	for range ch {
+	}
+
+	if goodCallCount == 0 {
+		t.Error("good server was never called; network-error failover did not happen")
+	}
+}
+
+// TestNewClientWithMirrors_StoresMirrors verifies that NewClientWithMirrors
+// stores all mirrors on the Client so StreamWithMirrors works without
+// re-supplying them.
+func TestNewClientWithMirrors_StoresMirrors(t *testing.T) {
+	goodCallCount := 0
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goodCallCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer good.Close()
+
+	// Build client with only the good mirror; call StreamWithMirrors with nil
+	// (should use c.Mirrors).
+	c := llm.NewClientWithMirrors("test-key", []string{good.URL})
+	ctx := t.Context()
+	ch, err := c.StreamWithMirrors(ctx, llm.Request{
+		Model:    "deepseek-chat",
+		Messages: []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}}}},
+	}, nil) // nil → use c.Mirrors
+	if err != nil {
+		t.Fatalf("StreamWithMirrors(nil) returned error: %v", err)
+	}
+	for range ch {
+	}
+	if goodCallCount == 0 {
+		t.Error("good server was never called when mirrors=nil; c.Mirrors not used")
+	}
 }

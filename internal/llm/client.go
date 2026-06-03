@@ -33,6 +33,11 @@ type Client struct {
 	APIKey     string
 	BaseURL    string
 
+	// Mirrors is an optional ordered list of base URLs to try when
+	// StreamWithMirrors is called without an explicit mirrors argument.
+	// Set by NewClientWithMirrors.
+	Mirrors []string
+
 	// FirstTokenTimeout caps the wait from request send to the first
 	// SSE event. Reasoner cold starts can be 30s+; default 45s.
 	FirstTokenTimeout time.Duration
@@ -132,10 +137,16 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 	}
 }
 
-// doStream performs a single HTTP+SSE request attempt.
+// doStream performs a single HTTP+SSE request attempt using c.BaseURL.
 func (c *Client) doStream(ctx context.Context, body []byte) (<-chan Event, error) {
-	url := c.BaseURL + "/v1/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	return c.doStreamURL(ctx, body, c.BaseURL+"/v1/chat/completions")
+}
+
+// doStreamURL performs a single HTTP+SSE request attempt against the given
+// fully-qualified endpoint URL. Used by StreamWithMirrors to avoid mutating
+// c.BaseURL across concurrent calls.
+func (c *Client) doStreamURL(ctx context.Context, body []byte, endpoint string) (<-chan Event, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

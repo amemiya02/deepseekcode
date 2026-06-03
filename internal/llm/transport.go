@@ -48,17 +48,20 @@ func ProxyTransport() *http.Transport {
 }
 
 // proxyFromEnv returns a proxy function that checks DEEPSEEKCODE_PROXY first,
-// then delegates to the standard env-based proxy resolution. We use
-// httpproxy.FromEnvironment() (reading env vars fresh on every call) instead
-// of http.ProxyFromEnvironment to avoid the per-process caching that
-// http.ProxyFromEnvironment applies — important for test isolation and for
-// processes that set DEEPSEEKCODE_PROXY after startup.
+// then delegates to the standard env-based proxy resolution. The
+// httpproxy.Config is captured once at construction time (matching the
+// behaviour of http.ProxyFromEnvironment) so proxy env vars are read at
+// ProxyTransport() call time, not on every request. Tests that need to change
+// the proxy mid-process should call ProxyTransport() again after updating env.
 func proxyFromEnv() func(*http.Request) (*url.URL, error) {
+	override := os.Getenv("DEEPSEEKCODE_PROXY")
+	cfg := httpproxy.FromEnvironment()
+	proxyFn := cfg.ProxyFunc()
 	return func(req *http.Request) (*url.URL, error) {
-		if v := os.Getenv("DEEPSEEKCODE_PROXY"); v != "" {
-			return url.Parse(v)
+		if override != "" {
+			return url.Parse(override)
 		}
-		return httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+		return proxyFn(req.URL)
 	}
 }
 
@@ -81,13 +84,15 @@ func NewClientWithEnv() *Client {
 
 // NewClientWithMirrors constructs a Client that will try each mirror URL in
 // order when StreamWithMirrors is called. The first mirror is also the
-// primary BaseURL for regular Stream calls.
+// primary BaseURL for regular Stream calls. All mirrors are stored on the
+// Client so that StreamWithMirrors can use c.Mirrors when called with nil.
 func NewClientWithMirrors(apiKey string, mirrors []string) *Client {
 	base := defaultBaseURL
 	if len(mirrors) > 0 {
 		base = mirrors[0]
 	}
 	c := NewClient(apiKey, base)
+	c.Mirrors = mirrors
 	c.HTTPClient = &http.Client{
 		Transport: ProxyTransport(),
 		Timeout:   0,
@@ -97,26 +102,36 @@ func NewClientWithMirrors(apiKey string, mirrors []string) *Client {
 
 // StreamWithMirrors attempts Stream against each mirror in turn, stopping at
 // the first success. It returns the first non-transient error or the last
-// error if all mirrors fail.
+// error if all mirrors fail. If mirrors is nil or empty, c.Mirrors is used.
+// c.BaseURL is never mutated; each attempt constructs its endpoint inline.
 func (c *Client) StreamWithMirrors(ctx context.Context, req Request, mirrors []string) (<-chan Event, error) {
+	if len(mirrors) == 0 {
+		mirrors = c.Mirrors
+	}
 	if len(mirrors) == 0 {
 		return c.Stream(ctx, req)
 	}
 
+	req.Stream = true
+	if req.StreamOptions == nil {
+		req.StreamOptions = &StreamOptions{IncludeUsage: true}
+	}
+	body, err := req.MarshalCacheStable()
+	if err != nil {
+		return nil, err
+	}
+
 	var lastErr error
 	for _, mirror := range mirrors {
-		mirror = strings.TrimRight(mirror, "/")
-		// Temporarily override BaseURL for this attempt.
-		orig := c.BaseURL
-		c.BaseURL = mirror
-		ch, err := c.Stream(ctx, req)
-		c.BaseURL = orig
+		endpoint := strings.TrimRight(mirror, "/") + "/v1/chat/completions"
+		ch, err := c.doStreamURL(ctx, body, endpoint)
 		if err == nil {
 			return ch, nil
 		}
 		lastErr = err
-		// Only continue to the next mirror for transient errors.
-		if !IsTransient(err) {
+		// Continue to the next mirror only for transient errors (HTTP 429/5xx
+		// or network-level failures such as connection refused / DNS error).
+		if !IsTransient(err) && !isNetworkError(err) {
 			return nil, err
 		}
 	}

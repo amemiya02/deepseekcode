@@ -12,6 +12,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/doctor"
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 func alwaysPass(_ context.Context, _ config.Config, _ *http.Client) doctor.CheckResult {
@@ -252,6 +253,22 @@ func TestCheckCacheFieldsInProbe_Present(t *testing.T) {
 	r := doctor.CheckCacheFieldsInProbe(context.Background(), cfg, srv.Client())
 	if !r.OK {
 		t.Fatalf("expected PASS when cache fields present, got: %s", r.Detail)
+	}
+}
+
+func TestCheckSandboxAvailable_ReturnsResult(t *testing.T) {
+	r := doctor.CheckSandboxAvailable(context.Background(), config.Config{}, nil)
+	if r.Name != "sandbox-available" {
+		t.Fatalf("wrong name: %s", r.Name)
+	}
+	if r.Detail == "" {
+		t.Fatal("Detail must not be empty")
+	}
+	// OK must match the sandbox package's own availability check so that a
+	// regression (e.g. hardcoding false) is caught immediately.
+	want := sandbox.Detect().Available()
+	if r.OK != want {
+		t.Fatalf("OK=%v but sandbox.Detect().Available()=%v; check is inconsistent", r.OK, want)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/onboarding"
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
 
 // CheckKeyPresent verifies that the active provider has a resolvable API key.
@@ -155,7 +156,15 @@ func CheckCacheFieldsInProbe(ctx context.Context, cfg config.Config, hc *http.Cl
 	return CheckResult{Name: name, OK: true, Detail: fmt.Sprintf("cache fields present (hit=%d miss=%d)", hit, miss)}
 }
 
-// CheckSandboxAvailable verifies that the sandbox environment is available.
+// CheckSandboxAvailable reports whether OS-native sandboxing is supported on
+// the current platform. It delegates to sandbox.Detect().Available() which
+// encodes the correct per-OS detection logic (seatbelt on macOS, Landlock on
+// Linux, noop elsewhere).
 func CheckSandboxAvailable(_ context.Context, _ config.Config, _ *http.Client) CheckResult {
-	return CheckResult{Name: "sandbox-available", OK: false, Detail: "not implemented"}
+	const name = "sandbox-available"
+	sb := sandbox.Detect()
+	if sb.Available() {
+		return CheckResult{Name: name, OK: true, Detail: fmt.Sprintf("%s sandbox available", sb.Name())}
+	}
+	return CheckResult{Name: name, OK: false, Detail: fmt.Sprintf("%s sandbox not available on this system", sb.Name())}
 }

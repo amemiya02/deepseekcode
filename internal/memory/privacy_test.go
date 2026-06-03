@@ -74,6 +74,13 @@ func TestStripSecretsAPIKey(t *testing.T) {
 				t.Errorf("expected %q to NOT contain %q\noriginal: %q\ngot: %q",
 					tc.name, tc.must0, tc.input, got)
 			}
+			// Every case that removes something must produce [REDACTED], not an empty hole.
+			if tc.must0 != "" && tc.input != tc.must {
+				if !strings.Contains(got, "[REDACTED]") {
+					t.Errorf("expected %q output to contain [REDACTED]\noriginal: %q\ngot: %q",
+						tc.name, tc.input, got)
+				}
+			}
 		})
 	}
 }
@@ -84,5 +91,41 @@ func TestStripSecretsIdempotent(t *testing.T) {
 	twice := memory.StripSecrets(once)
 	if once != twice {
 		t.Errorf("StripSecrets not idempotent:\nonce:  %q\ntwice: %q", once, twice)
+	}
+}
+
+// TestRememberStripsSecrets is an integration test that verifies StripSecrets
+// is wired into JSONLStore.Remember: if the wiring were accidentally removed,
+// the raw secret would appear in the stored record and this test would fail.
+func TestRememberStripsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.NewJSONLStore(dir + "/mem.jsonl")
+	if err != nil {
+		t.Fatalf("NewJSONLStore: %v", err)
+	}
+
+	secret := "sk-proj-abcdefghijklmnopqrstuvwxyz012345"
+	input := "my api key is " + secret
+
+	id, err := store.Remember(input, nil)
+	if err != nil {
+		t.Fatalf("Remember: %v", err)
+	}
+	if id == "" {
+		t.Fatal("Remember returned empty id")
+	}
+
+	// Recall the stored memory and confirm the raw secret is gone.
+	results, err := store.Recall("api key")
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
+	for _, m := range results {
+		if strings.Contains(m.Content, secret) {
+			t.Errorf("stored memory still contains raw secret %q; content: %q", secret, m.Content)
+		}
+		if !strings.Contains(m.Content, "[REDACTED]") {
+			t.Errorf("stored memory does not contain [REDACTED]; content: %q", m.Content)
+		}
 	}
 }

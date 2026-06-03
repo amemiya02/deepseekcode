@@ -3,12 +3,16 @@ package memory
 import "regexp"
 
 // secretPatterns lists regexes whose matches are redacted.
-// Each pattern should only redact the sensitive value portion,
-// not surrounding context, so anchors are used carefully.
+// Patterns redact the sensitive value portion only; the variable name or
+// surrounding context is preserved where possible.
+// NOTE: sk-/dsk-/bearer patterns must precede the generic env-var catch-all
+// (last entry) so that e.g. "token=sk-proj-…" is matched by the sk- rule
+// (which replaces only the key value) before the env-var rule could consume
+// the whole assignment.
 var secretPatterns = []*regexp.Regexp{
-	// OpenAI / Anthropic / DeepSeek style API keys
+	// OpenAI / Anthropic / DeepSeek style API keys — replace value only
 	regexp.MustCompile(`sk-[A-Za-z0-9\-_]{20,}`),
-	// DeepSeek dsk- keys
+	// DeepSeek dsk- keys — replace value only
 	regexp.MustCompile(`dsk-[A-Za-z0-9\-_]{20,}`),
 	// Generic long hex secrets (32+ chars) after = or :
 	regexp.MustCompile(`(?i)(secret[_\-]?(?:key|token|access[_\-]?key)|api[_\-]?key|token|password)\s*[=:]\s*\S{20,}`),
@@ -16,7 +20,10 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9\-_\.]{20,}`),
 	// AWS-style keys
 	regexp.MustCompile(`(?i)(AKIA|ASIA|AROA|AIDA)[A-Z0-9]{16}`),
-	// Generic env var assignments with long values (SECRET/KEY/TOKEN/PASSWORD in name)
+	// Generic env var assignments with long values (SECRET/KEY/TOKEN/PASSWORD in name).
+	// This intentionally replaces the whole assignment (NAME=value) because a
+	// look-behind is not available in Go's RE2 dialect. Must remain last so the
+	// more-specific sk-/dsk-/bearer patterns above take priority.
 	regexp.MustCompile(`(?i)(?:SECRET|KEY|TOKEN|PASSWORD)[A-Za-z0-9_]*\s*=\s*\S{16,}`),
 }
 

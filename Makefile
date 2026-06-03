@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop
+.PHONY: build install test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop ci
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -76,3 +76,7 @@ web-test:
 # ---------- Wails desktop ----------
 desktop: web
 	cd desktop && wails build
+
+# ---------- CI gate ----------
+ci: web-test test
+	@echo "CI: SPA tests + Go tests passed."

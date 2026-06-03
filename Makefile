@@ -66,6 +66,9 @@ cover-cache:
 # ---------- Web SPA ----------
 web:
 	cd web && npm install --legacy-peer-deps && npm run build
+	mkdir -p webapp
+	rm -rf webapp/dist
+	cp -r web/dist webapp/dist
 
 web-test:
 	cd web && npm install --legacy-peer-deps && npm test

@@ -44,3 +44,4 @@ bench/reports/
 bench/cache-demo/results.json
 web/dist/
 web/node_modules/
+webapp/dist/

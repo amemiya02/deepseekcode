@@ -182,6 +182,12 @@ func run() error {
 		return runCache(os.Args[2:])
 	}
 
+	// Subcommand: dsc serve --acp / --http :PORT. Starts an ACP stdio or
+	// HTTP+SSE gateway backed by the production agent factory.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		return runServe(os.Args[2:])
+	}
+
 	// Subcommand: dsc agent list|show|new|validate. Manage .deepseek/agent/*.md definitions.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		cwd, err := os.Getwd()

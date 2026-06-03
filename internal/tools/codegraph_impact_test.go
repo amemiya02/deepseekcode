@@ -10,8 +10,8 @@ import (
 )
 
 func TestCodegraphImpactTool_Name(t *testing.T) {
-	idx := buildToolIndex(t)
-	tool := tools.NewCodegraphImpactTool(idx)
+	// Name() never touches the index; use nil for speed.
+	tool := tools.NewCodegraphImpactTool(nil)
 	if tool.Name() != "codegraph_impact" {
 		t.Errorf("Name() = %q, want codegraph_impact", tool.Name())
 	}
@@ -30,8 +30,15 @@ func TestCodegraphImpactTool_Execute(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Execute returned error: %s", result.Content)
 	}
+	// Structural assertions: symbol name, kind, and file:line token must all appear.
 	if !strings.Contains(result.Content, "Run") {
 		t.Errorf("expected Run in impact set of Add; got: %s", result.Content)
+	}
+	if !strings.Contains(result.Content, "func") {
+		t.Errorf("result content missing kind 'func'; got: %s", result.Content)
+	}
+	if !strings.Contains(result.Content, ".go:") {
+		t.Errorf("result content missing file:line token (e.g. 'simple.go:7'); got: %s", result.Content)
 	}
 }
 
@@ -46,8 +53,7 @@ func TestCodegraphImpactTool_MissingParam(t *testing.T) {
 }
 
 func TestCodegraphImpactTool_IsReadOnly(t *testing.T) {
-	idx := buildToolIndex(t)
-	tool := tools.NewCodegraphImpactTool(idx)
+	tool := tools.NewCodegraphImpactTool(nil)
 	if !tool.IsReadOnly() {
 		t.Error("codegraph_impact must be read-only")
 	}

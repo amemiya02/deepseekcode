@@ -9,6 +9,11 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
 )
 
+const (
+	codegraphImpactMaxNodes = 100
+	codegraphImpactMaxBytes = 64 * 1024 // 64 KiB — transitive BFS can be large
+)
+
 // CodegraphImpactTool implements Tool for codegraph_impact.
 type CodegraphImpactTool struct {
 	idx *codegraph.Index
@@ -41,19 +46,27 @@ func (t *CodegraphImpactTool) Execute(ctx context.Context, params json.RawMessag
 		SymbolID string `json:"symbol_id"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
-		return Result{IsError: true, Content: "invalid params: " + err.Error()}, nil
+		return Errf("invalid params: %v", err), nil
 	}
 	if p.SymbolID == "" {
-		return Result{IsError: true, Content: "symbol_id parameter is required"}, nil
+		return Errf("symbol_id parameter is required"), nil
 	}
 	nodes := t.idx.Impact(codegraph.NodeID(p.SymbolID))
 	if len(nodes) == 0 {
 		return Result{Content: fmt.Sprintf("no symbols transitively impacted by changes to %q", p.SymbolID)}, nil
 	}
+	// Cap to avoid unbounded output for widely-depended-upon symbols.
+	capped := nodes
+	if len(capped) > codegraphImpactMaxNodes {
+		capped = capped[:codegraphImpactMaxNodes]
+	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Changing `%s` transitively impacts %d symbol(s):\n\n", p.SymbolID, len(nodes)))
-	for _, n := range nodes {
+	for _, n := range capped {
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s:%d\n", n.Name, n.Kind.String(), n.File, n.Line))
 	}
-	return Result{Content: sb.String()}, nil
+	if len(nodes) > codegraphImpactMaxNodes {
+		sb.WriteString(fmt.Sprintf("\n[showing first %d of %d impacted symbols]\n", codegraphImpactMaxNodes, len(nodes)))
+	}
+	return Result{Content: sb.String()}.Truncate(codegraphImpactMaxBytes), nil
 }

@@ -95,7 +95,10 @@ func TestStorePersistsAcrossReload(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "memory.jsonl")
 
-	store1, _ := memory.NewJSONLStore(path)
+	store1, err := memory.NewJSONLStore(path)
+	if err != nil {
+		t.Fatalf("NewJSONLStore store1: %v", err)
+	}
 	if _, err := store1.Remember("Persisted fact across reload.", []string{"reload"}); err != nil {
 		t.Fatal(err)
 	}

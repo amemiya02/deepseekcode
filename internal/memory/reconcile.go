@@ -4,7 +4,7 @@ import (
 	"math"
 )
 
-const reconcileThreshold = 0.60 // BM25-normalised cosine threshold
+const reconcileThreshold = 0.82 // TF-cosine similarity threshold (plain term-frequency cosine, not BM25-weighted)
 
 // findNearDuplicate scans existing records for one whose content is
 // sufficiently similar to newContent (Mem0 update-in-place pattern).

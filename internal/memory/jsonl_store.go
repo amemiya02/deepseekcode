@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync"
 	"time"
@@ -37,7 +39,7 @@ func NewJSONLStore(path string) (*JSONLStore, error) {
 
 func (s *JSONLStore) load() error {
 	f, err := os.Open(s.path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
@@ -46,6 +48,7 @@ func (s *JSONLStore) load() error {
 	defer f.Close()
 
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
 		var m Memory
 		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
@@ -145,11 +148,20 @@ func (s *JSONLStore) Forget(id string) error {
 	if !ok {
 		return fmt.Errorf("memory %q not found", id)
 	}
+	// Snapshot the record and mark deleted in the snapshot only.
+	// Mutate the live state only after the append succeeds so that
+	// a disk-full or other write error does not silently lose the record.
+	snapshot := *m
+	snapshot.Deleted = true
+	snapshot.UpdatedAt = time.Now()
+	if err := s.append(&snapshot); err != nil {
+		return err
+	}
 	m.Deleted = true
-	m.UpdatedAt = time.Now()
+	m.UpdatedAt = snapshot.UpdatedAt
 	delete(s.records, id)
 	s.index.Remove(id)
-	return s.append(m)
+	return nil
 }
 
 // Close is a no-op for JSONL (writes are immediate).

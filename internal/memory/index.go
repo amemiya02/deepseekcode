@@ -153,7 +153,7 @@ func (idx *BM25Index) recomputeAvgLen() {
 
 func unique(toks []string) []string {
 	seen := make(map[string]bool, len(toks))
-	out := toks[:0]
+	out := make([]string, 0, len(toks))
 	for _, t := range toks {
 		if !seen[t] {
 			seen[t] = true
@@ -174,7 +174,7 @@ func termFreq(tok string, tokens []string) float64 {
 }
 
 func removeStr(sl []string, s string) []string {
-	out := sl[:0]
+	out := make([]string, 0, len(sl))
 	for _, v := range sl {
 		if v != s {
 			out = append(out, v)

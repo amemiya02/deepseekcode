@@ -78,6 +78,10 @@ type Agent struct {
 	// goroutine, read from the agent goroutine, hence atomic.
 	stopRequested atomic.Bool
 
+	// checkpoints is the named-checkpoint index for this session.
+	// Reset at the start of each Run so branch/resume works on the live step list.
+	checkpoints *CheckpointIndex
+
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
 	// (the -p one-shot mode runs this way).
@@ -339,6 +343,8 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		a.ThinkingMode = m
 	}
 
+	a.checkpoints = newCheckpointIndex()
+
 	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
 	// after the literal rather than inside it.
 	a.StopWhen = []StopCondition{
@@ -409,6 +415,14 @@ func (a *Agent) RequestStop() {
 	a.stopRequested.Store(true)
 }
 
+// RecordCheckpoint implements tools.CheckpointRecorder. It associates name
+// with the current step count so /branch and --resume-at can find it.
+func (a *Agent) RecordCheckpoint(name string) int {
+	step := len(a.steps)
+	a.checkpoints.Record(name, step)
+	return step
+}
+
 // Run drives the loop until a stop condition fires or context cancels.
 // Returns the StopReason and any infrastructure error.
 //
@@ -427,6 +441,7 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	// Each Run gets its own single loop-break nudge and a fresh detection floor.
 	a.loopNudged = false
 	a.loopFloor = 0
+	a.checkpoints = newCheckpointIndex()
 
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})

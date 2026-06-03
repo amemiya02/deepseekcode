@@ -39,6 +39,22 @@ func TestCheckpointIndex(t *testing.T) {
 	}
 }
 
+func TestAgentRecordCheckpoint(t *testing.T) {
+	// Agent.RecordCheckpoint increments steps then records.
+	// Use a minimal agent with no LLM — just test the bookkeeping.
+	a := &Agent{checkpoints: newCheckpointIndex()}
+	// Simulate two steps already taken.
+	a.steps = []StepRecord{{}, {}}
+	step := a.RecordCheckpoint("mid")
+	if step != 2 {
+		t.Fatalf("RecordCheckpoint step = %d, want 2", step)
+	}
+	si, ok := a.checkpoints.Lookup("mid")
+	if !ok || si != 2 {
+		t.Fatalf("Lookup = (%d, %v), want (2, true)", si, ok)
+	}
+}
+
 // TestCheckpointIndexConcurrent exercises concurrent Record and Lookup under
 // the race detector to validate the RWMutex contract.
 func TestCheckpointIndexConcurrent(t *testing.T) {

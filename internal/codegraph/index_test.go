@@ -95,9 +95,42 @@ func TestIndexImpact(t *testing.T) {
 	}
 }
 
+func TestIndexDeletion(t *testing.T) {
+	// Write a file containing a symbol, rebuild, delete the file, rebuild again,
+	// and assert the symbol is absent. Guards against regression of the silent
+	// deletion bug fixed in commit 605002f (dead nodes not removed on file delete).
+	tmp := t.TempDir()
+	f1 := filepath.Join(tmp, "del.go")
+	if err := os.WriteFile(f1, []byte("package tmp\nfunc ToDelete() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile del.go: %v", err)
+	}
+
+	idx := codegraph.NewIndex("tmp")
+	if err := idx.Rebuild(tmp); err != nil {
+		t.Fatalf("first Rebuild: %v", err)
+	}
+	if len(idx.Search("ToDelete")) == 0 {
+		t.Fatal("ToDelete not found after first Rebuild")
+	}
+
+	// Delete the file and rebuild.
+	if err := os.Remove(f1); err != nil {
+		t.Fatalf("Remove del.go: %v", err)
+	}
+	if err := idx.Rebuild(tmp); err != nil {
+		t.Fatalf("second Rebuild after deletion: %v", err)
+	}
+	if len(idx.Search("ToDelete")) != 0 {
+		t.Fatal("ToDelete still present after its source file was deleted")
+	}
+}
+
 func TestIndexIncremental(t *testing.T) {
-	// Write a temp file, rebuild, modify it, rebuild again — only the changed
-	// file should be re-parsed (we verify by observing that the new symbol appears).
+	// Write a temp file, rebuild, add a second file, rebuild again — verify that
+	// symbols from both files are visible and no symbol is lost across rebuilds.
+	// Note: the implementation performs a full re-parse on every rebuild; the
+	// observable contract is that newly added symbols appear and pre-existing
+	// symbols are retained, not that only changed files are re-parsed.
 	tmp := t.TempDir()
 	f1 := filepath.Join(tmp, "a.go")
 	if err := os.WriteFile(f1, []byte("package tmp\nfunc Alpha() {}\n"), 0o644); err != nil {

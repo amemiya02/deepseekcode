@@ -164,7 +164,13 @@ func (idx *Index) Impact(symID NodeID) []*Node {
 	return out
 }
 
-// Store returns the underlying Store (for centrality / latent injection).
+// Store returns a snapshot pointer to the underlying Store at the instant of
+// the call. The pointer is valid for READ-ONLY use only. It carries no
+// durability guarantee: a concurrent Rebuild may atomically replace idx.store
+// at any time after Store() returns, making the returned pointer stale.
+// Callers must NOT retain the pointer across yield points and must NOT call
+// AddNode / AddEdge through it; doing so introduces a data race. Use the
+// Index query methods (Search, Callers, Callees, Impact) for safe access.
 func (idx *Index) Store() *Store {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()

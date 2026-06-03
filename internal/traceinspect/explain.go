@@ -45,7 +45,6 @@ func ExplainFile(path string) ([]TurnLedger, error) {
 
 	type epochState struct {
 		seenFirstUsage      bool
-		lastPrefixHash      string
 		pendingCompaction   bool
 		pendingDriftBlocked bool
 	}
@@ -77,10 +76,7 @@ func ExplainFile(path string) ([]TurnLedger, error) {
 
 		switch r.Type {
 		case "prefix.snapshot":
-			st := getState(r.EpochID)
-			if r.StaticPrefixHash != "" {
-				st.lastPrefixHash = r.StaticPrefixHash
-			}
+			// no per-epoch state mutation needed for snapshot records
 
 		case "compaction":
 			st := getState(r.EpochID)

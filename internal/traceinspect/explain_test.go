@@ -42,7 +42,8 @@ func TestExplainFile_TurnCount(t *testing.T) {
 
 func TestExplainFile_Turn1_ExpectedMiss(t *testing.T) {
 	path := writeTmp(t, minimalTrace)
-	ledger, _ := traceinspect.ExplainFile(path)
+	ledger, err := traceinspect.ExplainFile(path)
+	if err != nil { t.Fatalf("ExplainFile: %v", err) }
 	if ledger[0].Turn != 1 {
 		t.Fatalf("want turn 1, got %d", ledger[0].Turn)
 	}
@@ -56,7 +57,8 @@ func TestExplainFile_Turn1_ExpectedMiss(t *testing.T) {
 
 func TestExplainFile_Turn3_EvictionAfterCompaction(t *testing.T) {
 	path := writeTmp(t, minimalTrace)
-	ledger, _ := traceinspect.ExplainFile(path)
+	ledger, err := traceinspect.ExplainFile(path)
+	if err != nil { t.Fatalf("ExplainFile: %v", err) }
 	row := ledger[2]
 	if !row.Evicted {
 		t.Fatalf("turn 3 (hit=%d) should be flagged evicted", row.HitTokens)
@@ -68,7 +70,8 @@ func TestExplainFile_Turn3_EvictionAfterCompaction(t *testing.T) {
 
 func TestExplainFile_Turn2_HitOK(t *testing.T) {
 	path := writeTmp(t, minimalTrace)
-	ledger, _ := traceinspect.ExplainFile(path)
+	ledger, err := traceinspect.ExplainFile(path)
+	if err != nil { t.Fatalf("ExplainFile: %v", err) }
 	if ledger[1].Evicted {
 		t.Fatal("turn 2 has good cache hit and should not be evicted")
 	}
@@ -79,7 +82,8 @@ func TestExplainFile_Turn2_HitOK(t *testing.T) {
 
 func TestRenderExplainText_Headers(t *testing.T) {
 	path := writeTmp(t, minimalTrace)
-	ledger, _ := traceinspect.ExplainFile(path)
+	ledger, err := traceinspect.ExplainFile(path)
+	if err != nil { t.Fatalf("ExplainFile: %v", err) }
 	out := traceinspect.RenderExplainText(ledger)
 	for _, want := range []string{"TURN", "HIT", "MISS", "EVICT", "COST", "WHY"} {
 		if !strings.Contains(out, want) {
@@ -90,7 +94,8 @@ func TestRenderExplainText_Headers(t *testing.T) {
 
 func TestRenderExplainText_EvictMark(t *testing.T) {
 	path := writeTmp(t, minimalTrace)
-	ledger, _ := traceinspect.ExplainFile(path)
+	ledger, err := traceinspect.ExplainFile(path)
+	if err != nil { t.Fatalf("ExplainFile: %v", err) }
 	out := traceinspect.RenderExplainText(ledger)
 	if !strings.Contains(out, "Y") {
 		t.Errorf("RenderExplainText: expected at least one eviction mark 'Y'\noutput:\n%s", out)

@@ -157,6 +157,18 @@ func renderProject(p ProjectContext) string {
 	return b.String()
 }
 
+// InjectRecalled appends recalled memory facts into the dynamic section
+// of the system prompt. It ensures the recalled text always appears after
+// DynamicContextBoundary, preventing cache-prefix contamination.
+// If the boundary is not yet present in systemPrompt, it is inserted first.
+func InjectRecalled(systemPrompt, recalled string) string {
+	if !strings.Contains(systemPrompt, DynamicContextBoundary) {
+		// No boundary yet — append boundary then recalled.
+		return systemPrompt + DynamicContextBoundary + recalled
+	}
+	return systemPrompt + recalled
+}
+
 // renderSkillDirectory wraps the canonical stable skill directory (from
 // skills.Store.PromptIndex()) with the "## Skills" header. Empty input
 // returns "" so no section is emitted.

@@ -202,6 +202,13 @@ func run() error {
 		return nil
 	}
 
+	// Subcommand: dsc compact. Forces an immediate compaction of the last
+	// session's message list and writes the compacted session back to disk.
+	// Exits after reporting whether compaction occurred.
+	if len(os.Args) > 1 && os.Args[1] == "compact" {
+		return runCompactCmd(os.Args[2:])
+	}
+
 	var (
 		showVersion     bool
 		yolo            bool
@@ -1383,4 +1390,55 @@ func severityString(s int) string {
 	default:
 		return "unknown"
 	}
+}
+
+// runCompactCmd implements `dsc compact`. It loads the most-recent session for
+// the current working directory, replays its messages into a temporary Agent,
+// forces a compaction, and persists the result. Exits with a clear message
+// whether compaction occurred or the transcript was too short.
+func runCompactCmd(_ []string) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	rt, err := providerFromConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	cwd, _ := os.Getwd()
+	reg := tools.New()
+	pol := permissions.New(permissions.ModeAskAll, cwd, nil, nil, nil)
+	a := agent.New(rt.Client, reg, pol, rt.Model)
+	defer a.Close()
+	a.DisableSemanticCompaction = true // compact command uses deterministic path only
+
+	store, err := session.Open("")
+	if err != nil {
+		return fmt.Errorf("opening session store: %w", err)
+	}
+	sess, err := store.MostRecentInProject(ctx, cwd)
+	if err != nil {
+		return fmt.Errorf("no session found for current directory: %w", err)
+	}
+
+	msgs, err := store.Replay(ctx, sess.ID)
+	if err != nil {
+		return fmt.Errorf("replaying session: %w", err)
+	}
+	for _, m := range msgs {
+		a.Messages = append(a.Messages, llm.Message{Role: m.Role, Blocks: m.Blocks})
+	}
+
+	snaps := snapshots.New(".deepseek/snapshots")
+	a.Persister = session.NewPersister(store, snaps, sess.ID)
+
+	return agent.RunCompact(ctx, a, os.Stdout)
 }

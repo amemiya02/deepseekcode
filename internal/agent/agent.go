@@ -618,6 +618,28 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 	a.maybeCompact(ctx)
 }
 
+// Compact forces an immediate compaction (honoring the preserve count) and
+// reports whether a compaction was performed. It is the exported companion to
+// ForceCompact, intended for CLI paths such as `dsc --compact` and for
+// testing: callers that need to distinguish "nothing to compact" from a real
+// compaction can inspect the bool; errors surface as a non-nil second return.
+//
+// Internally it borrows ForceCompact's threshold-lowering trick, but wraps a
+// snapshot of the message-list length so it can report whether the list
+// actually shrank.
+func (a *Agent) Compact(ctx context.Context) (compacted bool, err error) {
+	before := len(a.Messages)
+	// Catch any panic from the internal path and convert to an error so
+	// CLI callers get a clean failure rather than a crash.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("compaction panic: %v", r)
+		}
+	}()
+	a.ForceCompact(ctx)
+	return len(a.Messages) != before, nil
+}
+
 // compactForOverflow runs a forced compaction for context-overflow recovery.
 // It pins the deterministic path for the duration of the call: a semantic
 // (LLM) summary would itself send much of the already-too-large conversation

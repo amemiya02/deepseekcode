@@ -82,6 +82,18 @@ func NewClientWithEnv() *Client {
 	return c
 }
 
+// WithProxyTransport installs a ProxyTransport() on the client's HTTPClient
+// in-place, so proxy env vars (DEEPSEEKCODE_PROXY / HTTPS_PROXY / HTTP_PROXY)
+// are honoured for every request made by this client. It returns the receiver
+// so callers can chain: prov.BaseClient().WithProxyTransport().
+func (c *Client) WithProxyTransport() *Client {
+	c.HTTPClient = &http.Client{
+		Transport: ProxyTransport(),
+		Timeout:   0, // streaming: no global timeout
+	}
+	return c
+}
+
 // NewClientWithMirrors constructs a Client that will try each mirror URL in
 // order when StreamWithMirrors is called. The first mirror is also the
 // primary BaseURL for regular Stream calls. All mirrors are stored on the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -9,17 +10,28 @@ import (
 )
 
 // TestBinary_ProxyEnvPassthrough verifies that the compiled binary actually
-// routes outbound requests through DEEPSEEKCODE_PROXY. The test runs the
-// binary in one-shot mode (-p) with a fake API key pointing at a closed
-// local port as the proxy. If the proxy transport is wired, the connection
-// attempt reaches 127.0.0.1:19999 and the error output mentions that
-// address. If the proxy is NOT wired, the binary would attempt a direct
+// routes outbound requests through DEEPSEEKCODE_PROXY. The test binds a TCP
+// listener to an OS-assigned free port, captures its address, then immediately
+// closes it so the port is in a connection-refused state. The binary is run
+// with that address as DEEPSEEKCODE_PROXY. If the proxy transport is wired,
+// the connection attempt reaches the closed port and the error output mentions
+// that address. If the proxy is NOT wired, the binary would attempt a direct
 // connection to api.deepseek.com instead, and the proxy address would never
 // appear — which is a regression.
 func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary build skipped in short mode")
 	}
+
+	// Reserve a port via OS assignment, then immediately free it so it is in
+	// connection-refused state when the binary tries to connect.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("could not reserve a free port: %v", err)
+	}
+	proxyAddr := ln.Addr().String() // e.g. "127.0.0.1:54321"
+	ln.Close()                      // port now refuses connections
+
 	// Build the binary into a temp dir.
 	dir := t.TempDir()
 	bin := dir + "/dsc"
@@ -27,16 +39,16 @@ func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 
-	// Run one-shot with a deliberately closed proxy. The binary must attempt
-	// to connect through 127.0.0.1:19999 and fail with a connection-refused
-	// error that mentions the proxy address — proving the proxy transport is
-	// actually wired. We pass a config-free HOME so no real key is loaded.
+	// Run one-shot with the deliberately closed proxy. The binary must attempt
+	// to connect through proxyAddr and fail with a connection-refused error
+	// that mentions that address — proving the proxy transport is actually wired.
+	// We pass a config-free HOME so no real key is loaded.
 	cmd := exec.Command(bin, "-p", "hello")
 	cmd.Env = append([]string{},
 		"HOME="+dir,
 		"USERPROFILE="+dir,
 		"PATH="+os.Getenv("PATH"),
-		"DEEPSEEKCODE_PROXY=http://127.0.0.1:19999",
+		"DEEPSEEKCODE_PROXY=http://"+proxyAddr,
 		// DEEPSEEK_API_KEY is the env var the default deepseek provider reads via
 		// config.ResolveSecret; it must be non-empty so onboarding is skipped.
 		"DEEPSEEK_API_KEY=sk-fake-proxy-test",
@@ -44,15 +56,24 @@ func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 	out, _ := cmd.CombinedOutput()
 	outStr := string(out)
 
+	// Sanity: the binary must have emitted a [stop: ...] line, proving it
+	// actually ran a one-shot turn and reached the network path.
+	// Note: runOneShot exits 0 even when the LLM call fails (the error is
+	// printed inline as [stop: unknown err=...]). A vacuous success would be
+	// an output that contains neither the stop line nor the proxy address.
+	if !strings.Contains(outStr, "[stop:") && !strings.Contains(outStr, proxyAddr) {
+		t.Errorf("binary produced no [stop:] line and no proxy address — did not reach the network path at all:\n%s", outStr)
+	}
 	// The binary must not panic.
 	if strings.Contains(outStr, "panic") {
 		t.Errorf("binary panicked with DEEPSEEKCODE_PROXY set:\n%s", outStr)
 	}
 	// The error must reference the proxy address, proving the proxy transport
 	// was used. A direct connection to api.deepseek.com would never mention
-	// 127.0.0.1:19999.
-	if !strings.Contains(outStr, "19999") {
-		t.Errorf("expected error output to mention proxy address 127.0.0.1:19999 (proxy transport not wired?):\n%s", outStr)
+	// the local proxy address.
+	if !strings.Contains(outStr, proxyAddr) {
+		t.Errorf("expected error output to mention proxy address %s (proxy transport not wired?):\n%s",
+			proxyAddr, outStr)
 	}
 }
 

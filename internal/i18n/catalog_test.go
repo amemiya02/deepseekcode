@@ -7,6 +7,19 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
 
+// TestMain registers test-only catalog entries before any test runs and
+// removes them when the suite finishes.  This keeps the production messages
+// map free of test data while still allowing TestT_Fallback_MissingKey to
+// exercise the English-fallback path.
+func TestMain(m *testing.M) {
+	cleanup := i18n.RegisterTestMessages("en", map[string]string{
+		"_test.en_only_sentinel": "english-only-sentinel",
+	})
+	code := m.Run()
+	cleanup()
+	os.Exit(code)
+}
+
 func TestT_English_default(t *testing.T) {
 	// No locale env set → English fallback.
 	os.Unsetenv("DEEPSEEKCODE_LANG")

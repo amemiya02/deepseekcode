@@ -5,17 +5,10 @@
 // the SPA can construct /v1/* URLs in Wails dev mode (where the
 // Vite proxy is not active).
 //
-// Gateway wiring follow-on (tracked): internal/gateway has not yet been
-// implemented. Once the Plan 4 HTTP/SSE gateway package ships, wire it
-// here by calling:
-//
-//	go gateway.Start(a.ctx, defaultGatewayPort)
-//
-// inside the OnStartup hook (a.ctx is set there and is cancelled when the
-// Wails window closes, so the goroutine terminates cleanly). Until that
-// package exists, /v1/* API calls from the SPA will fail with
-// connection-refused; see desktop/gateway_integration_test.go for the
-// failing stub that tracks this gap.
+// Gateway wiring: the OnStartup hook (App.startup) launches the in-process
+// internal/gateway HTTP+SSE server via `go gateway.Start(a.ctx, a.port)`. It
+// binds 127.0.0.1:<defaultGatewayPort>, matching the Vite proxy and
+// App.GetPort(), and shuts down when a.ctx is cancelled on window close.
 package main
 
 import (
@@ -32,9 +25,9 @@ const defaultGatewayPort = 7432
 func main() {
 	app := newApp(defaultGatewayPort)
 
-	// TODO(gateway): start the in-process gateway here once internal/gateway
-	// is implemented. See package-level doc comment above for details.
-	// Tracked by TestGatewayStartIsWired in gateway_integration_test.go.
+	// The in-process gateway is launched from app.startup (the Wails OnStartup
+	// hook) so it shares the Wails-managed context and shuts down on window
+	// close. See app.go and the package doc comment.
 
 	err := wails.Run(&options.App{
 		Title:  "DeepSeekCode",

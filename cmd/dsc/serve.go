@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -9,9 +12,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
+	"github.com/amemiya02/deepseekcode/internal/gateway"
 )
 
 // stdinForServe is the reader used by the ACP path. It defaults to os.Stdin
@@ -47,19 +52,25 @@ func runServe(args []string) error {
 		return nil
 	}
 
-	// HTTP+SSE mode.
+	// HTTP+SSE mode: serve the web gateway (SPA + /v1 API), not the bare ACP
+	// gateway, so a browser can drive the agent end-to-end.
 	bindAddr, err := resolveBindAddr(*httpAddr, *allowRemote)
 	if err != nil {
 		return err
 	}
 
-	gw := acp.NewHTTPGateway(sm)
-	server := &http.Server{Addr: bindAddr, Handler: gw}
-	if *allowRemote && !isLoopbackHost(hostOf(bindAddr)) {
+	// Build the gateway handler with the auth model applied for this bind. On a
+	// loopback bind (the default) it is served WITHOUT a bearer token so a local
+	// browser works out of the box; on a non-loopback bind the token is required
+	// and printed.
+	handler, token := buildServeHandler(sm, bindAddr)
+	if token != "" {
 		fmt.Fprintf(os.Stderr, "dsc serve: WARNING binding to non-loopback address %s — the agent gateway is reachable from the network\n", bindAddr)
+		fmt.Fprintf(os.Stderr, "Gateway auth token: %s\n", token)
 	}
+
+	server := &http.Server{Addr: bindAddr, Handler: handler}
 	fmt.Fprintf(os.Stderr, "dsc serve: listening on %s\n", bindAddr)
-	fmt.Fprintf(os.Stderr, "Gateway auth token: %s\n", gw.Token())
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -125,6 +136,53 @@ func hostOf(addr string) string {
 		return ""
 	}
 	return host
+}
+
+// buildServeHandler constructs the gateway handler for bindAddr and applies the
+// serve auth model. On a loopback bind it returns the bare gateway handler and
+// an empty token (no auth). On a non-loopback bind it wraps the handler in the
+// bearer-token middleware and returns the generated token so the caller can
+// print it. Factored out of runServe so the auth decision is unit-testable
+// without binding a socket or driving a signal.
+func buildServeHandler(sm *acp.SessionManager, bindAddr string) (http.Handler, string) {
+	handler := gateway.NewHandler(sm, os.Getenv("DEEPSEEKCODE_TRACE_JSONL"))
+	if isLoopbackHost(hostOf(bindAddr)) {
+		return handler, ""
+	}
+	token := newServeToken()
+	return requireBearer(token, handler), token
+}
+
+// newServeToken returns a cryptographically random 32-byte token, hex-encoded.
+// It is used to gate a non-loopback HTTP gateway bind. crypto/rand.Read never
+// returns an error on supported platforms; if it somehow does, panic rather
+// than fall back to a predictable token.
+func newServeToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("serve: generating gateway token: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
+
+// requireBearer wraps next so every request must present
+// "Authorization: Bearer <token>" (constant-time compared). Used only on a
+// non-loopback bind; a loopback bind serves next unwrapped.
+func requireBearer(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "Bearer "
+		h := r.Header.Get("Authorization")
+		if !strings.HasPrefix(h, prefix) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		got := strings.TrimPrefix(h, prefix)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // isLoopbackHost reports whether host refers to the loopback interface. A

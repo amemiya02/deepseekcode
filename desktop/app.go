@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 
+	"github.com/amemiya02/deepseekcode/internal/gateway"
 	"github.com/amemiya02/deepseekcode/internal/version"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -19,6 +21,16 @@ func newApp(port int) *App { return &App{port: port} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Launch the in-process gateway so the SPA's /v1/* calls reach the agent.
+	// It binds 127.0.0.1:<port> (matching the Vite proxy and App.GetPort()) and
+	// shuts down when ctx is cancelled (Wails cancels it on window close), so
+	// the goroutine terminates cleanly with the app.
+	go func() {
+		if err := gateway.Start(a.ctx, a.port); err != nil {
+			log.Printf("desktop: gateway stopped: %v", err)
+		}
+	}()
 }
 
 // GetVersion returns the dsc binary version string for display in the UI.

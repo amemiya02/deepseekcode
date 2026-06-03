@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "dsc",
+  "outputfilename": "dsc-desktop",
+  "frontenddevwatcher": "",
+  "frontend": {
+    "dir": "../web",
+    "install": "npm install",
+    "build": "npm run build",
+    "dev:watcher": "npm run dev",
+    "dev:serverUrl": "http://localhost:5173"
+  },
+  "author": {
+    "name": "amemiya02",
+    "email": ""
+  }
+}

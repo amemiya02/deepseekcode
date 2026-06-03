@@ -34,3 +34,12 @@ func Handler() http.Handler {
 	}
 	return http.FileServer(http.FS(sub))
 }
+
+// DistFS returns the embedded dist/ sub-filesystem for use by Wails's asset server.
+func DistFS() fs.FS {
+	sub, err := fs.Sub(dist, "dist")
+	if err != nil {
+		panic("webapp: DistFS: " + err.Error())
+	}
+	return sub
+}

@@ -54,7 +54,9 @@ func TestParserFindsCallEdge(t *testing.T) {
 func TestParserKinds(t *testing.T) {
 	dir := fixtureDir(t)
 	store := codegraph.NewStore()
-	_ = codegraph.ParseDir(dir, "github.com/amemiya02/deepseekcode/testdata/fixtures/simple", store)
+	if err := codegraph.ParseDir(dir, "github.com/amemiya02/deepseekcode/testdata/fixtures/simple", store); err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
 
 	calcID := codegraph.NodeID("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Calculator")
 	doerID := codegraph.NodeID("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Doer")
@@ -64,6 +66,26 @@ func TestParserKinds(t *testing.T) {
 	}
 	if n := store.Node(doerID); n == nil || n.Kind != codegraph.KindInterface {
 		t.Errorf("Doer should be KindInterface; got %+v", n)
+	}
+}
+
+func TestParserMethodReceiverDisambiguation(t *testing.T) {
+	dir := fixtureDir(t)
+	store := codegraph.NewStore()
+	if err := codegraph.ParseDir(dir, "github.com/amemiya02/deepseekcode/testdata/fixtures/simple", store); err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	// A.String and B.String must be registered as two distinct nodes.
+	aStringID := codegraph.NodeID("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.(*A).String")
+	bStringID := codegraph.NodeID("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.(*B).String")
+	if store.Node(aStringID) == nil {
+		t.Errorf("expected node for (*A).String (id=%s); got nil", aStringID)
+	}
+	if store.Node(bStringID) == nil {
+		t.Errorf("expected node for (*B).String (id=%s); got nil", bStringID)
+	}
+	if aStringID == bStringID {
+		t.Errorf("(*A).String and (*B).String must have distinct NodeIDs")
 	}
 }
 

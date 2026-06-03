@@ -33,7 +33,7 @@ func parsePackage(fset *token.FileSet, pkg *ast.Package, pkgPath string, store *
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
 				pos := fset.Position(d.Pos())
-				id := NodeID(pkgPath + "." + d.Name.Name)
+				id := funcNodeID(pkgPath, d)
 				store.AddNode(&Node{
 					ID:   id,
 					Kind: KindFunc,
@@ -72,7 +72,7 @@ func parsePackage(fset *token.FileSet, pkg *ast.Package, pkgPath string, store *
 			if !ok || fn.Body == nil {
 				continue
 			}
-			callerID := NodeID(pkgPath + "." + fn.Name.Name)
+			callerID := funcNodeID(pkgPath, fn)
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -90,6 +90,32 @@ func parsePackage(fset *token.FileSet, pkg *ast.Package, pkgPath string, store *
 			})
 		}
 	}
+}
+
+// funcNodeID returns the canonical NodeID for a function or method declaration.
+// For methods (those with a receiver), the ID is pkgPath+".(ReceiverType).MethodName"
+// so that two methods with the same name on different receiver types never collide.
+// For free functions the ID is pkgPath+".FuncName" (unchanged from before).
+func funcNodeID(pkgPath string, d *ast.FuncDecl) NodeID {
+	if d.Recv != nil && len(d.Recv.List) > 0 {
+		recvType := receiverTypeName(d.Recv.List[0].Type)
+		return NodeID(pkgPath + ".(" + recvType + ")." + d.Name.Name)
+	}
+	return NodeID(pkgPath + "." + d.Name.Name)
+}
+
+// receiverTypeName returns a stable string for a receiver type expression.
+// Pointer receivers are rendered as "*T"; value receivers as "T".
+func receiverTypeName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.StarExpr:
+		if ident, ok := e.X.(*ast.Ident); ok {
+			return "*" + ident.Name
+		}
+	case *ast.Ident:
+		return e.Name
+	}
+	return "?"
 }
 
 // callExprName extracts the simple identifier name from a call expression's Fun field.

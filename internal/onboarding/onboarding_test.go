@@ -1,6 +1,7 @@
 package onboarding_test
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -121,5 +122,85 @@ func TestValidateKey_Unauthorized(t *testing.T) {
 	err := onboarding.ValidateKey(context.Background(), srv.URL, "sk-bad", srv.Client())
 	if err == nil {
 		t.Fatal("expected error for 401, got nil")
+	}
+}
+
+func TestPersistConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "") // force ~/.deepseekcode path
+
+	err := onboarding.PersistConfig(onboarding.OnboardingResult{
+		APIKey:  "sk-persist-test",
+		BaseURL: "https://api.deepseek.com/v1",
+		Model:   "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("PersistConfig: %v", err)
+	}
+
+	// Secrets file must exist and be 0600
+	secretsPath := filepath.Join(dir, ".deepseekcode", "secrets.toml")
+	info, err := os.Stat(secretsPath)
+	if err != nil {
+		t.Fatalf("secrets file not written: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("secrets file perms = %o, want 0600", info.Mode().Perm())
+	}
+
+	// Config file must have model and base_url
+	cfgPath := filepath.Join(dir, ".deepseek", "config.toml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("config file not written: %v", err)
+	}
+	if !bytes.Contains(data, []byte("deepseek-v4-flash")) {
+		t.Fatalf("config does not contain model: %s", data)
+	}
+	if !bytes.Contains(data, []byte("api.deepseek.com")) {
+		t.Fatalf("config does not contain base_url: %s", data)
+	}
+}
+
+func TestPersistConfig_OverlayPreservesExistingKeys(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "") // force ~/.deepseekcode path
+
+	// Pre-write a config.toml with an extra key that PersistConfig should not clobber.
+	cfgDir := filepath.Join(dir, ".deepseek")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	existing := []byte("[ui]\ntheme = \"dark\"\n")
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+	if err := os.WriteFile(cfgPath, existing, 0o600); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	err := onboarding.PersistConfig(onboarding.OnboardingResult{
+		APIKey:  "sk-overlay-test",
+		BaseURL: "https://api.deepseek.com/v1",
+		Model:   "deepseek-v4-flash",
+	})
+	if err != nil {
+		t.Fatalf("PersistConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("config file not written: %v", err)
+	}
+	// The extra key from the pre-existing file must survive.
+	if !bytes.Contains(data, []byte("dark")) {
+		t.Fatalf("overlay destroyed existing ui.theme key; config = %s", data)
+	}
+	// Our new values must also be present.
+	if !bytes.Contains(data, []byte("deepseek-v4-flash")) {
+		t.Fatalf("config does not contain model: %s", data)
+	}
+	if !bytes.Contains(data, []byte("api.deepseek.com")) {
+		t.Fatalf("config does not contain base_url: %s", data)
 	}
 }

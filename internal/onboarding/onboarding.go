@@ -3,8 +3,14 @@
 package onboarding
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 
+	"github.com/BurntSushi/toml"
 	"github.com/amemiya02/deepseekcode/internal/config"
 )
 
@@ -49,4 +55,82 @@ func NeedsOnboarding(cfg config.Config) (bool, error) {
 	// documents that invariant; using key == "" would silently pass if the
 	// invariant were ever violated.
 	return false, nil
+}
+
+// OnboardingResult holds the values the user confirmed during init.
+type OnboardingResult struct {
+	APIKey  string
+	BaseURL string
+	Model   string
+}
+
+// PersistConfig writes:
+//   - model + base_url to ~/.deepseek/config.toml  (user config layer)
+//   - DEEPSEEK_API_KEY = apiKey to config.SecretsPath() at mode 0600
+func PersistConfig(r OnboardingResult) error {
+	// 1. User config dir
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	cfgDir := filepath.Join(home, ".deepseek")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	cfgPath := filepath.Join(cfgDir, "config.toml")
+
+	// Read existing file so we don't clobber unrelated settings.
+	existing := map[string]any{}
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		if err := toml.Unmarshal(data, &existing); err != nil {
+			return fmt.Errorf("parse existing config: %w", err)
+		}
+	}
+
+	// Overlay our values.
+	api, _ := existing["api"].(map[string]any)
+	if api == nil {
+		api = map[string]any{}
+	}
+	api["base_url"] = r.BaseURL
+	existing["api"] = api
+
+	defaults, _ := existing["defaults"].(map[string]any)
+	if defaults == nil {
+		defaults = map[string]any{}
+	}
+	defaults["model"] = r.Model
+	existing["defaults"] = defaults
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(existing); err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	if err := os.WriteFile(cfgPath, buf.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	// 2. Secrets file
+	secretsPath := config.SecretsPath()
+	if err := os.MkdirAll(filepath.Dir(secretsPath), 0o700); err != nil {
+		return fmt.Errorf("create secrets dir: %w", err)
+	}
+	secretsContent := fmt.Sprintf("DEEPSEEK_API_KEY = %q\n", r.APIKey)
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	f, err := os.OpenFile(secretsPath, flags, 0o600)
+	if err != nil {
+		return fmt.Errorf("open secrets file: %w", err)
+	}
+	defer f.Close()
+	// Lock down permissions before writing any secret bytes, so that even
+	// a non-default umask cannot leave group- or world-write bits set.
+	if runtime.GOOS != "windows" {
+		if err := f.Chmod(0o600); err != nil {
+			return fmt.Errorf("chmod secrets: %w", err)
+		}
+	}
+	if _, err := f.WriteString(secretsContent); err != nil {
+		return fmt.Errorf("write secrets: %w", err)
+	}
+	return nil
 }

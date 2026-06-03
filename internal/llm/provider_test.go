@@ -38,3 +38,33 @@ func TestCapabilitiesField(t *testing.T) {
 		t.Fatal("Capabilities{Thinking:true}.Thinking = false")
 	}
 }
+
+func TestNewProviderSwitchArms(t *testing.T) {
+	cases := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"deepseek", false},
+		{"", false},          // default alias for deepseek
+		{"openai-compat", false},
+		{"anthropic", false}, // NEW
+		{"openai", false},    // NEW
+		{"unknown-xyz", true},
+	}
+	for _, tc := range cases {
+		p, err := NewProvider(tc.name, ProviderConfig{APIKey: "k"})
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("NewProvider(%q): expected error, got nil", tc.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("NewProvider(%q): unexpected error: %v", tc.name, err)
+			continue
+		}
+		if p == nil {
+			t.Errorf("NewProvider(%q): got nil provider", tc.name)
+		}
+	}
+}

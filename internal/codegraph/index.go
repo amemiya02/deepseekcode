@@ -71,7 +71,7 @@ func (idx *Index) Rebuild(root string) error {
 	// (Full re-parse is correct; file-level incremental is a later optimisation.)
 	if len(changedFiles) > 0 || len(deletedPaths) > 0 || len(idx.store.AllNodes()) == 0 {
 		fresh := NewStore()
-		if pErr := ParseDir(root, idx.pkgPath, fresh); pErr != nil {
+		if pErr := parseAll(root, idx.pkgPath, fresh); pErr != nil {
 			return pErr
 		}
 		idx.store = fresh
@@ -186,6 +186,49 @@ func (idx *Index) Store() *Store {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.store
+}
+
+// parseAll walks root recursively, calling ParseDir on each subdirectory that
+// contains at least one non-test .go file. The pkgPath for each subdirectory is
+// derived by appending the relative path from root to idx.pkgPath.
+func parseAll(root, basePkgPath string, store *Store) error {
+	// Collect unique directories that contain .go files.
+	dirs := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			dirs[filepath.Dir(path)] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk %s: %w", root, err)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("abs %s: %w", root, err)
+	}
+	for dir := range dirs {
+		absDir, aErr := filepath.Abs(dir)
+		if aErr != nil {
+			continue
+		}
+		rel, rErr := filepath.Rel(absRoot, absDir)
+		if rErr != nil {
+			continue
+		}
+		pkgPath := basePkgPath
+		if rel != "." {
+			pkgPath = basePkgPath + "/" + filepath.ToSlash(rel)
+		}
+		if pErr := ParseDir(dir, pkgPath, store); pErr != nil {
+			// Non-fatal: a single bad package should not abort the whole walk.
+			continue
+		}
+	}
+	return nil
 }
 
 func hashFile(path string) (string, error) {

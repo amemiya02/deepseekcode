@@ -3,6 +3,8 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -110,7 +112,11 @@ func (s *ACPServer) dispatch(ctx context.Context, body []byte) {
 			}
 		})
 		if err != nil {
-			s.sendError(reqID, CodeInternalError, err.Error())
+			if errors.Is(err, ErrSessionNotFound) {
+				s.sendError(reqID, CodeInvalidParams, err.Error())
+			} else {
+				s.sendError(reqID, CodeInternalError, err.Error())
+			}
 			return
 		}
 		s.sendResult(reqID, struct{}{})
@@ -130,9 +136,14 @@ func (s *ACPServer) dispatch(ctx context.Context, body []byte) {
 }
 
 func (s *ACPServer) sendResult(id ID, result interface{}) {
-	b, _ := json.Marshal(result)
+	b, err := json.Marshal(result)
+	if err != nil {
+		// A result struct we control failed to marshal; surface an internal error.
+		s.sendError(id, CodeInternalError, "acp: marshal result: "+err.Error())
+		return
+	}
 	resp := Response{JSONRPC: JSONRPC20, ID: id, Result: b}
-	s.writeFrame(resp)
+	_ = s.writeFrame(resp)
 }
 
 func (s *ACPServer) sendError(id ID, code int, msg string) {
@@ -141,21 +152,32 @@ func (s *ACPServer) sendError(id ID, code int, msg string) {
 		ID:      id,
 		Error:   &RPCError{Code: code, Message: msg},
 	}
-	s.writeFrame(resp)
+	_ = s.writeFrame(resp)
 }
 
 func (s *ACPServer) sendNotification(method string, params interface{}) {
-	b, _ := json.Marshal(params)
+	b, err := json.Marshal(params)
+	if err != nil {
+		// Notification params we control failed to marshal; drop the
+		// notification rather than emit a malformed frame.
+		return
+	}
 	n := Notification{JSONRPC: JSONRPC20, Method: method, Params: b}
-	s.writeFrame(n)
+	_ = s.writeFrame(n)
 }
 
-func (s *ACPServer) writeFrame(v interface{}) {
+// writeFrame marshals v and writes it as a single framed message. It returns
+// the marshal or write error instead of silently discarding it so callers can
+// react (and so a marshalling regression is observable, not swallowed).
+func (s *ACPServer) writeFrame(v interface{}) error {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return
+		return fmt.Errorf("acp: marshal frame: %w", err)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_ = s.writer.WriteFrame(b)
+	if err := s.writer.WriteFrame(b); err != nil {
+		return fmt.Errorf("acp: write frame: %w", err)
+	}
+	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
-	"github.com/amemiya02/deepseekcode/internal/agent"
 )
 
 // TestAdapterCompiles verifies that AgentAdapter implements AgentRunner at compile time.
@@ -61,52 +60,5 @@ func TestAgentRunnerEventOrder(t *testing.T) {
 	}
 	if got[2].Kind != acp.EventKindDone || got[2].StopReason != "end_turn" || got[2].Err != wantErr {
 		t.Errorf("event[2] = %+v, want EventKindDone stop=end_turn err=%v", got[2], wantErr)
-	}
-}
-
-// TestBusPermissionAskNoDeadlock verifies that EventPermissionAsk does NOT
-// deadlock a consumer: a reply must be sent on the Reply channel to unblock
-// the agent goroutine. This mirrors the fix in AgentAdapter.
-func TestBusPermissionAskNoDeadlock(t *testing.T) {
-	permReply := make(chan agent.PermissionResponse, 1)
-	// Simulate the adapter behaviour: send a denial reply immediately.
-	go func() {
-		permReply <- agent.PermissionResponse{Allow: false}
-	}()
-
-	resp := <-permReply
-	if resp.Allow {
-		t.Fatal("expected Allow=false denial reply")
-	}
-}
-
-// TestBusCloseBeforeDone verifies that when a bus channel is closed before
-// EventDone is published, the consumer correctly handles the closed channel
-// (ok==false) and can still recover the error from a separate done channel —
-// simulating the fix in AgentAdapter.
-func TestBusCloseBeforeDone(t *testing.T) {
-	wantErr := errors.New("agent panic error")
-
-	// Simulate a bus channel that closes unexpectedly.
-	ch := make(chan agent.EventEnvelope, 4)
-	done := make(chan error, 1)
-	done <- wantErr
-	close(ch)
-
-	// Adapter logic: if ok==false, drain done.
-	var gotErr error
-	for env := range ch {
-		_ = env // would process normally
-	}
-	// ch is closed (ok==false path), drain done.
-	select {
-	case err := <-done:
-		gotErr = err
-	default:
-		gotErr = nil
-	}
-
-	if gotErr != wantErr {
-		t.Fatalf("on bus close got err=%v, want %v", gotErr, wantErr)
 	}
 }

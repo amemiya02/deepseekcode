@@ -82,20 +82,37 @@ func TestHTTPGatewaySSEStream(t *testing.T) {
 			strings.NewReader(`{"prompt":"world"}`))
 	}()
 
-	// 4. Read SSE lines until we see a done event or timeout.
+	// 4. Read SSE lines until we see a completion event (non-empty stopReason)
+	// or timeout. We unmarshal each "data:" frame rather than substring-matching
+	// the literal "done": the stub emits a DoneParams with stopReason="end_turn"
+	// and no "done" token, so the old break condition never fired and the test
+	// passed only by exhausting the 5s deadline. Parsing stopReason makes the
+	// test detect completion and return promptly.
 	scanner := bufio.NewScanner(streamResp.Body)
-	var sawData bool
+	var sawData, sawDone bool
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "data:") {
-			sawData = true
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
 		}
-		if strings.Contains(line, "done") {
+		sawData = true
+		var frame struct {
+			StopReason string `json:"stopReason"`
+		}
+		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+			t.Fatalf("unmarshal SSE data frame %q: %v", payload, err)
+		}
+		if frame.StopReason != "" {
+			sawDone = true
 			break
 		}
 	}
 	if !sawData {
 		t.Error("expected at least one SSE data line")
+	}
+	if !sawDone {
+		t.Error("expected an SSE frame carrying a non-empty stopReason (stream completion)")
 	}
 }
 

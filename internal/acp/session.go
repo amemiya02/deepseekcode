@@ -2,10 +2,16 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 )
+
+// ErrSessionNotFound is returned by SessionManager lookups when no session
+// exists for the requested id. Callers route on it with errors.Is rather than
+// matching error strings.
+var ErrSessionNotFound = errors.New("acp: session not found")
 
 // EventKind identifies what kind of event came from an AgentRunner.
 type EventKind int
@@ -37,30 +43,55 @@ type AgentRunner interface {
 type AgentFactory func(workingDir string) (AgentRunner, error)
 
 // session holds the state for a single ACP session.
+//
+// ctx/cancel are owned by the SessionManager and parented to the manager's
+// long-lived base context (NOT to the per-request/per-connection context that
+// created the session). The only intentional cancellation path is Cancel();
+// a connection closing must never cancel a logically-alive session.
 type session struct {
 	id     string
 	runner AgentRunner
-	ctx    context.Context    // cancelled when the session is cancelled
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 // SessionManager manages the lifecycle of ACP sessions.
 type SessionManager struct {
 	factory  AgentFactory
+	base     context.Context    // long-lived parent for all session contexts
+	baseStop context.CancelFunc // cancels every session; called by Shutdown
 	mu       sync.Mutex
 	sessions map[string]*session
 	counter  atomic.Int64
 }
 
 // NewSessionManager creates a SessionManager backed by the given factory.
+// Session contexts are parented to a manager-owned context derived from
+// context.Background(), so a closing request/connection never cancels a live
+// session.
 func NewSessionManager(factory AgentFactory) *SessionManager {
+	base, stop := context.WithCancel(context.Background())
 	return &SessionManager{
 		factory:  factory,
+		base:     base,
+		baseStop: stop,
 		sessions: make(map[string]*session),
 	}
 }
 
+// Shutdown cancels every live session by cancelling the manager-owned base
+// context. After Shutdown the manager should not be reused.
+func (sm *SessionManager) Shutdown() {
+	sm.baseStop()
+}
+
 // NewSession creates a new session and returns its id.
+//
+// The ctx argument is used only for factory creation; it is deliberately NOT
+// the parent of the session's lifetime context. The session context is
+// parented to the manager-owned base context so the session stays alive after
+// the creating request/connection closes. Cancel() is the only path that
+// cancels it.
 func (sm *SessionManager) NewSession(ctx context.Context, workingDir string) (string, error) {
 	runner, err := sm.factory(workingDir)
 	if err != nil {
@@ -68,19 +99,23 @@ func (sm *SessionManager) NewSession(ctx context.Context, workingDir string) (st
 	}
 	n := sm.counter.Add(1)
 	id := fmt.Sprintf("sess-%d", n)
-	sCtx, cancel := context.WithCancel(ctx)
+	sCtx, cancel := context.WithCancel(sm.base)
 	sm.mu.Lock()
 	sm.sessions[id] = &session{id: id, runner: runner, ctx: sCtx, cancel: cancel}
 	sm.mu.Unlock()
 	return id, nil
 }
 
-// Lookup returns the session for the given id, or false if not found.
-func (sm *SessionManager) Lookup(id string) (*session, bool) {
+// Lookup returns the session for the given id, or ErrSessionNotFound if no
+// session exists. Callers route on the error with errors.Is.
+func (sm *SessionManager) Lookup(id string) (*session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	s, ok := sm.sessions[id]
-	return s, ok
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	return s, nil
 }
 
 // Has reports whether a session with the given id exists.
@@ -104,26 +139,31 @@ func (sm *SessionManager) Cancel(id string) {
 	}
 }
 
-// SessionCtx returns the context associated with the session, or
-// context.Background() if the session is not found.
+// SessionCtx returns the context associated with the session. If the session
+// does not exist (already cancelled/removed), it returns an already-cancelled
+// context rather than context.Background(), so a caller that races a Cancel
+// does not launch an uncancellable agent goroutine.
 func (sm *SessionManager) SessionCtx(id string) context.Context {
 	sm.mu.Lock()
 	s, ok := sm.sessions[id]
 	sm.mu.Unlock()
 	if !ok {
-		return context.Background()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
 	}
 	return s.ctx
 }
 
 // Prompt runs the agent for the session with the given prompt, calling
-// onEvent for each event. It blocks until the agent is done.
+// onEvent for each event. It blocks until the agent is done. If the session
+// does not exist it returns ErrSessionNotFound (wrapped).
 func (sm *SessionManager) Prompt(ctx context.Context, id, prompt string, onEvent func(AgentEvent)) error {
 	sm.mu.Lock()
 	s, ok := sm.sessions[id]
 	sm.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("acp: session %q not found", id)
+		return fmt.Errorf("acp: prompt session %q: %w", id, ErrSessionNotFound)
 	}
 	return s.runner.Run(ctx, prompt, onEvent)
 }

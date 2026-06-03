@@ -126,16 +126,28 @@ func (g *HTTPGateway) handlePrompt(w http.ResponseWriter, r *http.Request, sessi
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	_, ok := g.sm.Lookup(sessionID)
-	if !ok {
+
+	// Acquire the stream-state reference BEFORE the session lookup and hold it
+	// across the cancel window. A concurrent handleCancelSession deletes the
+	// stream-state map entry, but because we hold this *sessionStreamState
+	// pointer its readyCh stays valid and the select below still unblocks the
+	// moment the (already-registered) subscriber closed it — no TOCTOU stall.
+	st := g.streamStateFor(sessionID)
+
+	// Look the session up and capture its lifetime context in one shot. Using
+	// the session pointer's context (rather than a second SessionCtx call after
+	// the wait) closes the window where Cancel could delete the session between
+	// the lookup and the context fetch.
+	sess, err := g.sm.Lookup(sessionID)
+	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	promptCtx := sess.ctx
 
 	// Wait until the SSE subscriber is registered so that broadcast never
 	// races with an empty client list.  Use a short timeout so that a caller
 	// who deliberately skips /stream does not block forever.
-	st := g.streamStateFor(sessionID)
 	waitCtx, waitCancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer waitCancel()
 	select {
@@ -145,11 +157,6 @@ func (g *HTTPGateway) handlePrompt(w http.ResponseWriter, r *http.Request, sessi
 		// Timeout: no subscriber arrived. Proceed anyway (events will be
 		// dropped), consistent with documented ordering requirements.
 	}
-
-	// Derive promptCtx from the session's stored context so that
-	// DELETE /session/{id} (which calls sm.Cancel) propagates cancellation
-	// to the running agent goroutine.
-	promptCtx := g.sm.SessionCtx(sessionID)
 
 	onEvent := func(ev AgentEvent) {
 		var payload []byte
@@ -188,7 +195,6 @@ func (g *HTTPGateway) handlePrompt(w http.ResponseWriter, r *http.Request, sessi
 	// 202 Accepted: the work is dispatched asynchronously.
 	w.WriteHeader(http.StatusAccepted)
 }
-
 func (g *HTTPGateway) handleStream(w http.ResponseWriter, r *http.Request, sessionID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -274,6 +280,11 @@ func (g *HTTPGateway) broadcast(sessionID, msg string) {
 			// client is shutting down; skip
 		case c.ch <- msg:
 			// delivered
+		default:
+			// Client's 64-slot buffer is full and it is not shutting down.
+			// For SSE, dropping a frame to a stalled client is acceptable and
+			// far preferable to blocking broadcast for ALL other clients. The
+			// non-blocking default makes broadcast deadlock-free.
 		}
 	}
 }

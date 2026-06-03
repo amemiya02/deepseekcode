@@ -161,6 +161,14 @@ func TestValidateResponseMutualExclusion(t *testing.T) {
 	}
 }
 
+func TestValidateResponseNeitherSet(t *testing.T) {
+	// JSON-RPC §5 requires exactly one of Result or Error. Neither set is invalid.
+	resp := acp.Response{JSONRPC: "2.0", ID: json.RawMessage(`1`)}
+	if err := resp.Validate(); err == nil {
+		t.Fatal("expected error when neither Result nor Error is set")
+	}
+}
+
 func TestDoneParamsErrorPointer(t *testing.T) {
 	// nil Error must omit the field entirely.
 	d := acp.DoneParams{SessionID: "s1", StopReason: "end_turn"}

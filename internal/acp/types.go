@@ -76,6 +76,9 @@ func (r *Response) Validate() error {
 	if r.Result != nil && r.Error != nil {
 		return errors.New("acp: response Result and Error are mutually exclusive")
 	}
+	if r.Result == nil && r.Error == nil {
+		return errors.New("acp: response must set exactly one of Result or Error")
+	}
 	return nil
 }
 

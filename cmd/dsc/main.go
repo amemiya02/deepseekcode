@@ -176,6 +176,12 @@ func run() error {
 		return runTrace(os.Args[2:])
 	}
 
+	// Subcommand: dsc cache explain TRACE.jsonl. Renders a per-turn cache
+	// ledger with eviction classification from an agent JSONL trace.
+	if len(os.Args) > 1 && os.Args[1] == "cache" {
+		return runCache(os.Args[2:])
+	}
+
 	// Subcommand: dsc agent list|show|new|validate. Manage .deepseek/agent/*.md definitions.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		cwd, err := os.Getwd()

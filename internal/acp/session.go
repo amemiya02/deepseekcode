@@ -82,6 +82,14 @@ func (sm *SessionManager) Lookup(id string) (*session, bool) {
 	return s, ok
 }
 
+// Has reports whether a session with the given id exists.
+func (sm *SessionManager) Has(id string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	_, ok := sm.sessions[id]
+	return ok
+}
+
 // Cancel cancels and removes the session.
 func (sm *SessionManager) Cancel(id string) {
 	sm.mu.Lock()

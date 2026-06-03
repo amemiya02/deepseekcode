@@ -9,6 +9,17 @@ import (
 // JSONRPC20 is the protocol version literal required in every message.
 const JSONRPC20 = "2.0"
 
+// ID is a JSON-RPC 2.0 message identifier (integer, string, or null).
+// It is a type alias for json.RawMessage to remain compatible with callers
+// that assign json.RawMessage literals directly.
+type ID = json.RawMessage
+
+// NewID creates an integer ID from n.
+func NewID(n int64) ID {
+	b, _ := json.Marshal(n)
+	return ID(b)
+}
+
 // Compile-time assertion: *RPCError must satisfy the error interface.
 var _ error = (*RPCError)(nil)
 

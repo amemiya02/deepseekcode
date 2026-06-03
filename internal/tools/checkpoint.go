@@ -43,8 +43,10 @@ func (*CheckpointTool) Parameters() json.RawMessage {
 	})
 }
 
-// IsReadOnly returns true: recording a checkpoint mutates no files.
-func (*CheckpointTool) IsReadOnly() bool { return true }
+// IsReadOnly returns false: recording a checkpoint writes to the agent's
+// CheckpointIndex, which is an agent-state mutation even though no files
+// are touched. The repair module's ToolMutating default applies here.
+func (*CheckpointTool) IsReadOnly() bool { return false }
 
 func (t *CheckpointTool) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
 	var p struct {

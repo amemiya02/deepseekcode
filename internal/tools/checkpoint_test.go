@@ -16,7 +16,9 @@ func (f *fakeCheckpointRecorder) RecordCheckpoint(name string) int {
 		f.recorded = make(map[string]int)
 	}
 	f.recorded[name] = f.step
-	return f.step
+	step := f.step
+	f.step++
+	return step
 }
 
 func TestCheckpointToolExecute(t *testing.T) {
@@ -49,7 +51,7 @@ func TestCheckpointToolMissingName(t *testing.T) {
 
 func TestCheckpointToolIsReadOnly(t *testing.T) {
 	tool := NewCheckpointTool(nil)
-	if !tool.IsReadOnly() {
-		t.Fatal("checkpoint tool should be read-only (no file mutations)")
+	if tool.IsReadOnly() {
+		t.Fatal("checkpoint tool must not be read-only: RecordCheckpoint mutates agent state")
 	}
 }

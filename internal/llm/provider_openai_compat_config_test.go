@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"context"
+	"strings"
 	"testing"
 )
 
@@ -33,8 +35,15 @@ func TestOpenAICompatDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
-	// Provider must not panic on construction; model is validated at Stream time.
 	if p == nil {
-		t.Error("expected non-nil provider")
+		t.Fatal("expected non-nil provider")
+	}
+
+	// Verify that cfg.DefaultModel was threaded through into valModel: when
+	// DefaultModel is set, ValidatePro must NOT return "validate model not
+	// configured".  Any other error (auth, network) is acceptable in tests.
+	_, _, valErr := p.ValidatePro(context.Background(), "probe")
+	if valErr != nil && strings.Contains(valErr.Error(), "validate model not configured") {
+		t.Errorf("DefaultModel not threaded through: got %q", valErr.Error())
 	}
 }

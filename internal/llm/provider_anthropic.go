@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ── Wire types (Anthropic Messages API) ───────────────────────────────────────
@@ -11,41 +12,38 @@ type anthropicCacheControl struct {
 	Type string `json:"type"` // "ephemeral"
 }
 
-type anthropicContentBlock struct {
+// anthropicBlock represents a single content block used in both the top-level
+// "system" array and per-message "content" arrays. Both positions share the
+// same three fields, so a single type serves both roles.
+type anthropicBlock struct {
 	Type         string                 `json:"type"`                    // "text"
 	Text         string                 `json:"text"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicMessage struct {
-	Role    string                  `json:"role"`
-	Content []anthropicContentBlock `json:"content"`
-}
-
-type anthropicSystemBlock struct {
-	Type         string                 `json:"type"` // "text"
-	Text         string                 `json:"text"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Role    string           `json:"role"`
+	Content []anthropicBlock `json:"content"`
 }
 
 type anthropicWireRequest struct {
-	Model       string                 `json:"model"`
-	System      []anthropicSystemBlock `json:"system,omitempty"`
-	Messages    []anthropicMessage     `json:"messages"`
-	MaxTokens   int                    `json:"max_tokens"`
-	Temperature float64                `json:"temperature,omitempty"`
+	Model       string           `json:"model"`
+	System      []anthropicBlock `json:"system,omitempty"`
+	Messages    []anthropicMessage `json:"messages"`
+	MaxTokens   int              `json:"max_tokens"`
+	Temperature *float64         `json:"temperature,omitempty"`
 }
 
 // textFromBlocks extracts all TextBlock text values from a Message's Blocks,
 // concatenating them into a single string. Non-text blocks are skipped.
 func textFromBlocks(blocks []ContentBlock) string {
-	var out string
+	var sb strings.Builder
 	for _, b := range blocks {
 		if tb, ok := b.(TextBlock); ok {
-			out += tb.Text
+			sb.WriteString(tb.Text)
 		}
 	}
-	return out
+	return sb.String()
 }
 
 // anthropicMarshal converts a provider-neutral Request into Anthropic Messages
@@ -59,13 +57,13 @@ func textFromBlocks(blocks []ContentBlock) string {
 //   - "stream" is NOT included in the body (passed via Accept/stream header).
 //   - "max_tokens" is required; defaults to 1024 if Request.MaxTokens == 0.
 func anthropicMarshal(req Request) ([]byte, error) {
-	var sysBlocks []anthropicSystemBlock
+	var sysBlocks []anthropicBlock
 	var msgs []anthropicMessage
 
 	for _, m := range req.Messages {
 		text := textFromBlocks(m.Blocks)
 		if m.Role == "system" {
-			sysBlocks = append(sysBlocks, anthropicSystemBlock{
+			sysBlocks = append(sysBlocks, anthropicBlock{
 				Type: "text",
 				Text: text,
 			})
@@ -73,7 +71,7 @@ func anthropicMarshal(req Request) ([]byte, error) {
 		}
 		msgs = append(msgs, anthropicMessage{
 			Role: m.Role,
-			Content: []anthropicContentBlock{
+			Content: []anthropicBlock{
 				{Type: "text", Text: text},
 			},
 		})
@@ -101,17 +99,12 @@ func anthropicMarshal(req Request) ([]byte, error) {
 		maxTok = 1024
 	}
 
-	var temp float64
-	if req.Temperature != nil {
-		temp = *req.Temperature
-	}
-
 	wire := anthropicWireRequest{
 		Model:       req.Model,
 		System:      sysBlocks,
 		Messages:    msgs,
 		MaxTokens:   maxTok,
-		Temperature: temp,
+		Temperature: req.Temperature,
 	}
 
 	b, err := json.Marshal(wire)

@@ -66,6 +66,10 @@ func TestAnthropicMarshalShape(t *testing.T) {
 	lastMsg := msgs[len(msgs)-1].(map[string]any)
 	switch c := lastMsg["content"].(type) {
 	case []any:
+		if len(c) == 0 {
+			t.Errorf("last user message content slice is empty")
+			break
+		}
 		lastBlock := c[len(c)-1].(map[string]any)
 		if lastBlock["cache_control"] == nil {
 			t.Errorf("last user message content block missing cache_control")
@@ -89,7 +93,7 @@ func TestAnthropicMarshalShape(t *testing.T) {
 func TestAnthropicMarshalGolden(t *testing.T) {
 	golden, err := os.ReadFile("testdata/anthropic_marshal_golden.json")
 	if err != nil {
-		t.Skipf("golden not yet committed — run gen step: %v", err)
+		t.Fatalf("golden fixture missing: %v — run GEN_GOLDEN=1 go test -run TestAnthropicGenGolden to regenerate", err)
 	}
 
 	req := fixedAnthropicRequest()

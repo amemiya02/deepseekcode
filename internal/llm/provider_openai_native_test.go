@@ -66,7 +66,7 @@ func TestOpenAINativeMarshalShape(t *testing.T) {
 func TestOpenAINativeMarshalGolden(t *testing.T) {
 	golden, err := os.ReadFile("testdata/openai_native_marshal_golden.json")
 	if err != nil {
-		t.Skipf("golden not yet committed: %v", err)
+		t.Fatalf("golden file missing: %v", err)
 	}
 
 	req := fixedOpenAINativeRequest()
@@ -75,6 +75,9 @@ func TestOpenAINativeMarshalGolden(t *testing.T) {
 		t.Fatalf("openaiNativeMarshal: %v", err)
 	}
 
+	// Strip optional trailing newline from the golden file (POSIX convention)
+	// so that adding a newline to the file does not cause spurious failures.
+	golden = bytes.TrimRight(golden, "\n")
 	if !bytes.Equal(got, golden) {
 		t.Fatalf("OpenAI Native wire bytes changed!\ngot  %d bytes\nwant %d bytes\nfirst diff at byte %d",
 			len(got), len(golden), firstDiff(got, golden))
@@ -90,7 +93,7 @@ func TestOpenAINativeGenGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile("testdata/openai_native_marshal_golden.json", b, 0644); err != nil {
+	if err := os.WriteFile("testdata/openai_native_marshal_golden.json", append(b, '\n'), 0644); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %d bytes", len(b))

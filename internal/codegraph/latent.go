@@ -34,8 +34,10 @@ func escapePipe(s string) string {
 // Render returns a markdown-formatted symbol table of the most central nodes.
 // The output is intended for placement AFTER prompt.DynamicContextBoundary.
 func (li *LatentInjector) Render() string {
-	// Short-circuit: nothing to render.
-	if li.topN == 0 {
+	// Short-circuit: nothing to render. A non-positive topN (including
+	// negative values) would otherwise index ranked[:limit] with a negative
+	// limit and panic, so guard <= 0.
+	if li.topN <= 0 {
 		return ""
 	}
 

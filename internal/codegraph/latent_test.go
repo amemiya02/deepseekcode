@@ -78,3 +78,23 @@ func TestLatentSnippetNotInStaticPrefix(t *testing.T) {
 			"this would pollute the static prefix and break cache hits", snippetIdx, boundaryIdx)
 	}
 }
+
+// TestLatentRenderNonPositiveTopN guards against a panic regression: a
+// non-positive topN (0 or negative) must short-circuit to "" rather than
+// indexing ranked[:limit] with a negative limit. NewLatentInjector(idx, -1)
+// previously slid past the `== 0` guard and panicked.
+func TestLatentRenderNonPositiveTopN(t *testing.T) {
+	dir := fixtureDir(t)
+	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild(%q) failed: %v", dir, err)
+	}
+
+	for _, topN := range []int{-1, 0} {
+		inj := codegraph.NewLatentInjector(idx, topN)
+		got := inj.Render() // must not panic
+		if got != "" {
+			t.Errorf("Render() with topN=%d = %q; want \"\"", topN, got)
+		}
+	}
+}

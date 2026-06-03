@@ -3,6 +3,7 @@ package codegraph_test
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
@@ -161,4 +162,61 @@ func TestIndexIncremental(t *testing.T) {
 	if len(idx.Search("Alpha")) == 0 {
 		t.Fatal("Alpha disappeared after second Rebuild")
 	}
+}
+
+func TestIndexLookup(t *testing.T) {
+	dir := fixtureDir(t)
+	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Add is a known symbol in the fixture (see TestIndexCallers).
+	const knownID = "github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Add"
+	n := idx.Lookup(knownID)
+	if n == nil {
+		t.Fatalf("Lookup(%q) returned nil for a known symbol", knownID)
+	}
+	if n.Name != "Add" {
+		t.Errorf("Lookup(%q).Name = %q, want Add", knownID, n.Name)
+	}
+
+	// An ID that does not exist must return nil, not a stale or zero node.
+	if got := idx.Lookup("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.DoesNotExist"); got != nil {
+		t.Errorf("Lookup of unknown ID returned non-nil node: %+v", got)
+	}
+}
+
+// TestIndexLookupConcurrentRebuild guards the Lookup/Rebuild data race: Lookup
+// takes idx.mu.RLock around both the store dereference and the map lookup,
+// while Rebuild atomically swaps idx.store under the write lock. Run with -race.
+func TestIndexLookupConcurrentRebuild(t *testing.T) {
+	dir := fixtureDir(t)
+	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("initial Rebuild: %v", err)
+	}
+
+	const knownID = "github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Add"
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			if err := idx.Rebuild(dir); err != nil {
+				t.Errorf("Rebuild in loop: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Hammer Lookup concurrently with the rebuild loop. We assert nothing about
+	// the result here (a rebuild may be mid-flight); the point is the race
+	// detector, not the value.
+	for i := 0; i < 1000; i++ {
+		_ = idx.Lookup(knownID)
+	}
+
+	wg.Wait()
 }

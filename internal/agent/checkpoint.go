@@ -5,13 +5,6 @@ import (
 	"sync"
 )
 
-// NamedCheckpoint records a human-readable name for a step index so sessions
-// can be resumed or branched from a known point.
-type NamedCheckpoint struct {
-	Name    string
-	StepIdx int
-}
-
 // CheckpointIndex is a concurrency-safe name→stepIdx registry.
 // It is owned by Agent and reset on each Run.
 type CheckpointIndex struct {

@@ -38,10 +38,13 @@ func TestT_Fallback_MissingKey(t *testing.T) {
 	defer os.Unsetenv("DEEPSEEKCODE_LANG")
 	i18n.ReloadLocale()
 
-	// Key exists only in English catalog → must return English string, not "".
-	got := i18n.T("welcome.hint.send")
-	if got == "" {
-		t.Error("T(welcome.hint.send) returned empty string; want English fallback")
+	// "_test.en_only_sentinel" exists only in the English catalog, so with
+	// zh-CN active the lookup must fall back to English and return the exact
+	// English string — not the zh-CN translation and not an empty string.
+	got := i18n.T("_test.en_only_sentinel")
+	want := "english-only-sentinel"
+	if got != want {
+		t.Errorf("T(_test.en_only_sentinel) with zh-CN locale = %q; want English fallback %q", got, want)
 	}
 }
 

@@ -47,6 +47,11 @@ var messages = map[string]map[string]string{
 
 		// App-level hints (internal/tui/app.go)
 		"app.help.hint": "/help for commands",
+
+		// Sentinel key present only in English — used by TestT_Fallback_MissingKey
+		// to verify that T() falls back to English when a key is absent from the
+		// active locale.  Never add this key to any other locale map.
+		"_test.en_only_sentinel": "english-only-sentinel",
 	},
 
 	"zh-CN": {

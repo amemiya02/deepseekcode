@@ -40,6 +40,7 @@ type AgentFactory func(workingDir string) (AgentRunner, error)
 type session struct {
 	id     string
 	runner AgentRunner
+	ctx    context.Context    // cancelled when the session is cancelled
 	cancel context.CancelFunc
 }
 
@@ -67,9 +68,9 @@ func (sm *SessionManager) NewSession(ctx context.Context, workingDir string) (st
 	}
 	n := sm.counter.Add(1)
 	id := fmt.Sprintf("sess-%d", n)
-	_, cancel := context.WithCancel(ctx)
+	sCtx, cancel := context.WithCancel(ctx)
 	sm.mu.Lock()
-	sm.sessions[id] = &session{id: id, runner: runner, cancel: cancel}
+	sm.sessions[id] = &session{id: id, runner: runner, ctx: sCtx, cancel: cancel}
 	sm.mu.Unlock()
 	return id, nil
 }
@@ -101,6 +102,18 @@ func (sm *SessionManager) Cancel(id string) {
 	if ok {
 		s.cancel()
 	}
+}
+
+// SessionCtx returns the context associated with the session, or
+// context.Background() if the session is not found.
+func (sm *SessionManager) SessionCtx(id string) context.Context {
+	sm.mu.Lock()
+	s, ok := sm.sessions[id]
+	sm.mu.Unlock()
+	if !ok {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 // Prompt runs the agent for the session with the given prompt, calling

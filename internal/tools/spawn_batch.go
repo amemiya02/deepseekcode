@@ -29,7 +29,7 @@ func (*SpawnBatchTool) Name() string { return "spawn_batch" }
 
 func (*SpawnBatchTool) Description() string {
 	return "Fan out multiple subtasks to sub-agents concurrently and collect all results. " +
-		"Each task is a SpawnRequest object ({description, agent?, tools?, async?}). " +
+		"Each task is a SpawnRequest object ({description, agent?, tools?}). " +
 		"Tasks run in parallel (capped to avoid overload) and results are returned in order. " +
 		"Prefer this over sequential task calls when subtasks are independent."
 }
@@ -75,7 +75,6 @@ type batchTaskSpec struct {
 type batchResult struct {
 	idx     int
 	summary string
-	err     error
 }
 
 func (t *SpawnBatchTool) Execute(ctx context.Context, args json.RawMessage) (Result, error) {
@@ -93,12 +92,12 @@ func (t *SpawnBatchTool) Execute(ctx context.Context, args json.RawMessage) (Res
 		return Errf("spawn_batch: no spawner configured"), nil
 	}
 
-	cap := t.maxConcurrency
+	concurrency := t.maxConcurrency
 	if p.MaxConcurrency > 0 {
-		cap = p.MaxConcurrency
+		concurrency = p.MaxConcurrency
 	}
 
-	sem := make(chan struct{}, cap)
+	sem := make(chan struct{}, concurrency)
 	results := make([]batchResult, len(p.Tasks))
 	var wg sync.WaitGroup
 

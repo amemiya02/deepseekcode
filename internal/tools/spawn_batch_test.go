@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,10 +12,9 @@ import (
 
 // fakeBatchSpawner records how many concurrent spawns happen at peak.
 type fakeBatchSpawner struct {
-	active  atomic.Int32
-	peak    atomic.Int32
-	results []SpawnResult
-	delay   time.Duration
+	active atomic.Int32
+	peak   atomic.Int32
+	delay  time.Duration
 }
 
 func (f *fakeBatchSpawner) Spawn(ctx context.Context, req SpawnRequest) (SpawnResult, error) {
@@ -52,13 +52,19 @@ func TestSpawnBatchExecute(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("tool error: %s", res.Content)
 	}
-	// All five summaries should appear in the result.
-	for _, r := range reqs {
-		want := fmt.Sprintf("done:%s", r["description"])
-		if !containsStr(res.Content, want) {
-			t.Errorf("result missing %q; got:\n%s", want, res.Content)
+
+	// Results must appear in order: task[0] before task[1] before task[2] etc.
+	lines := strings.Split(strings.TrimRight(res.Content, "\n"), "\n")
+	if len(lines) != len(reqs) {
+		t.Fatalf("expected %d output lines, got %d:\n%s", len(reqs), len(lines), res.Content)
+	}
+	for i, r := range reqs {
+		wantLine := fmt.Sprintf("task[%d]: done:%s", i, r["description"])
+		if lines[i] != wantLine {
+			t.Errorf("line %d: got %q, want %q", i, lines[i], wantLine)
 		}
 	}
+
 	// Peak concurrency must not exceed cap=3.
 	if pk := sp.peak.Load(); pk > 3 {
 		t.Errorf("peak concurrency = %d, want ≤ 3", pk)
@@ -74,6 +80,24 @@ func TestSpawnBatchEmptyTasks(t *testing.T) {
 	}
 }
 
+func TestSpawnBatchNilSpawnerWithTasks(t *testing.T) {
+	// spawner is nil but tasks is non-empty — should hit the nil-spawner error branch.
+	tool := NewSpawnBatchTool(nil, 4)
+	args, _ := json.Marshal(map[string]any{
+		"tasks": []map[string]any{{"description": "task-a"}},
+	})
+	res, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected error result when spawner is nil, got: %s", res.Content)
+	}
+	if !strings.Contains(res.Content, "no spawner configured") {
+		t.Errorf("unexpected error message: %s", res.Content)
+	}
+}
+
 func TestSpawnBatchMissingDescription(t *testing.T) {
 	sp := &fakeBatchSpawner{}
 	tool := NewSpawnBatchTool(sp, 2)
@@ -86,17 +110,4 @@ func TestSpawnBatchMissingDescription(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("outer error unexpected: %s", res.Content)
 	}
-}
-
-func containsStr(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStrInner(s, sub))
-}
-
-func containsStrInner(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

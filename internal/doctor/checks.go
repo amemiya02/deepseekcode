@@ -55,6 +55,8 @@ func CheckKeyValid(ctx context.Context, cfg config.Config, hc *http.Client) Chec
 
 // CheckBaseURLReachable performs a HEAD request to the base URL to confirm
 // basic network reachability (no auth required).
+// expects a Finalize()d config — the provider-BaseURL → cfg.API.BaseURL fallback
+// mirrors what config.Finalize() does and must stay in sync with it.
 func CheckBaseURLReachable(ctx context.Context, cfg config.Config, hc *http.Client) CheckResult {
 	p, ok := cfg.Providers[cfg.Active.Provider]
 	if !ok {
@@ -89,7 +91,15 @@ func CheckProxyConfigured(_ context.Context, _ config.Config, _ *http.Client) Ch
 			if u, err := url.Parse(v); err == nil {
 				detail = u.Redacted()
 			}
-			return CheckResult{Name: "proxy-configured", OK: true, Detail: fmt.Sprintf("%s=%s", env, detail)}
+			detail = fmt.Sprintf("%s=%s", env, detail)
+			// Warn when NO_PROXY/no_proxy is also set: a wildcard or matching entry
+			// effectively disables the proxy and the doctor should not mislead.
+			for _, npEnv := range []string{"NO_PROXY", "no_proxy"} {
+				if np := os.Getenv(npEnv); np != "" {
+					detail += fmt.Sprintf(" (NO_PROXY also set: %s)", np)
+				}
+			}
+			return CheckResult{Name: "proxy-configured", OK: true, Detail: detail}
 		}
 	}
 	return CheckResult{Name: "proxy-configured", OK: false, Detail: "no HTTP(S) proxy env vars set (OK if direct access)"}

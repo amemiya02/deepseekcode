@@ -4,7 +4,6 @@ package doctor_test
 import (
 	"bytes"
 	"context"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,16 +177,17 @@ func TestCheckBaseURLReachable_OK(t *testing.T) {
 }
 
 func TestCheckBaseURLReachable_Unreachable(t *testing.T) {
-	// Grab a free port then immediately close the listener so nothing is bound there.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("could not allocate free port: %v", err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
+	// Start a real server so we get a real ephemeral port, then close it
+	// immediately. Using httptest.NewServer avoids the TOCTOU race where another
+	// process re-binds the port between net.Listen/Close and our dial.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	targetURL := srv.URL
+	srv.Close() // port is now released; subsequent dial must fail
 
 	cfg := config.Config{}
-	cfg.API.BaseURL = "http://" + addr
+	cfg.API.BaseURL = targetURL
 	r := doctor.CheckBaseURLReachable(context.Background(), cfg, &http.Client{})
 	if r.OK {
 		t.Fatal("expected FAIL for unreachable URL")
@@ -225,6 +225,27 @@ func TestCheckProxyConfigured_WithProxy(t *testing.T) {
 	r := doctor.CheckProxyConfigured(context.Background(), config.Config{}, nil)
 	if !r.OK {
 		t.Fatalf("expected PASS when HTTPS_PROXY is set, got: %s", r.Detail)
+	}
+	// Detail must surface the proxy host so that a mutation setting OK=true with
+	// an empty Detail is caught immediately.
+	if !strings.Contains(r.Detail, "proxy.example.com") {
+		t.Fatalf("expected Detail to contain proxy host %q, got: %s", "proxy.example.com", r.Detail)
+	}
+}
+
+func TestCheckProxyConfigured_WithProxyAndNoProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+	t.Setenv("NO_PROXY", "*")
+	r := doctor.CheckProxyConfigured(context.Background(), config.Config{}, nil)
+	if !r.OK {
+		t.Fatalf("expected OK=true (proxy var is set), got: %s", r.Detail)
+	}
+	// Detail must warn that NO_PROXY is also set so the doctor doesn't mislead.
+	if !strings.Contains(r.Detail, "NO_PROXY") {
+		t.Fatalf("expected Detail to mention NO_PROXY, got: %s", r.Detail)
+	}
+	if !strings.Contains(r.Detail, "*") {
+		t.Fatalf("expected Detail to include NO_PROXY value %q, got: %s", "*", r.Detail)
 	}
 }
 

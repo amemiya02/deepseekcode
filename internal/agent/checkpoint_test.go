@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -102,10 +103,13 @@ func TestAgentBranchAtByStep(t *testing.T) {
 	}
 	a.Messages = make([]llm.Message, 6)
 
-	// Branch at step 1 (0-indexed) → boundary = MessageCount of step 1 = 4.
-	boundary, err := a.resolveBranchBoundary("1")
+	// Branch at step 1 (0-indexed) → stepIdx=1, messageCount=4.
+	stepIdx, boundary, err := a.resolveBranchBoundary("1")
 	if err != nil {
 		t.Fatalf("resolveBranchBoundary: %v", err)
+	}
+	if stepIdx != 1 {
+		t.Fatalf("stepIdx = %d, want 1", stepIdx)
 	}
 	if boundary != 4 {
 		t.Fatalf("boundary = %d, want 4", boundary)
@@ -121,11 +125,162 @@ func TestAgentBranchAtByName(t *testing.T) {
 	a.Messages = make([]llm.Message, 7)
 	a.checkpoints.Record("pre-test", 1) // step index 1 → MessageCount 7
 
-	boundary, err := a.resolveBranchBoundary("pre-test")
+	stepIdx, boundary, err := a.resolveBranchBoundary("pre-test")
 	if err != nil {
 		t.Fatalf("resolveBranchBoundary by name: %v", err)
 	}
+	if stepIdx != 1 {
+		t.Fatalf("stepIdx = %d, want 1", stepIdx)
+	}
 	if boundary != 7 {
 		t.Fatalf("boundary = %d, want 7", boundary)
+	}
+}
+
+// TestResolveBranchBoundaryErrors covers all error paths.
+func TestResolveBranchBoundaryErrors(t *testing.T) {
+	t.Run("empty steps slice", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		// a.steps is nil/empty
+		_, _, err := a.resolveBranchBoundary("0")
+		if err == nil {
+			t.Fatal("expected error for empty steps, got nil")
+		}
+	})
+
+	t.Run("step out of range negative", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		a.steps = []StepRecord{{MessageCount: 2}}
+		_, _, err := a.resolveBranchBoundary("-1")
+		if err == nil {
+			t.Fatal("expected error for step -1, got nil")
+		}
+	})
+
+	t.Run("step out of range too large", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		a.steps = []StepRecord{{MessageCount: 2}}
+		_, _, err := a.resolveBranchBoundary("5")
+		if err == nil {
+			t.Fatal("expected error for step 5 with 1 step, got nil")
+		}
+	})
+
+	t.Run("unknown checkpoint name", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		a.steps = []StepRecord{{MessageCount: 2}}
+		_, _, err := a.resolveBranchBoundary("no-such-checkpoint")
+		if err == nil {
+			t.Fatal("expected error for unknown checkpoint, got nil")
+		}
+	})
+
+	t.Run("step below compactionFloor", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		a.steps = []StepRecord{
+			{MessageCount: 2},
+			{MessageCount: 4},
+			{MessageCount: 6},
+		}
+		// Simulate a compaction at step 2: steps 0 and 1 are stale.
+		a.compactionFloor = 2
+		_, _, err := a.resolveBranchBoundary("1")
+		if err == nil {
+			t.Fatal("expected error when step index is below compactionFloor, got nil")
+		}
+	})
+
+	t.Run("checkpoint below compactionFloor", func(t *testing.T) {
+		a := &Agent{checkpoints: newCheckpointIndex()}
+		a.steps = []StepRecord{
+			{MessageCount: 2},
+			{MessageCount: 4},
+			{MessageCount: 6},
+		}
+		a.checkpoints.Record("stale", 0) // step 0 is below compactionFloor=1
+		a.compactionFloor = 1
+		_, _, err := a.resolveBranchBoundary("stale")
+		if err == nil {
+			t.Fatal("expected error when checkpoint step is below compactionFloor, got nil")
+		}
+	})
+}
+
+// TestBranchAtNilWorktree exercises BranchAt end-to-end with wt=nil
+// (dry-run mode), verifying StepIdx and MessageCount are set correctly.
+func TestBranchAtNilWorktree(t *testing.T) {
+	a := &Agent{checkpoints: newCheckpointIndex()}
+	a.steps = []StepRecord{
+		{MessageCount: 5, Snapshotted: true},
+		{MessageCount: 10, Snapshotted: true},
+	}
+	a.Messages = make([]llm.Message, 10)
+	a.checkpoints.Record("snap", 1) // step 1 → MessageCount 10
+
+	t.Run("by step index", func(t *testing.T) {
+		res, err := a.BranchAt(context.Background(), "0", nil)
+		if err != nil {
+			t.Fatalf("BranchAt: %v", err)
+		}
+		if res.StepIdx != 0 {
+			t.Fatalf("StepIdx = %d, want 0", res.StepIdx)
+		}
+		if res.MessageCount != 5 {
+			t.Fatalf("MessageCount = %d, want 5", res.MessageCount)
+		}
+		if res.WorktreePath != "" || res.Branch != "" {
+			t.Fatalf("expected empty WorktreePath/Branch for nil wt, got %+v", res)
+		}
+	})
+
+	t.Run("by checkpoint name", func(t *testing.T) {
+		res, err := a.BranchAt(context.Background(), "snap", nil)
+		if err != nil {
+			t.Fatalf("BranchAt by name: %v", err)
+		}
+		if res.StepIdx != 1 {
+			t.Fatalf("StepIdx = %d, want 1", res.StepIdx)
+		}
+		if res.MessageCount != 10 {
+			t.Fatalf("MessageCount = %d, want 10", res.MessageCount)
+		}
+	})
+}
+
+// TestBranchAtCompactionFloor ensures BranchAt propagates the compactionFloor
+// error from resolveBranchBoundary rather than silently returning stale data.
+func TestBranchAtCompactionFloor(t *testing.T) {
+	a := &Agent{checkpoints: newCheckpointIndex()}
+	a.steps = []StepRecord{
+		{MessageCount: 3},
+		{MessageCount: 8},
+		{MessageCount: 12},
+	}
+	a.compactionFloor = 2 // steps 0 and 1 are stale
+
+	_, err := a.BranchAt(context.Background(), "1", nil)
+	if err == nil {
+		t.Fatal("BranchAt should have returned an error for a step below compactionFloor")
+	}
+}
+
+// TestSanitizeBranchName verifies that '/' is replaced and safe chars pass through.
+func TestSanitizeBranchName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"hello", "hello"},
+		{"step-1", "step-1"},
+		{"pre_test", "pre_test"},
+		{"feature/foo", "feature-foo"}, // '/' must be replaced
+		{"my branch!", "my-branch-"},   // space and '!' replaced
+		{"ABC123", "ABC123"},
+	}
+	for _, tc := range cases {
+		got := sanitizeBranchName(tc.in)
+		if got != tc.want {
+			t.Errorf("sanitizeBranchName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

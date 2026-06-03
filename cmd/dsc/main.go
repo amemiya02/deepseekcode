@@ -351,6 +351,10 @@ func run() error {
 	logging.Setup(debug, logMode, cwd)
 	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
 
+	if resumeAt != "" && tuiMode {
+		return fmt.Errorf("--resume-at requires -p (one-shot mode)")
+	}
+
 	if !tuiMode {
 		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL, resumeAt: resumeAt})
 	}
@@ -841,6 +845,15 @@ type modeFlags struct {
 	resumeAt                  string // --resume-at checkpoint name or step index; "" disables
 }
 
+// applyResumeAtTruncation trims a.Messages to messageCount when messageCount
+// is within the current slice bounds. It is the single authoritative
+// implementation of the truncation step that follows BranchAt in runOneShot.
+func applyResumeAtTruncation(a *agent.Agent, messageCount int) {
+	if messageCount <= len(a.Messages) {
+		a.Messages = a.Messages[:messageCount]
+	}
+}
+
 type providerRuntime struct {
 	Provider llm.Provider
 	Client   *llm.Client
@@ -1048,15 +1061,12 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	if mf.resumeAt != "" {
 		res, err := a.BranchAt(ctx, mf.resumeAt, wtMgr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "--resume-at: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("--resume-at: %w", err)
 		}
 		if res.WorktreePath != "" {
 			fmt.Fprintf(os.Stderr, "branching to %s (step %d)\n", res.WorktreePath, res.StepIdx)
 		}
-		if res.MessageCount <= len(a.Messages) {
-			a.Messages = a.Messages[:res.MessageCount]
-		}
+		applyResumeAtTruncation(a, res.MessageCount)
 	}
 
 	// Optional JSONL trace sink (benchmark harness). Attached before Run so

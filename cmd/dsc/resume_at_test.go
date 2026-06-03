@@ -20,41 +20,34 @@ func TestResumeAtFlagRegistered(t *testing.T) {
 	}
 }
 
-// TestResumeAtMessageTruncation verifies the truncation logic applied after
-// BranchAt resolves: when res.MessageCount <= len(agent.Messages) the slice
-// is trimmed to the boundary so the resumed session starts at the right
-// transcript position.
+// TestResumeAtMessageTruncation verifies that applyResumeAtTruncation (the
+// production helper called by runOneShot) trims the transcript to the
+// boundary when messageCount is within bounds.
 func TestResumeAtMessageTruncation(t *testing.T) {
 	a := &agent.Agent{}
-	// Populate 5 messages.
 	for i := 0; i < 5; i++ {
 		a.Messages = append(a.Messages, llm.Message{Role: "user"})
 	}
 
 	boundary := 3
-	// Reproduce the truncation block from runOneShot.
-	if boundary <= len(a.Messages) {
-		a.Messages = a.Messages[:boundary]
-	}
+	applyResumeAtTruncation(a, boundary)
 
 	if len(a.Messages) != boundary {
 		t.Fatalf("expected %d messages after truncation, got %d", boundary, len(a.Messages))
 	}
 }
 
-// TestResumeAtTruncationNoopWhenBoundaryLarger verifies that truncation is
-// skipped (messages unchanged) when MessageCount > len(agent.Messages), which
-// can happen if the session was partially loaded.
+// TestResumeAtTruncationNoopWhenBoundaryLarger verifies that
+// applyResumeAtTruncation leaves the transcript unchanged when messageCount
+// exceeds the current length (e.g. partially-loaded session).
 func TestResumeAtTruncationNoopWhenBoundaryLarger(t *testing.T) {
 	a := &agent.Agent{}
 	for i := 0; i < 3; i++ {
 		a.Messages = append(a.Messages, llm.Message{Role: "user"})
 	}
 
-	boundary := 10
-	if boundary <= len(a.Messages) {
-		a.Messages = a.Messages[:boundary]
-	}
+	applyResumeAtTruncation(a, 10)
+
 	// Should still have 3 messages — boundary was larger so truncation was skipped.
 	if len(a.Messages) != 3 {
 		t.Fatalf("expected 3 messages (no truncation), got %d", len(a.Messages))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,36 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
+
+// trackingPersister is a Persister that records AppendUserMessage calls so
+// tests can assert the persister received expected feedback messages.
+type trackingPersister struct {
+	mu       sync.Mutex
+	userMsgs [][]llm.ContentBlock
+}
+
+func (f *trackingPersister) SessionID() string { return "tracking-session" }
+
+func (f *trackingPersister) AppendUserMessage(_ context.Context, blocks []llm.ContentBlock) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := make([]llm.ContentBlock, len(blocks))
+	copy(cp, blocks)
+	f.userMsgs = append(f.userMsgs, cp)
+	return len(f.userMsgs), nil
+}
+
+func (f *trackingPersister) AppendAssistant(_ context.Context, _ []llm.ContentBlock, _ string, _ llm.Usage) (int, error) {
+	return 0, nil
+}
+func (f *trackingPersister) AppendToolResult(_ context.Context, _ string, _ string, _ bool) (int, error) {
+	return 0, nil
+}
+func (f *trackingPersister) TakeSnapshot(_ int, _ []string) (int, error)          { return 0, nil }
+func (f *trackingPersister) SetActiveModel(_ context.Context, _ string) error     { return nil }
+func (f *trackingPersister) ReplaceWithCompaction(_ context.Context, _, _ int, _ string) (int, error) {
+	return 0, nil
+}
 
 func TestVerifyHookPass(t *testing.T) {
 	h := &VerifyHook{Cmd: "true"} // unix `true` always exits 0
@@ -182,5 +213,45 @@ func TestAgentVerifyHookInjectsFeedbackAtStopTimeOnFailure(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected verify failure feedback in a.Messages at stop time, but none found; messages=%+v", a.Messages)
+	}
+}
+
+// TestAgentVerifyHookStopTimePersisterReceivesFeedback asserts that when the
+// verify hook fails at model-stop time (hasTools == false), the feedback
+// message is forwarded to the Persister via AppendUserMessage — not just
+// appended to a.Messages. This is the persister-path that was missing before
+// the fix (commit add751c).
+func TestAgentVerifyHookStopTimePersisterReceivesFeedback(t *testing.T) {
+	// Single turn: model stops immediately (no tool calls).
+	// The verify hook ("false") always fails, triggering the stop-time else-branch.
+	srv := llmtest.NewServer(llmtest.Turn{Text: "done"})
+	defer srv.Close()
+
+	a := newVerifyAgent(t, srv, "false") // "false" always fails
+
+	fp := &trackingPersister{}
+	a.Persister = fp
+
+	_, err := a.Run(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The persister must have received at least one AppendUserMessage call
+	// that contains the verify failure feedback.
+	fp.mu.Lock()
+	msgs := fp.userMsgs
+	fp.mu.Unlock()
+
+	found := false
+	for _, blocks := range msgs {
+		for _, b := range blocks {
+			if tb, ok := b.(llm.TextBlock); ok && strings.Contains(tb.Text, "Verification failed") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Persister.AppendUserMessage was not called with verify failure feedback at stop time; persister userMsgs=%+v", msgs)
 	}
 }

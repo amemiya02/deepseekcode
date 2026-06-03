@@ -2,6 +2,7 @@
 package llm
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -166,5 +167,71 @@ func TestApplyPolicy_PassThroughNoReasoningUnchanged(t *testing.T) {
 	out := applyPolicy(msgs, ReasoningPolicy{Mode: PolicyPassThrough})
 	if len(out) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(out))
+	}
+}
+
+func TestMarshalCacheStable_DropPolicy_RemovesReasoning(t *testing.T) {
+	t.Setenv("DEEPSEEKCODE_REASONING_DROP", "1")
+	t.Setenv("DEEPSEEKCODE_REASONING_RETAIN", "")
+
+	req := Request{
+		Model:    "deepseek-reasoner",
+		Thinking: &ThinkingOptions{Type: "enabled"},
+		Messages: []Message{
+			makeAssistantWithReasoning("answer", "secret reasoning"),
+		},
+	}
+	data, err := req.MarshalCacheStable()
+	if err != nil {
+		t.Fatalf("MarshalCacheStable: %v", err)
+	}
+	if bytes.Contains(data, []byte("secret reasoning")) {
+		t.Fatal("DropAll policy: reasoning must not appear in serialized output")
+	}
+}
+
+func TestMarshalCacheStable_RetainPolicy_OlderOmitted(t *testing.T) {
+	t.Setenv("DEEPSEEKCODE_REASONING_DROP", "")
+	t.Setenv("DEEPSEEKCODE_REASONING_RETAIN", "1")
+
+	req := Request{
+		Model:    "deepseek-reasoner",
+		Thinking: &ThinkingOptions{Type: "enabled"},
+		Messages: []Message{
+			makeAssistantWithReasoning("first", "old reasoning"),
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "next"}}},
+			makeAssistantWithReasoning("second", "new reasoning"),
+		},
+	}
+	data, err := req.MarshalCacheStable()
+	if err != nil {
+		t.Fatalf("MarshalCacheStable: %v", err)
+	}
+	if bytes.Contains(data, []byte("old reasoning")) {
+		t.Fatal("RetainLast(1): old reasoning must be replaced with placeholder")
+	}
+	if !bytes.Contains(data, []byte("new reasoning")) {
+		t.Fatal("RetainLast(1): last turn reasoning must be retained")
+	}
+}
+
+func TestMarshalCacheStable_NoPolicy_ByteIdentical(t *testing.T) {
+	t.Setenv("DEEPSEEKCODE_REASONING_DROP", "")
+	t.Setenv("DEEPSEEKCODE_REASONING_RETAIN", "")
+
+	req := Request{
+		Model: "deepseek-chat",
+		Messages: []Message{
+			{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "hello"}}},
+		},
+	}
+	// Call twice: output must be identical (determinism + no policy mutation).
+	d1, err1 := req.MarshalCacheStable()
+	d2, err2 := req.MarshalCacheStable()
+	if err1 != nil || err2 != nil {
+		t.Fatalf("errors: %v / %v", err1, err2)
+	}
+	if !bytes.Equal(d1, d2) {
+		t.Fatal("MarshalCacheStable must be deterministic under no policy")
 	}
 }

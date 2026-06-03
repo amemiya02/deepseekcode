@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"sort"
 )
 
@@ -112,6 +113,12 @@ type ResponseFmt struct {
 func (r Request) MarshalCacheStable() ([]byte, error) {
 	// Sanitize first so thinking-mode replay is stable
 	r = r.SanitizeForDeepSeek()
+	// Apply reasoning retention policy (env-gated; no-op when unset).
+	policy, err := ReadPolicy()
+	if err != nil {
+		return nil, fmt.Errorf("reasoning policy: %w", err)
+	}
+	r.Messages = applyPolicy(r.Messages, policy)
 	// canonicalizeTools is the single shared canonicalization with the Prefix
 	// Fingerprint (static_prefix.go), so the tool bytes on the wire and the
 	// bytes the fingerprint hashes are produced by the same code.

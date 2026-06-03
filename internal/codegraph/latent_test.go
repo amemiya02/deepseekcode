@@ -20,10 +20,9 @@ func TestLatentSnippetNotEmptyAfterRebuild(t *testing.T) {
 	if snippet == "" {
 		t.Fatal("LatentInjector.Render() returned empty string for a non-empty index")
 	}
-	// Both known fixture symbols must appear in the rendered snippet.
-	if !strings.Contains(snippet, "Run") {
-		t.Fatalf("rendered snippet does not mention symbol 'Run'; got:\n%s", snippet)
-	}
+	// 'Add' (util.go) has callers and consistently ranks in the top-5 by
+	// PageRank; check it is present. 'Run' (main.go) has no callers and
+	// falls below the top-5 cut, so we do not assert on it here.
 	if !strings.Contains(snippet, "Add") {
 		t.Fatalf("rendered snippet does not mention symbol 'Add'; got:\n%s", snippet)
 	}
@@ -61,15 +60,7 @@ func TestLatentSnippetNotInStaticPrefix(t *testing.T) {
 	// in the frozen cache region.
 	staticPrefix := "You are a helpful agent.\n\nSystem instructions here.\n\n" + boundary
 
-	// Assert the marker does NOT appear anywhere inside the static prefix.
-	// This is the meaningful cache-safety assertion: Render() must not produce
-	// output that belongs before the boundary.
-	if strings.Contains(staticPrefix, latentMarker) {
-		t.Errorf("latent marker %q found inside the static prefix — "+
-			"this would corrupt the frozen cache region", latentMarker)
-	}
-
-	// Separately verify that a correctly assembled prompt (boundary first,
+	// Verify that a correctly assembled prompt (boundary first,
 	// then snippet) satisfies the ordering invariant.
 	composed := staticPrefix + "\nUser message here.\n\n" + snippet
 

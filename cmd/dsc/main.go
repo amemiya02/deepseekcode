@@ -230,6 +230,7 @@ func run() error {
 		newSession      bool
 		continueSes     bool
 		resumeSes       string
+		resumeAt        string
 		prompt          string
 		debug           bool
 		traceJSONL      string
@@ -247,6 +248,7 @@ func run() error {
 	flag.BoolVar(&newSession, "new", false, "force new session, even if a recent one exists")
 	flag.BoolVar(&continueSes, "c", false, "continue last session in cwd")
 	flag.StringVar(&resumeSes, "r", "", "resume session by ID (empty opens picker)")
+	flag.StringVar(&resumeAt, "resume-at", "", "resume session from named checkpoint or step index")
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
 	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
 	flag.StringVar(&traceJSONL, "trace-jsonl", "", "one-shot: write epoch/usage/compaction/drift trace as JSONL to PATH (used by the benchmark harness)")
@@ -350,7 +352,7 @@ func run() error {
 	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
 
 	if !tuiMode {
-		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL})
+		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL, resumeAt: resumeAt})
 	}
 
 	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction}, newSession, continueSes, resumeSes)
@@ -836,6 +838,7 @@ type modeFlags struct {
 	disablePrefixEpoch        bool
 	disableSemanticCompaction bool
 	traceJSONL                string // one-shot trace sink path; "" disables
+	resumeAt                  string // --resume-at checkpoint name or step index; "" disables
 }
 
 type providerRuntime struct {
@@ -1037,6 +1040,24 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.Spawner = spawner
 	reg.Register(tools.NewSubagentTool(spawner))
 	reg.Register(tools.NewWorktreeTool(wtMgr))
+
+	// --resume-at: resolve the named checkpoint or step index, then truncate
+	// the in-memory transcript to the boundary so the resumed session starts
+	// from the right position. Full exec-fork into the new worktree is out of
+	// scope; the flag wires the boundary-resolution and truncation path.
+	if mf.resumeAt != "" {
+		res, err := a.BranchAt(ctx, mf.resumeAt, wtMgr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "--resume-at: %v\n", err)
+			os.Exit(1)
+		}
+		if res.WorktreePath != "" {
+			fmt.Fprintf(os.Stderr, "branching to %s (step %d)\n", res.WorktreePath, res.StepIdx)
+		}
+		if res.MessageCount <= len(a.Messages) {
+			a.Messages = a.Messages[:res.MessageCount]
+		}
+	}
 
 	// Optional JSONL trace sink (benchmark harness). Attached before Run so
 	// it captures the first epoch event; flushed by waiting on its handle

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const anthropicAPIVersion = "2023-06-01"
@@ -23,6 +24,7 @@ func newAnthropicProvider(cfg ProviderConfig) (Provider, error) {
 		baseURL = "https://api.anthropic.com"
 	}
 	c := NewClient(cfg.APIKey, baseURL)
+	applyProviderTimeouts(c, cfg)
 	return &AnthropicProvider{client: c}, nil
 }
 
@@ -58,16 +60,16 @@ func (p *AnthropicProvider) ValidatePro(ctx context.Context, prompt string) (boo
 // It uses server-sent events (SSE) identical in framing to the DeepSeek path
 // but parses Anthropic-specific event types.
 func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan Event, error) {
+	// Apply model default before marshaling so the wire body uses the correct value.
+	if req.Model == "" {
+		req.Model = "claude-sonnet-4-5"
+	}
+
 	body, err := anthropicMarshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic stream marshal: %w", err)
 	}
 
-	model := req.Model
-	if model == "" {
-		model = "claude-sonnet-4-5"
-	}
-	_ = model // used for defaulting; already embedded in marshaled body
 	url := strings.TrimRight(p.client.BaseURL, "/") + "/v1/messages"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -90,22 +92,95 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 	}
 
 	ch := make(chan Event, 32)
+	c := p.client
 	go func() {
 		defer close(ch)
 		defer resp.Body.Close()
+
 		scanner := bufio.NewScanner(resp.Body)
+
+		// Two-tier timeout mirrors Client.readSSE.
+		firstTimer := time.NewTimer(c.FirstTokenTimeout)
+		stallTimer := time.NewTimer(c.ChunkStallTimeout)
+		stallTimer.Stop()
+		defer firstTimer.Stop()
+		defer stallTimer.Stop()
+
+		type scanLine struct {
+			text string
+			ok   bool
+			err  error
+		}
+		lines := make(chan scanLine, 1)
+		go func() {
+			for scanner.Scan() {
+				lines <- scanLine{text: scanner.Text(), ok: true}
+			}
+			lines <- scanLine{ok: false, err: scanner.Err()}
+			close(lines)
+		}()
+
+		emit := func(e Event) {
+			select {
+			case ch <- e:
+			case <-ctx.Done():
+			}
+		}
+
 		var eventType string
-		for scanner.Scan() {
-			line := scanner.Text()
+		seenFirst := false
+
+		for {
+			var sl scanLine
+			select {
+			case <-ctx.Done():
+				emit(Event{Type: EventError, Err: ctx.Err()})
+				return
+			case <-firstTimer.C:
+				if !seenFirst {
+					emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrFirstTokenTimeout, c.FirstTokenTimeout)})
+					return
+				}
+			case <-stallTimer.C:
+				emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrChunkStall, c.ChunkStallTimeout)})
+				return
+			case sl = <-lines:
+			}
+
+			if !sl.ok {
+				if sl.err != nil {
+					emit(Event{Type: EventError, Err: sl.err})
+				}
+				return
+			}
+
+			// Mark first byte received and arm stall timer.
+			if !seenFirst {
+				seenFirst = true
+				firstTimer.Stop()
+			}
+			if !stallTimer.Stop() {
+				select {
+				case <-stallTimer.C:
+				default:
+				}
+			}
+			stallTimer.Reset(c.ChunkStallTimeout)
+
+			line := sl.text
 			if strings.HasPrefix(line, "event: ") {
 				eventType = strings.TrimPrefix(line, "event: ")
+				continue
+			} else if line == "" {
+				// Blank line terminates an SSE event; reset type for next event.
+				eventType = ""
 				continue
 			}
 			if strings.HasPrefix(line, "data: ") {
 				data := strings.TrimPrefix(line, "data: ")
 				ev := parseAnthropicSSEData(eventType, data)
 				if ev != nil {
-					ch <- *ev
+					emit(*ev)
 				}
 			}
 		}
@@ -131,9 +206,8 @@ func parseAnthropicSSEData(eventType, data string) *Event {
 		}
 	case "message_delta":
 		if delta, ok := raw["delta"].(map[string]any); ok {
-			if reason, _ := delta["stop_reason"].(string); reason == "end_turn" {
-				// Use EventFinish to match the real codebase event types
-				return &Event{Type: EventFinish, FinishReason: "end_turn"}
+			if reason, _ := delta["stop_reason"].(string); reason != "" {
+				return &Event{Type: EventFinish, FinishReason: reason}
 			}
 		}
 	case "message_stop":
@@ -163,11 +237,12 @@ type anthropicMessage struct {
 }
 
 type anthropicWireRequest struct {
-	Model       string           `json:"model"`
-	System      []anthropicBlock `json:"system,omitempty"`
+	Model       string             `json:"model"`
+	Stream      bool               `json:"stream"`
+	System      []anthropicBlock   `json:"system,omitempty"`
 	Messages    []anthropicMessage `json:"messages"`
-	MaxTokens   int              `json:"max_tokens"`
-	Temperature *float64         `json:"temperature,omitempty"`
+	MaxTokens   int                `json:"max_tokens"`
+	Temperature *float64           `json:"temperature,omitempty"`
 }
 
 // textFromBlocks extracts all TextBlock text values from a Message's Blocks,
@@ -190,7 +265,7 @@ func textFromBlocks(blocks []ContentBlock) string {
 //     system block gets cache_control:{type:ephemeral}.
 //   - non-system messages become "messages"; the last user turn's last content
 //     block gets cache_control:{type:ephemeral}.
-//   - "stream" is NOT included in the body (passed via Accept/stream header).
+//   - "stream" is set to true in the body (required by Anthropic's API).
 //   - "max_tokens" is required; defaults to 1024 if Request.MaxTokens == 0.
 func anthropicMarshal(req Request) ([]byte, error) {
 	var sysBlocks []anthropicBlock
@@ -237,6 +312,7 @@ func anthropicMarshal(req Request) ([]byte, error) {
 
 	wire := anthropicWireRequest{
 		Model:       req.Model,
+		Stream:      true,
 		System:      sysBlocks,
 		Messages:    msgs,
 		MaxTokens:   maxTok,

@@ -69,8 +69,8 @@ func TestAnthropicProviderStream(t *testing.T) {
 			got = append(got, ev.Text)
 		}
 	}
-	if len(got) == 0 {
-		t.Error("expected at least one text event")
+	if len(got) != 1 || got[0] != "4" {
+		t.Errorf("expected exactly one text event with value \"4\", got %v", got)
 	}
 }
 
@@ -145,9 +145,9 @@ func TestAnthropicMarshalShape(t *testing.T) {
 		t.Errorf("expected content block array for last user turn, got string")
 	}
 
-	// must not contain stream field (Anthropic passes it via header)
-	if _, has := wire["stream"]; has {
-		t.Errorf("wire must not contain 'stream' key for Anthropic")
+	// stream must be true in the body (required by Anthropic's Messages API)
+	if v, _ := wire["stream"].(bool); !v {
+		t.Errorf("wire must contain 'stream': true for Anthropic")
 	}
 
 	// max_tokens must be present and correct

@@ -1,3 +1,6 @@
+// Package memory provides persistent, BM25-indexed long-term memory for the
+// agent. Records are stored as JSONL with soft-deletes, SHA deduplication, and
+// Mem0-style near-duplicate reconciliation.
 package memory
 
 import "time"

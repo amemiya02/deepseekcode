@@ -398,7 +398,7 @@ func TestAgentMaybeCompactTriggers(t *testing.T) {
 		})
 	}
 	before := len(a.Messages)
-	a.maybeCompact(context.Background(), 0)
+	a.maybeCompact(context.Background())
 
 	if len(a.Messages) >= before {
 		t.Errorf("expected a.Messages to shrink; before=%d after=%d", before, len(a.Messages))
@@ -505,7 +505,7 @@ func TestCompactionSummaryWireShapeProviderAcceptable(t *testing.T) {
 			Blocks: []llm.ContentBlock{llm.TextBlock{Text: strings.Repeat("x", 400)}},
 		})
 	}
-	a.maybeCompact(context.Background(), 0)
+	a.maybeCompact(context.Background())
 
 	wire := a.fullMessages()
 	var systemCount int
@@ -684,7 +684,7 @@ func TestAgentMaybeCompactNoOpBelowThreshold(t *testing.T) {
 		{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hi"}}},
 		{Role: "assistant", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "ok"}}},
 	}
-	a.maybeCompact(context.Background(), 0)
+	a.maybeCompact(context.Background())
 	if len(a.Messages) != 2 {
 		t.Errorf("expected no-op; got %d messages", len(a.Messages))
 	}

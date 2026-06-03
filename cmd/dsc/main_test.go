@@ -8,9 +8,14 @@ import (
 	"testing"
 )
 
-// TestBinary_ProxyEnvPassthrough verifies that the compiled binary honours
-// DEEPSEEKCODE_PROXY by ensuring it doesn't crash on startup when the env
-// var contains an invalid proxy (the binary must parse, not panic).
+// TestBinary_ProxyEnvPassthrough verifies that the compiled binary actually
+// routes outbound requests through DEEPSEEKCODE_PROXY. The test runs the
+// binary in one-shot mode (-p) with a fake API key pointing at a closed
+// local port as the proxy. If the proxy transport is wired, the connection
+// attempt reaches 127.0.0.1:19999 and the error output mentions that
+// address. If the proxy is NOT wired, the binary would attempt a direct
+// connection to api.deepseek.com instead, and the proxy address would never
+// appear — which is a regression.
 func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 	if testing.Short() {
 		t.Skip("binary build skipped in short mode")
@@ -22,18 +27,33 @@ func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 		t.Fatalf("build failed: %v", err)
 	}
 
-	// Run with --help so it exits immediately; set a bogus proxy.
-	cmd := exec.Command(bin, "--help")
-	cmd.Env = append(os.Environ(),
+	// Run one-shot with a deliberately closed proxy. The binary must attempt
+	// to connect through 127.0.0.1:19999 and fail with a connection-refused
+	// error that mentions the proxy address — proving the proxy transport is
+	// actually wired. We pass a config-free HOME so no real key is loaded.
+	cmd := exec.Command(bin, "-p", "hello")
+	cmd.Env = append([]string{},
+		"HOME="+dir,
+		"USERPROFILE="+dir,
+		"PATH="+os.Getenv("PATH"),
 		"DEEPSEEKCODE_PROXY=http://127.0.0.1:19999",
-		"DEEPSEEKCODE_API_KEY=test",
+		// DEEPSEEK_API_KEY is the env var the default deepseek provider reads via
+		// config.ResolveSecret; it must be non-empty so onboarding is skipped.
+		"DEEPSEEK_API_KEY=sk-fake-proxy-test",
 	)
-	out, err := cmd.CombinedOutput()
-	// --help should exit 0 or 2; either way the binary must not panic.
-	if strings.Contains(string(out), "panic") {
-		t.Errorf("binary panicked with DEEPSEEKCODE_PROXY set:\n%s", out)
+	out, _ := cmd.CombinedOutput()
+	outStr := string(out)
+
+	// The binary must not panic.
+	if strings.Contains(outStr, "panic") {
+		t.Errorf("binary panicked with DEEPSEEKCODE_PROXY set:\n%s", outStr)
 	}
-	_ = err // exit code 2 is fine for --help on some flag libs
+	// The error must reference the proxy address, proving the proxy transport
+	// was used. A direct connection to api.deepseek.com would never mention
+	// 127.0.0.1:19999.
+	if !strings.Contains(outStr, "19999") {
+		t.Errorf("expected error output to mention proxy address 127.0.0.1:19999 (proxy transport not wired?):\n%s", outStr)
+	}
 }
 
 func TestDscDoctor_Runs(t *testing.T) {

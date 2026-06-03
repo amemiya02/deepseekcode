@@ -860,7 +860,26 @@ func providerFromConfig(cfg config.Config) (providerRuntime, error) {
 	if cfg.LegacyAPIUsed {
 		notices = append(notices, "`[api]` is deprecated; use `[providers.deepseek]`")
 	}
-	return providerRuntime{Provider: prov, Client: prov.BaseClient(), Model: model, Notices: notices}, nil
+	// Wire the proxy-aware transport. NewClientWithEnv() reads DEEPSEEKCODE_API_KEY
+	// and DEEPSEEKCODE_BASE_URL from the environment and installs ProxyTransport()
+	// so DEEPSEEKCODE_PROXY / HTTPS_PROXY / HTTP_PROXY are honoured. Config-resolved
+	// values (from the TOML file / keychain) take priority over env vars: if the
+	// provider config supplied a non-empty apiKey or baseURL, they override what
+	// NewClientWithEnv() read from the environment.
+	client := llm.NewClientWithEnv()
+	if apiKey != "" {
+		client.APIKey = apiKey
+	}
+	if pcfg.BaseURL != "" {
+		client.BaseURL = pcfg.BaseURL
+	}
+	// Carry over per-provider timeout settings from the provider-constructed client.
+	base := prov.BaseClient()
+	client.FirstTokenTimeout = base.FirstTokenTimeout
+	client.ChunkStallTimeout = base.ChunkStallTimeout
+	client.MaxRetries = base.MaxRetries
+	client.WireDumpDir = base.WireDumpDir
+	return providerRuntime{Provider: prov, Client: client, Model: model, Notices: notices}, nil
 }
 
 func sandboxFromConfig(cfg config.Config) (sandboxpkg.Sandbox, sandboxpkg.Profile) {

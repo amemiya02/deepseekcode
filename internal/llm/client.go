@@ -10,7 +10,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,6 +48,16 @@ type Client struct {
 	// OnRetry, if non-nil, is called before each retry sleep with the
 	// attempt number (1-based) and the error that triggered it.
 	OnRetry func(attempt int, err error)
+
+	// WireDumpDir, when non-empty, makes Stream write each turn's canonical
+	// request body to WireDumpDir/turn_NNNN.json for `dsc trace diff-body`.
+	// Set from DEEPSEEKCODE_WIRE_DUMP in NewClient. Diagnostic only — the
+	// bytes are exactly those sent (may contain source); off by default.
+	WireDumpDir string
+
+	// wireDumpSeq is the monotonic per-Client turn counter for the dump
+	// filenames. Atomic so concurrent Stream calls get distinct names.
+	wireDumpSeq atomic.Int64
 }
 
 // NewClient returns a Client with sensible defaults.
@@ -57,6 +69,7 @@ func NewClient(apiKey, baseURL string) *Client {
 		FirstTokenTimeout: 45 * time.Second,
 		ChunkStallTimeout: 20 * time.Second,
 		MaxRetries:        3,
+		WireDumpDir:       os.Getenv("DEEPSEEKCODE_WIRE_DUMP"),
 	}
 }
 
@@ -78,6 +91,9 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 	body, err := req.MarshalCacheStable()
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	if c.WireDumpDir != "" {
+		_, _ = dumpWireBody(c.WireDumpDir, c.wireDumpSeq.Add(1), body)
 	}
 
 	maxRetries := c.MaxRetries

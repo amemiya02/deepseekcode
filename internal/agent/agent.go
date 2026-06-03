@@ -622,10 +622,14 @@ agentLoop:
 				if fb, ok := a.Verify.Run(stepCtx); ok {
 					reason = StopVerifiedDone
 				} else {
+					msg := []llm.ContentBlock{llm.TextBlock{Text: fb}}
 					a.Messages = append(a.Messages, llm.Message{
 						Role:   "user",
-						Blocks: []llm.ContentBlock{llm.TextBlock{Text: fb}},
+						Blocks: msg,
 					})
+					if a.Persister != nil {
+						_, _ = a.Persister.AppendUserMessage(stepCtx, msg)
+					}
 				}
 			}
 			stepCancel()

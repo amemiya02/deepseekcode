@@ -7,6 +7,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/version"
 )
 
@@ -16,17 +17,17 @@ func renderWelcome(t Theme, width int) string {
 	const fullWidth = 80 // letterform wordmark + diagonal fields need room
 
 	if width < fullWidth {
-		return t.ToolCall.Render("⏺ deepseekcode") + " " +
-			t.Hint.Render(version.Display()+" · /help for commands") + "\n"
+		return t.ToolCall.Render(i18n.T("welcome.narrow")) + " " +
+			t.Hint.Render(i18n.T("welcome.narrow.hint", version.Display())) + "\n"
 	}
 
 	var b strings.Builder
 	b.WriteByte('\n')
 	b.WriteString(renderLogo(t, "deepseek", "deepseekcode", version.Display(), width))
 	b.WriteByte('\n')
-	b.WriteString(t.Hint.Render("  Terminal coding agent for DeepSeek"))
+	b.WriteString(t.Hint.Render("  " + i18n.T("welcome.tagline")))
 	b.WriteByte('\n')
-	b.WriteString(t.Hint.Render("  ⏎ send · ⇧⏎ newline · /help · ^D quit"))
+	b.WriteString(t.Hint.Render("  " + i18n.T("welcome.hint.send")))
 	b.WriteByte('\n')
 	return b.String()
 }

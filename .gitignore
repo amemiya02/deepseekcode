@@ -53,7 +53,5 @@ desktop/build/appicon.png
 desktop/build/darwin/Info.plist
 desktop/frontend/wailsjs/
 
-# Out-of-spec strategic/analysis docs (not part of tracked source)
-docs/competitive/2026-06-03-coding-agent-ref-gap-analysis.md
-docs/competitive/2026-06-03-industrial-execution-plan.md
-docs/competitive/2026-06-03-reasonix-1.0-strategic-analysis.md
+# Competitive / strategic analysis docs (session-generated; not tracked source)
+docs/competitive/

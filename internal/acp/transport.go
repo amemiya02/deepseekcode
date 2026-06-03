@@ -20,8 +20,8 @@ func NewFrameWriter(w io.Writer) *FrameWriter {
 	return &FrameWriter{w: w}
 }
 
-// Write frames and writes p.
-func (fw *FrameWriter) Write(p []byte) error {
+// WriteFrame frames and writes p.
+func (fw *FrameWriter) WriteFrame(p []byte) error {
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(p))
 	if _, err := io.WriteString(fw.w, header); err != nil {
 		return err
@@ -52,8 +52,8 @@ func (fr *FrameReader) Read() ([]byte, error) {
 		if line == "" {
 			break
 		}
-		if strings.HasPrefix(line, "Content-Length: ") {
-			v := strings.TrimPrefix(line, "Content-Length: ")
+		if strings.HasPrefix(line, "Content-Length:") {
+			v := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
 			n, err := strconv.Atoi(v)
 			if err != nil {
 				return nil, fmt.Errorf("acp: bad Content-Length: %w", err)

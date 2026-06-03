@@ -191,6 +191,83 @@ func TestACPServerMethodNotFound(t *testing.T) {
 	}
 }
 
+func TestACPServerFullRoundTrip(t *testing.T) {
+	conn, serverIn, serverOut := newPipeConn()
+	sm := acp.NewSessionManager(stubAgentFactory)
+	srv := acp.NewACPServer(sm, serverIn, serverOut)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	go srv.Serve(ctx)
+
+	// Step 1: session/new
+	sendRequest(conn.testW, 10, "session/new", acp.SessionNewParams{WorkingDir: "/tmp"})
+	frame1, err := conn.testR.Read()
+	if err != nil {
+		t.Fatal("read session/new response:", err)
+	}
+	var resp1 acp.Response
+	json.Unmarshal(frame1, &resp1)
+	if resp1.Error != nil {
+		t.Fatal("session/new error:", resp1.Error)
+	}
+	var newRes acp.SessionNewResult
+	if err := json.Unmarshal(resp1.Result, &newRes); err != nil {
+		t.Fatal("unmarshal session/new result:", err)
+	}
+	if newRes.SessionID == "" {
+		t.Fatal("session/new returned empty sessionId")
+	}
+
+	// Step 2: session/prompt — distinct from TestACPServerSessionPromptStreams:
+	// this test also verifies the response frame ID echoes the request ID (11).
+	sendRequest(conn.testW, 11, "session/prompt", acp.SessionPromptParams{
+		SessionID: newRes.SessionID, Prompt: "roundtrip",
+	})
+
+	// Collect: textDelta + done notification + prompt response frame.
+	var gotDelta, gotDone bool
+	var responseFrames int
+	for i := 0; i < 10; i++ {
+		frame, err := conn.testR.Read()
+		if err != nil {
+			break
+		}
+		var m map[string]json.RawMessage
+		json.Unmarshal(frame, &m)
+		if method, ok := m["method"]; ok {
+			var s string
+			json.Unmarshal(method, &s)
+			if s == "session/textDelta" {
+				gotDelta = true
+			}
+			if s == "session/done" {
+				gotDone = true
+			}
+		} else {
+			// Response frame (no "method" field): verify ID and no error.
+			responseFrames++
+			var resp acp.Response
+			json.Unmarshal(frame, &resp)
+			if resp.Error != nil {
+				t.Errorf("unexpected error in prompt response frame: %v", resp.Error)
+			}
+			if string(resp.ID) != "11" {
+				t.Errorf("expected response ID=11, got %s", string(resp.ID))
+			}
+		}
+		if gotDelta && gotDone && responseFrames > 0 {
+			break
+		}
+	}
+	if !gotDelta || !gotDone {
+		t.Errorf("fullRoundTrip: gotDelta=%v gotDone=%v", gotDelta, gotDone)
+	}
+	if responseFrames != 1 {
+		t.Errorf("expected exactly 1 response frame, got %d", responseFrames)
+	}
+}
+
 func TestACPServerSessionCancel(t *testing.T) {
 	conn, serverIn, serverOut := newPipeConn()
 	sm := acp.NewSessionManager(stubAgentFactory)

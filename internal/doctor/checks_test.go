@@ -69,10 +69,11 @@ func TestRun_Output(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := doctor.Run(context.Background(), tc.cfg, &buf)
-			if err != nil {
-				t.Fatalf("Run returned error: %v", err)
-			}
+			// Pass nil loadErr — we are not testing config-load failures here.
+			// Run now returns a non-nil error when checks fail, which is
+			// expected for a zero-value Config (no key, no base URL, etc.).
+			// Ignore that error; the test only cares about output contents.
+			_ = doctor.Run(context.Background(), tc.cfg, &buf, nil)
 			out := buf.String()
 			for _, want := range tc.wantContain {
 				if !strings.Contains(out, want) {

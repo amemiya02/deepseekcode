@@ -31,11 +31,13 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/agents"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/doctor"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
+	"github.com/amemiya02/deepseekcode/internal/onboarding"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	sandboxpkg "github.com/amemiya02/deepseekcode/internal/sandbox"
@@ -146,19 +148,27 @@ func applyRoutingConfig(a *agent.Agent, cfg config.Config) {
 }
 
 func run() error {
-	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
+	// Subcommand: dsc init. Runs interactive or non-interactive onboarding.
 	if len(os.Args) > 1 && os.Args[1] == "init" {
-		if err := runInit(); err != nil {
-			return err
+		ctx := context.Background()
+		cfg, loadErr := config.Load()
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "dsc init: warning: config load: %v\n", loadErr)
+		}
+		if err := onboarding.Run(ctx, cfg, os.Args[2:], os.Stdin, os.Stdout, nil); err != nil {
+			fmt.Fprintln(os.Stderr, "dsc init:", err)
+			os.Exit(1)
 		}
 		return nil
 	}
 
-	// Subcommand: dsc doctor. Doctor prints its own report; exit(1) on
-	// failure so main doesn't print "dsc: doctor failed" on top.
+	// Subcommand: dsc doctor. Doctor prints its own report and returns a
+	// non-nil error when any check fails, so we exit(1) to be CI-scriptable.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		ctx := context.Background()
 		cfg, loadErr := config.Load()
-		if err := runDoctor(cfg, loadErr); err != nil {
+		if err := doctor.Run(ctx, cfg, os.Stdout, loadErr); err != nil {
+			fmt.Fprintln(os.Stderr, "dsc doctor:", err)
 			os.Exit(1)
 		}
 		return nil
@@ -269,6 +279,24 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// First-run onboarding gate: if no API key is configured, prompt the user
+	// before attempting any agent call. NeedsOnboarding returns (true, nil)
+	// when the key is simply absent; real I/O errors are surfaced as warnings
+	// but do not block startup (the provider call will fail with a clear error).
+	if needs, _ := onboarding.NeedsOnboarding(cfg); needs {
+		onbCtx := context.Background()
+		if err := onboarding.Run(onbCtx, cfg, nil, os.Stdin, os.Stdout, nil); err != nil {
+			fmt.Fprintln(os.Stderr, "onboarding failed:", err)
+			os.Exit(1)
+		}
+		// Reload config after onboarding writes it.
+		cfg, err = config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "reload config:", err)
+			os.Exit(1)
+		}
 	}
 
 	if model != "" {

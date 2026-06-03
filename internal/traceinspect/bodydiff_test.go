@@ -1,6 +1,10 @@
 package traceinspect
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestDiffBytes_CleanPrefix(t *testing.T) {
 	a := []byte(`{"messages":[1,2]}`)
@@ -30,5 +34,35 @@ func TestDiffBytes_HistoricalDrift(t *testing.T) {
 	}
 	if d.DivergeAt != 6 {
 		t.Fatalf("DivergeAt = %d, want 6", d.DivergeAt)
+	}
+}
+
+func TestDiffBodyFiles_CleanPrefix(t *testing.T) {
+	dir := t.TempDir()
+	a := dir + "/turn_0001.json"
+	b := dir + "/turn_0002.json"
+	if err := os.WriteFile(a, []byte("HEAD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("HEADtail"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := DiffBodyFiles(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.AIsPrefixOfB {
+		t.Fatalf("expected clean prefix, got %+v", d)
+	}
+}
+
+func TestRenderBodyDiff_Verdicts(t *testing.T) {
+	stable := RenderBodyDiff(DiffBytes([]byte("HEAD"), []byte("HEADtail")))
+	if !strings.Contains(stable, "cache-stable") {
+		t.Fatalf("want cache-stable verdict, got: %s", stable)
+	}
+	evict := RenderBodyDiff(DiffBytes([]byte("aXc"), []byte("aYc")))
+	if !strings.Contains(evict, "EVICTION CAUSE") {
+		t.Fatalf("want EVICTION CAUSE verdict, got: %s", evict)
 	}
 }

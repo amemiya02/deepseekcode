@@ -1,5 +1,11 @@
 package traceinspect
 
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
 // BodyDiff is the result of comparing two canonical wire-request bodies —
 // the bytes MarshalCacheStable produced for two consecutive turns. For
 // DeepSeek prefix-cache stability, the earlier turn's body MUST be a clean
@@ -63,4 +69,37 @@ func window(s []byte, off int) string {
 		}
 	}
 	return string(out)
+}
+
+// DiffBodyFiles reads two wire-body dump files (turn_NNNN.json, written by
+// the DEEPSEEKCODE_WIRE_DUMP capture) and diffs them. pathA must be the
+// earlier turn, pathB the later.
+func DiffBodyFiles(pathA, pathB string) (BodyDiff, error) {
+	a, err := os.ReadFile(pathA)
+	if err != nil {
+		return BodyDiff{}, err
+	}
+	b, err := os.ReadFile(pathB)
+	if err != nil {
+		return BodyDiff{}, err
+	}
+	return DiffBytes(a, b), nil
+}
+
+// RenderBodyDiff formats a BodyDiff as a human-readable verdict.
+func RenderBodyDiff(d BodyDiff) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "wire-body diff: lenA=%d lenB=%d\n", d.LenA, d.LenB)
+	switch {
+	case d.AIsPrefixOfB:
+		fmt.Fprintf(&b, "VERDICT: cache-stable — earlier body is a clean prefix of the later (append-only). New tail = %d bytes.\n", d.LenB-d.LenA)
+	case !d.Diverged:
+		// Not diverged and not a prefix ⇒ B is shorter and a prefix of A.
+		fmt.Fprintf(&b, "VERDICT: later body is SHORTER and a prefix of the earlier — history truncated/compacted at offset %d.\n", d.DivergeAt)
+	default:
+		fmt.Fprintf(&b, "VERDICT: EVICTION CAUSE — historical bytes changed at offset %d (inside the shared region).\n", d.DivergeAt)
+		fmt.Fprintf(&b, "  A @%d: %q\n", d.DivergeAt, d.ContextA)
+		fmt.Fprintf(&b, "  B @%d: %q\n", d.DivergeAt, d.ContextB)
+	}
+	return b.String()
 }

@@ -29,6 +29,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
@@ -53,6 +54,7 @@ import (
 )
 
 func main() {
+	i18n.ReloadLocale() // honour DEEPSEEKCODE_LANG / LANG from process env
 	if len(os.Args) > 1 && os.Args[1] == "__sandbox_run" {
 		if err := sandboxpkg.RunSandboxedChild(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "dsc:", err)

@@ -8,6 +8,34 @@ import (
 	"testing"
 )
 
+// TestBinary_ProxyEnvPassthrough verifies that the compiled binary honours
+// DEEPSEEKCODE_PROXY by ensuring it doesn't crash on startup when the env
+// var contains an invalid proxy (the binary must parse, not panic).
+func TestBinary_ProxyEnvPassthrough(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary build skipped in short mode")
+	}
+	// Build the binary into a temp dir.
+	dir := t.TempDir()
+	bin := dir + "/dsc"
+	if err := exec.Command("go", "build", "-o", bin, "github.com/amemiya02/deepseekcode/cmd/dsc").Run(); err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+
+	// Run with --help so it exits immediately; set a bogus proxy.
+	cmd := exec.Command(bin, "--help")
+	cmd.Env = append(os.Environ(),
+		"DEEPSEEKCODE_PROXY=http://127.0.0.1:19999",
+		"DEEPSEEKCODE_API_KEY=test",
+	)
+	out, err := cmd.CombinedOutput()
+	// --help should exit 0 or 2; either way the binary must not panic.
+	if strings.Contains(string(out), "panic") {
+		t.Errorf("binary panicked with DEEPSEEKCODE_PROXY set:\n%s", out)
+	}
+	_ = err // exit code 2 is fine for --help on some flag libs
+}
+
 func TestDscDoctor_Runs(t *testing.T) {
 	cmd := exec.Command("go", "run", ".", "doctor")
 	cmd.Dir = "."

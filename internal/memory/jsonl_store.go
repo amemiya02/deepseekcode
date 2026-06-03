@@ -91,6 +91,7 @@ func (s *JSONLStore) Remember(content string, tags []string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	content = StripSecrets(content)
 	sha := ContentSHA(content)
 
 	// SHA dedup — exact same text already stored.

@@ -3,6 +3,8 @@ package agent
 import (
 	"sync"
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 func TestCheckpointIndex(t *testing.T) {
@@ -88,4 +90,42 @@ func TestCheckpointIndexConcurrent(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestAgentBranchAtByStep(t *testing.T) {
+	a := &Agent{checkpoints: newCheckpointIndex()}
+	// Three steps: boundaries at messages 2, 4, 6.
+	a.steps = []StepRecord{
+		{MessageCount: 2, Snapshotted: true},
+		{MessageCount: 4, Snapshotted: true},
+		{MessageCount: 6, Snapshotted: true},
+	}
+	a.Messages = make([]llm.Message, 6)
+
+	// Branch at step 1 (0-indexed) → boundary = MessageCount of step 1 = 4.
+	boundary, err := a.resolveBranchBoundary("1")
+	if err != nil {
+		t.Fatalf("resolveBranchBoundary: %v", err)
+	}
+	if boundary != 4 {
+		t.Fatalf("boundary = %d, want 4", boundary)
+	}
+}
+
+func TestAgentBranchAtByName(t *testing.T) {
+	a := &Agent{checkpoints: newCheckpointIndex()}
+	a.steps = []StepRecord{
+		{MessageCount: 3, Snapshotted: true},
+		{MessageCount: 7, Snapshotted: true},
+	}
+	a.Messages = make([]llm.Message, 7)
+	a.checkpoints.Record("pre-test", 1) // step index 1 → MessageCount 7
+
+	boundary, err := a.resolveBranchBoundary("pre-test")
+	if err != nil {
+		t.Fatalf("resolveBranchBoundary by name: %v", err)
+	}
+	if boundary != 7 {
+		t.Fatalf("boundary = %d, want 7", boundary)
+	}
 }

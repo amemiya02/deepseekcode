@@ -4,6 +4,7 @@ package doctor_test
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,5 +144,84 @@ func TestCheckKeyValid_InvalidKey(t *testing.T) {
 	r := doctor.CheckKeyValid(context.Background(), cfg, srv.Client())
 	if r.OK {
 		t.Fatal("expected FAIL for invalid key")
+	}
+}
+
+func TestCheckBaseURLReachable_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	t.Run("via cfg.API.BaseURL", func(t *testing.T) {
+		cfg := config.Config{}
+		cfg.API.BaseURL = srv.URL
+		r := doctor.CheckBaseURLReachable(context.Background(), cfg, srv.Client())
+		if !r.OK {
+			t.Fatalf("expected PASS, got: %s", r.Detail)
+		}
+	})
+
+	t.Run("via provider BaseURL", func(t *testing.T) {
+		cfg := config.Config{}
+		cfg.Providers = map[string]config.ProviderConfigTOML{
+			"deepseek": {Type: "deepseek", BaseURL: srv.URL},
+		}
+		cfg.Active.Provider = "deepseek"
+		r := doctor.CheckBaseURLReachable(context.Background(), cfg, srv.Client())
+		if !r.OK {
+			t.Fatalf("expected PASS via provider path, got: %s", r.Detail)
+		}
+	})
+}
+
+func TestCheckBaseURLReachable_Unreachable(t *testing.T) {
+	// Grab a free port then immediately close the listener so nothing is bound there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("could not allocate free port: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	cfg := config.Config{}
+	cfg.API.BaseURL = "http://" + addr
+	r := doctor.CheckBaseURLReachable(context.Background(), cfg, &http.Client{})
+	if r.OK {
+		t.Fatal("expected FAIL for unreachable URL")
+	}
+}
+
+func TestCheckBaseURLReachable_EmptyURL(t *testing.T) {
+	cfg := config.Config{} // no BaseURL set
+	r := doctor.CheckBaseURLReachable(context.Background(), cfg, &http.Client{})
+	if r.OK {
+		t.Fatal("expected FAIL when base URL is empty")
+	}
+	if !strings.Contains(r.Detail, "empty") {
+		t.Fatalf("expected detail to mention empty, got: %s", r.Detail)
+	}
+}
+
+func TestCheckProxyConfigured_NoProxy(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("https_proxy", "")
+	r := doctor.CheckProxyConfigured(context.Background(), config.Config{}, nil)
+	// Not OK = no proxy — that's fine, detail should say "no proxy"
+	if r.Name != "proxy-configured" {
+		t.Fatalf("wrong check name: %s", r.Name)
+	}
+	if r.OK {
+		t.Fatal("expected OK=false when no proxy set")
+	}
+}
+
+func TestCheckProxyConfigured_WithProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+	r := doctor.CheckProxyConfigured(context.Background(), config.Config{}, nil)
+	if !r.OK {
+		t.Fatalf("expected PASS when HTTPS_PROXY is set, got: %s", r.Detail)
 	}
 }

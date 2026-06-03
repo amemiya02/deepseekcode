@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
@@ -47,14 +49,46 @@ func CheckKeyValid(ctx context.Context, cfg config.Config, hc *http.Client) Chec
 	return CheckResult{Name: "key-valid", OK: true, Detail: "API key accepted by server"}
 }
 
-// CheckBaseURLReachable verifies that the configured base URL is reachable.
-func CheckBaseURLReachable(_ context.Context, _ config.Config, _ *http.Client) CheckResult {
-	return CheckResult{Name: "base-url-reachable", OK: false, Detail: "not implemented"}
+// CheckBaseURLReachable performs a HEAD request to the base URL to confirm
+// basic network reachability (no auth required).
+func CheckBaseURLReachable(ctx context.Context, cfg config.Config, hc *http.Client) CheckResult {
+	p, ok := cfg.Providers[cfg.Active.Provider]
+	if !ok {
+		p = config.ProviderConfigTOML{}
+	}
+	base := p.BaseURL
+	if base == "" {
+		base = cfg.API.BaseURL
+	}
+	if base == "" {
+		return CheckResult{Name: "base-url-reachable", OK: false, Detail: "api.base_url is empty"}
+	}
+	// HEAD the base URL root; ignore auth errors (401 means we reached it).
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, base, nil)
+	if err != nil {
+		return CheckResult{Name: "base-url-reachable", OK: false, Detail: fmt.Sprintf("bad URL: %v", err)}
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return CheckResult{Name: "base-url-reachable", OK: false, Detail: fmt.Sprintf("connection failed: %v", err)}
+	}
+	resp.Body.Close()
+	return CheckResult{Name: "base-url-reachable", OK: true, Detail: fmt.Sprintf("reached %s (HTTP %d)", base, resp.StatusCode)}
 }
 
-// CheckProxyConfigured reports whether a proxy is configured.
+// CheckProxyConfigured reports whether any standard HTTP proxy env vars are set.
+// This is informational — OK = proxy is configured, not-OK = no proxy (not an error per se).
 func CheckProxyConfigured(_ context.Context, _ config.Config, _ *http.Client) CheckResult {
-	return CheckResult{Name: "proxy-configured", OK: false, Detail: "not implemented"}
+	for _, env := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if v := os.Getenv(env); v != "" {
+			detail := v
+			if u, err := url.Parse(v); err == nil {
+				detail = u.Redacted()
+			}
+			return CheckResult{Name: "proxy-configured", OK: true, Detail: fmt.Sprintf("%s=%s", env, detail)}
+		}
+	}
+	return CheckResult{Name: "proxy-configured", OK: false, Detail: "no HTTP(S) proxy env vars set (OK if direct access)"}
 }
 
 // CheckCacheFieldsInProbe verifies that cache fields appear in a probe response.

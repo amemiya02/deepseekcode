@@ -3,7 +3,11 @@ package codegraph
 import "sort"
 
 // RankByPageRank runs `iterations` steps of PageRank over the CALLS edge set
-// and returns nodes sorted descending by score.
+// and returns nodes sorted descending by score. A sensible value for
+// iterations is 20–100 for small graphs; higher values cost more but
+// converge more tightly. When iterations is 0 or negative the loop is
+// skipped and every node receives an equal score of 1/n, with ties broken
+// arbitrarily by the final sort.
 func RankByPageRank(s *Store, iterations int) []*Node {
 	allNodes := s.AllNodes()
 	if len(allNodes) == 0 {
@@ -13,8 +17,10 @@ func RankByPageRank(s *Store, iterations int) []*Node {
 	n := len(allNodes)
 
 	ids := make([]NodeID, 0, n)
+	set := make(map[NodeID]struct{}, n)
 	for _, node := range allNodes {
 		ids = append(ids, node.ID)
+		set[node.ID] = struct{}{}
 	}
 
 	score := make(map[NodeID]float64, n)
@@ -46,7 +52,9 @@ func RankByPageRank(s *Store, iterations int) []*Node {
 			share := damping * score[id] / float64(callOut)
 			for _, e := range outEdges {
 				if e.Kind == EdgeCalls {
-					next[e.To] += share
+					if _, ok := set[e.To]; ok {
+						next[e.To] += share
+					}
 				}
 			}
 		}

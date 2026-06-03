@@ -2,6 +2,9 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,21 +40,62 @@ type sessionStreamState struct {
 //	DELETE /session/{id}                  → cancel session
 type HTTPGateway struct {
 	sm      *SessionManager
+	token   string // bearer token required on every request (Authorization: Bearer <token>)
 	mu      sync.Mutex
 	clients map[string][]*sseClient        // sessionID → subscribers
 	streams map[string]*sessionStreamState // sessionID → stream readiness
 }
 
-// NewHTTPGateway creates an HTTPGateway backed by sm.
+// NewHTTPGateway creates an HTTPGateway backed by sm. A random bearer token is
+// generated at construction; every request must present it via the
+// Authorization header (see ServeHTTP). The token is exposed through Token() so
+// the local operator can be shown the value on startup.
 func NewHTTPGateway(sm *SessionManager) *HTTPGateway {
 	return &HTTPGateway{
 		sm:      sm,
+		token:   newGatewayToken(),
 		clients: make(map[string][]*sseClient),
 		streams: make(map[string]*sessionStreamState),
 	}
 }
 
+// Token returns the bearer token required to authenticate against the gateway.
+func (g *HTTPGateway) Token() string {
+	return g.token
+}
+
+// newGatewayToken returns a cryptographically random 32-byte token, hex-encoded.
+func newGatewayToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read never returns an error on supported platforms; if it
+		// somehow does, panic rather than fall back to a predictable token.
+		panic(fmt.Sprintf("acp: generating gateway token: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
+
+// authorized reports whether r carries a valid "Authorization: Bearer <token>"
+// header matching the gateway token, using a constant-time comparison.
+func (g *HTTPGateway) authorized(r *http.Request) bool {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, prefix) {
+		return false
+	}
+	got := strings.TrimPrefix(h, prefix)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(g.token)) == 1
+}
+
 func (g *HTTPGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Authenticate every request before any routing. The gateway drives an
+	// agent that executes tools and reads/writes files on the operator's
+	// machine, so an unauthenticated request must never be processed.
+	if !g.authorized(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	path := r.URL.Path
 
 	// POST /session

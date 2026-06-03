@@ -47,3 +47,44 @@ func TestServeACPExitsOnEOF(t *testing.T) {
 		t.Fatalf("expected nil error on EOF, got: %v", err)
 	}
 }
+
+// TestResolveBindAddr verifies the safe-by-default bind logic: wildcard and
+// non-loopback hosts are forced to loopback unless --http-allow-remote is set.
+func TestResolveBindAddr(t *testing.T) {
+	cases := []struct {
+		name        string
+		addr        string
+		allowRemote bool
+		want        string
+		wantErr     bool
+	}{
+		{name: "bare port forced to loopback", addr: ":8080", allowRemote: false, want: "127.0.0.1:8080"},
+		{name: "wildcard ipv4 forced to loopback", addr: "0.0.0.0:8080", allowRemote: false, want: "127.0.0.1:8080"},
+		{name: "wildcard ipv6 forced to loopback", addr: "[::]:8080", allowRemote: false, want: "127.0.0.1:8080"},
+		{name: "explicit lan host forced to loopback", addr: "192.168.1.5:8080", allowRemote: false, want: "127.0.0.1:8080"},
+		{name: "loopback preserved", addr: "127.0.0.1:9090", allowRemote: false, want: "127.0.0.1:9090"},
+		{name: "localhost preserved", addr: "localhost:9090", allowRemote: false, want: "localhost:9090"},
+		{name: "wildcard honored with allow-remote", addr: "0.0.0.0:8080", allowRemote: true, want: "0.0.0.0:8080"},
+		{name: "bare port wildcard with allow-remote", addr: ":8080", allowRemote: true, want: ":8080"},
+		{name: "lan host honored with allow-remote", addr: "192.168.1.5:8080", allowRemote: true, want: "192.168.1.5:8080"},
+		{name: "empty addr errors", addr: "", allowRemote: false, wantErr: true},
+		{name: "missing port errors", addr: "127.0.0.1", allowRemote: false, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveBindAddr(tc.addr, tc.allowRemote)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for addr %q, got %q", tc.addr, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for addr %q: %v", tc.addr, err)
+			}
+			if got != tc.want {
+				t.Fatalf("resolveBindAddr(%q, %v) = %q, want %q", tc.addr, tc.allowRemote, got, tc.want)
+			}
+		})
+	}
+}

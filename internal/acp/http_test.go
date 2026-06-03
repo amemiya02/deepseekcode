@@ -22,10 +22,23 @@ func setupGateway(t *testing.T) (*httptest.Server, *acp.HTTPGateway) {
 	return ts, gw
 }
 
+// authPost issues a POST carrying the gateway bearer token. The gateway rejects
+// any request lacking a valid Authorization header with 401, so all
+// happy-path tests authenticate through this helper.
+func authPost(t *testing.T, gw *acp.HTTPGateway, url, body string) (*http.Response, error) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+gw.Token())
+	return http.DefaultClient.Do(req)
+}
+
 func TestHTTPGatewayCreateSession(t *testing.T) {
-	ts, _ := setupGateway(t)
-	resp, err := http.Post(ts.URL+"/session", "application/json",
-		strings.NewReader(`{"workingDir":"/tmp"}`))
+	ts, gw := setupGateway(t)
+	resp, err := authPost(t, gw, ts.URL+"/session", `{"workingDir":"/tmp"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,11 +56,10 @@ func TestHTTPGatewayCreateSession(t *testing.T) {
 }
 
 func TestHTTPGatewaySSEStream(t *testing.T) {
-	ts, _ := setupGateway(t)
+	ts, gw := setupGateway(t)
 
 	// 1. Create session.
-	resp1, err := http.Post(ts.URL+"/session", "application/json",
-		strings.NewReader(`{"workingDir":"/tmp"}`))
+	resp1, err := authPost(t, gw, ts.URL+"/session", `{"workingDir":"/tmp"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +77,7 @@ func TestHTTPGatewaySSEStream(t *testing.T) {
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		ts.URL+"/session/"+newRes.SessionID+"/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+gw.Token())
 	streamResp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -78,8 +91,7 @@ func TestHTTPGatewaySSEStream(t *testing.T) {
 	// SSE client registered above signals readiness, so no artificial sleep
 	// is needed here — the synchronisation is handled by the gateway itself.
 	go func() {
-		http.Post(ts.URL+"/session/"+newRes.SessionID+"/prompt", "application/json", //nolint
-			strings.NewReader(`{"prompt":"world"}`))
+		authPost(t, gw, ts.URL+"/session/"+newRes.SessionID+"/prompt", `{"prompt":"world"}`) //nolint
 	}()
 
 	// 4. Read SSE lines until we see a completion event (non-empty stopReason)
@@ -117,11 +129,10 @@ func TestHTTPGatewaySSEStream(t *testing.T) {
 }
 
 func TestHTTPGatewayDeleteSession(t *testing.T) {
-	ts, _ := setupGateway(t)
+	ts, gw := setupGateway(t)
 
 	// Create session.
-	resp1, err := http.Post(ts.URL+"/session", "application/json",
-		strings.NewReader(`{"workingDir":"/tmp"}`))
+	resp1, err := authPost(t, gw, ts.URL+"/session", `{"workingDir":"/tmp"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +147,7 @@ func TestHTTPGatewayDeleteSession(t *testing.T) {
 
 	// Delete the session.
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/session/"+newRes.SessionID, nil)
+	req.Header.Set("Authorization", "Bearer "+gw.Token())
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -146,8 +158,7 @@ func TestHTTPGatewayDeleteSession(t *testing.T) {
 	resp2.Body.Close()
 
 	// A subsequent prompt to the deleted session must return 404.
-	resp3, err := http.Post(ts.URL+"/session/"+newRes.SessionID+"/prompt", "application/json",
-		strings.NewReader(`{"prompt":"after-delete"}`))
+	resp3, err := authPost(t, gw, ts.URL+"/session/"+newRes.SessionID+"/prompt", `{"prompt":"after-delete"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,10 +169,69 @@ func TestHTTPGatewayDeleteSession(t *testing.T) {
 }
 
 func TestHTTPGatewayMissingSession(t *testing.T) {
-	ts, _ := setupGateway(t)
-	resp, _ := http.Post(ts.URL+"/session/nonexistent/prompt", "application/json",
-		strings.NewReader(`{"prompt":"hi"}`))
+	ts, gw := setupGateway(t)
+	resp, err := authPost(t, gw, ts.URL+"/session/nonexistent/prompt", `{"prompt":"hi"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPGatewayRejectsMissingToken verifies that a request without the bearer
+// token is rejected with 401 before any session work happens. This is the core
+// defense against an unauthenticated network host driving the agent.
+func TestHTTPGatewayRejectsMissingToken(t *testing.T) {
+	ts, _ := setupGateway(t)
+	// No Authorization header at all.
+	resp, err := http.Post(ts.URL+"/session", "application/json",
+		strings.NewReader(`{"workingDir":"/tmp"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without bearer token, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPGatewayRejectsWrongToken verifies that a request presenting an
+// incorrect bearer token is rejected with 401.
+func TestHTTPGatewayRejectsWrongToken(t *testing.T) {
+	ts, _ := setupGateway(t)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/session",
+		strings.NewReader(`{"workingDir":"/tmp"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer not-the-real-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with wrong bearer token, got %d", resp.StatusCode)
+	}
+}
+
+// TestHTTPGatewayAcceptsValidToken verifies the happy path: a request carrying
+// the correct bearer token is processed normally (200 with a session id).
+func TestHTTPGatewayAcceptsValidToken(t *testing.T) {
+	ts, gw := setupGateway(t)
+	resp, err := authPost(t, gw, ts.URL+"/session", `{"workingDir":"/tmp"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with valid bearer token, got %d", resp.StatusCode)
+	}
+	var result acp.SessionNewResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode session result: %v", err)
+	}
+	if result.SessionID == "" {
+		t.Fatal("expected sessionId with valid bearer token")
 	}
 }

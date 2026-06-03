@@ -6,9 +6,9 @@ package hooks
 // typo'd builtin name (e.g. "duett") is rejected at validation time instead of
 // silently fail-opening at runtime.
 //
-// Keep this in sync with the builtin registrations in cmd/dsc — currently the
-// single "duet" hook (see builtin_duet.go).
-var KnownBuiltinNames = []string{"duet"}
+// Keep this in sync with the builtin registrations in cmd/dsc — currently
+// "duet" (see builtin_duet.go) and "memory-capture" (see memory_capture.go).
+var KnownBuiltinNames = []string{"duet", "memory-capture"}
 
 // IsKnownBuiltin reports whether name is a registered builtin hook.
 func IsKnownBuiltin(name string) bool {

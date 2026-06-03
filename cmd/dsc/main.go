@@ -35,6 +35,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/doctor"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/memory"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
@@ -534,6 +535,13 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		}
 	}
 
+	// Auto-capture: always register memory-capture so tool outputs and session
+	// summaries flow into the long-term store without user configuration.
+	hookConfigs = append(hookConfigs,
+		hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+		hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+	)
+
 	if len(hookConfigs) > 0 {
 		hookRunner := hooks.NewRunner()
 		if cfg.Duet.Enabled {
@@ -545,6 +553,10 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 				func() string { return a.Model },
 				func() []byte { return a.Transcript() },
 			))
+		}
+		// Wire memory-capture when a store is available (best-effort).
+		if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
+			hookRunner.Register("memory-capture", mc)
 		}
 		hookRunner.Configure(hookConfigs)
 		a.HookRunner = hookRunner
@@ -1067,6 +1079,67 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.Spawner = spawner
 	registerSpawnerTools(reg, spawner, wtMgr)
 
+	// Hooks: assemble configs from TOML, add Duet builtin when enabled, and
+	// always add memory-capture for EventPostToolUse + EventSessionEnd.
+	var oneShotHookConfigs []hooks.HookConfig
+	for _, hi := range cfg.Hooks {
+		hc := hooks.HookConfig{
+			Event:   hooks.HookEvent(hi.Event),
+			Type:    hooks.HookType(hi.Type),
+			Command: hi.Command,
+			Name:    hi.Name,
+		}
+		if hc.Type == "" {
+			hc.Type = hooks.TypeSubprocess
+		}
+		if !validHookEvent(hc.Event) {
+			slog.Warn("skipping hook with unknown event", "event", hi.Event)
+			continue
+		}
+		if hi.Timeout > 0 {
+			hc.Timeout = time.Duration(hi.Timeout) * time.Second
+		}
+		oneShotHookConfigs = append(oneShotHookConfigs, hc)
+	}
+	if cfg.Duet.Enabled {
+		hasDuetPreTool := false
+		for _, hc := range oneShotHookConfigs {
+			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
+				hasDuetPreTool = true
+				break
+			}
+		}
+		if !hasDuetPreTool {
+			oneShotHookConfigs = append(oneShotHookConfigs, hooks.HookConfig{
+				Event: hooks.EventPreToolUse,
+				Type:  hooks.TypeBuiltin,
+				Name:  "duet",
+			})
+		}
+	}
+	oneShotHookConfigs = append(oneShotHookConfigs,
+		hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+		hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+	)
+	{
+		hookRunner := hooks.NewRunner()
+		if cfg.Duet.Enabled {
+			hookRunner.Register("duet", hooks.NewDuetHook(
+				rt.Provider,
+				cfg.Duet.ExtraDestructive,
+				cwd,
+				cfg.Permissions.SecretPathPatterns,
+				func() string { return a.Model },
+				func() []byte { return a.Transcript() },
+			))
+		}
+		if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
+			hookRunner.Register("memory-capture", mc)
+		}
+		hookRunner.Configure(oneShotHookConfigs)
+		a.HookRunner = hookRunner
+	}
+
 	// --resume-at: resolve the named checkpoint or step index, then truncate
 	// the in-memory transcript to the boundary so the resumed session starts
 	// from the right position. Full exec-fork into the new worktree is out of
@@ -1539,4 +1612,25 @@ func runCompactCmd(_ []string) error {
 	a.Persister = session.NewPersister(store, snaps, sess.ID)
 
 	return agent.RunCompact(ctx, a, os.Stdout)
+}
+
+// openMemoryCaptureBuiltin opens the per-project JSONL memory store and
+// returns a BuiltinHook that wraps MemoryCapture.Handle. Returns nil when
+// the store cannot be opened (best-effort: a missing store must not break
+// the agent loop).
+func openMemoryCaptureBuiltin(cwd string) hooks.BuiltinHook {
+	_ = os.MkdirAll(filepath.Join(cwd, ".deepseek"), 0o755)
+	storePath := filepath.Join(cwd, ".deepseek", "memory.jsonl")
+	ms, err := memory.NewJSONLStore(storePath)
+	if err != nil {
+		slog.Warn("memory-capture: store unavailable", "path", storePath, "err", err)
+		return nil
+	}
+	mc := hooks.NewMemoryCapture(ms)
+	return func(ctx context.Context, in hooks.HookInput) (hooks.HookOutput, error) {
+		if hErr := mc.Handle(ctx, in); hErr != nil {
+			slog.Warn("memory-capture: handle error", "event", in.Event, "err", hErr)
+		}
+		return hooks.HookOutput{Decision: "continue"}, nil
+	}
 }

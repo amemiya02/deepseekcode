@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/memory"
 )
@@ -43,7 +44,19 @@ func (t *ForgetTool) Execute(_ context.Context, args json.RawMessage) (Result, e
 		return Errf("forget: id is required"), nil
 	}
 	if err := t.store.Forget(p.ID); err != nil {
+		// "not found" is a semantic failure the model can recover from; all
+		// other errors (disk-full, etc.) are hard infrastructure faults.
+		if isNotFound(err) {
+			return Errf("forget: %v", err), nil
+		}
 		return Result{}, fmt.Errorf("forget: store error: %w", err)
 	}
 	return Result{Content: fmt.Sprintf(`{"status":"forgotten","id":%q}`, p.ID)}, nil
+}
+
+// isNotFound reports whether err is the "memory X not found" sentinel returned
+// by JSONLStore.Forget. It matches by substring because the store does not
+// expose a typed error yet; this keeps the fix minimal.
+func isNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not found")
 }

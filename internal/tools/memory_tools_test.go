@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/memory"
@@ -62,6 +63,10 @@ func TestRecallToolExecute(t *testing.T) {
 	if result.Content == "" {
 		t.Fatal("Execute returned empty result content")
 	}
+	// Must contain the stored content, not just a non-empty (e.g. "[]") string.
+	if !strings.Contains(result.Content, "User works in Go.") {
+		t.Fatalf("recall result does not contain expected content; got: %s", result.Content)
+	}
 }
 
 func TestForgetToolExecute(t *testing.T) {
@@ -93,13 +98,108 @@ func TestForgetToolExecute(t *testing.T) {
 func TestToolsRegistration(t *testing.T) {
 	store := makeTestStore(t)
 	reg := tools.New()
-	reg.Register(tools.NewRememberTool(store))
-	reg.Register(tools.NewRecallTool(store))
-	reg.Register(tools.NewForgetTool(store))
+	tools.RegisterMemoryTools(reg, store)
 
 	for _, name := range []string{"remember", "recall", "forget"} {
 		if _, ok := reg.Get(name); !ok {
-			t.Errorf("tool %q not found in registry after Register", name)
+			t.Errorf("tool %q not found in registry after RegisterMemoryTools", name)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Validation-branch coverage
+// ---------------------------------------------------------------------------
+
+func TestRememberToolValidation(t *testing.T) {
+	store := makeTestStore(t)
+	tool := tools.NewRememberTool(store)
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		result, err := tool.Execute(context.Background(), json.RawMessage(`{bad`))
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for invalid JSON")
+		}
+	})
+
+	t.Run("empty content", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"content": ""})
+		result, err := tool.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for empty content")
+		}
+	})
+}
+
+func TestRecallToolValidation(t *testing.T) {
+	store := makeTestStore(t)
+	tool := tools.NewRecallTool(store)
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		result, err := tool.Execute(context.Background(), json.RawMessage(`{bad`))
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for invalid JSON")
+		}
+	})
+
+	t.Run("empty query", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": ""})
+		result, err := tool.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for empty query")
+		}
+	})
+}
+
+func TestForgetToolValidation(t *testing.T) {
+	store := makeTestStore(t)
+	tool := tools.NewForgetTool(store)
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		result, err := tool.Execute(context.Background(), json.RawMessage(`{bad`))
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for invalid JSON")
+		}
+	})
+
+	t.Run("empty id", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"id": ""})
+		result, err := tool.Execute(context.Background(), args)
+		if err != nil {
+			t.Fatalf("unexpected hard error: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for empty id")
+		}
+	})
+
+	t.Run("not-found id", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"id": "does-not-exist"})
+		result, err := tool.Execute(context.Background(), args)
+		// Must be a tool-result error (err==nil), NOT a hard infrastructure error.
+		if err != nil {
+			t.Fatalf("not-found should produce tool result, not hard error; got err: %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected error result for not-found id")
+		}
+		if !strings.Contains(result.Content, "not found") {
+			t.Fatalf("error message should mention 'not found'; got: %s", result.Content)
+		}
+	})
 }

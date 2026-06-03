@@ -573,14 +573,24 @@ func TestLoopUserRequestedStop(t *testing.T) {
 	}
 }
 
-// TestStopReasonIsSuccess pins that only a model-completed run is a success.
+// TestStopReasonIsSuccess pins that only model-completed runs are a success.
 func TestStopReasonIsSuccess(t *testing.T) {
-	if !StopModelDone.IsSuccess() {
-		t.Error("StopModelDone should be a success")
+	cases := []struct {
+		r    StopReason
+		want bool
+	}{
+		{StopModelDone, true},
+		{StopVerifiedDone, true},   // NEW — must be true
+		{StopMaxSteps, false},
+		{StopLoopDetected, false},
+		{StopContextCancel, false},
+		{StopUserRequested, false},
+		{StopStepTimeout, false},
+		{StopUnknown, false},
 	}
-	for _, r := range []StopReason{StopUnknown, StopMaxSteps, StopLoopDetected, StopContextCancel, StopUserRequested, StopStepTimeout} {
-		if r.IsSuccess() {
-			t.Errorf("%v should not be a success", r)
+	for _, tc := range cases {
+		if got := tc.r.IsSuccess(); got != tc.want {
+			t.Errorf("StopReason(%d).IsSuccess() = %v, want %v", tc.r, got, tc.want)
 		}
 	}
 }

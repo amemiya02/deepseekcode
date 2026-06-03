@@ -51,3 +51,9 @@ func TestLoopDetection(t *testing.T) {
 		t.Errorf("varied args should not trigger loop detection")
 	}
 }
+
+func TestStopReasonString(t *testing.T) {
+	if s := StopVerifiedDone.String(); s != "verified_done" {
+		t.Errorf("StopVerifiedDone.String() = %q, want %q", s, "verified_done")
+	}
+}

@@ -23,7 +23,9 @@ func TestIndexRebuild(t *testing.T) {
 func TestIndexSearch(t *testing.T) {
 	dir := fixtureDir(t)
 	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
-	_ = idx.Rebuild(dir)
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
 
 	results := idx.Search("Multiply")
 	if len(results) == 0 {
@@ -37,7 +39,9 @@ func TestIndexSearch(t *testing.T) {
 func TestIndexCallers(t *testing.T) {
 	dir := fixtureDir(t)
 	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
-	_ = idx.Rebuild(dir)
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
 
 	// Add is called by Run
 	callers := idx.Callers("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Add")
@@ -58,7 +62,9 @@ func TestIndexCallers(t *testing.T) {
 func TestIndexCallees(t *testing.T) {
 	dir := fixtureDir(t)
 	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
-	_ = idx.Rebuild(dir)
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
 
 	// Run calls Add and Multiply
 	callees := idx.Callees("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Run")
@@ -74,7 +80,9 @@ func TestIndexCallees(t *testing.T) {
 func TestIndexImpact(t *testing.T) {
 	dir := fixtureDir(t)
 	idx := codegraph.NewIndex("github.com/amemiya02/deepseekcode/testdata/fixtures/simple")
-	_ = idx.Rebuild(dir)
+	if err := idx.Rebuild(dir); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
 
 	// Changing Add impacts Run (Run calls Add)
 	impacted := idx.Impact("github.com/amemiya02/deepseekcode/testdata/fixtures/simple.Add")
@@ -92,7 +100,9 @@ func TestIndexIncremental(t *testing.T) {
 	// file should be re-parsed (we verify by observing that the new symbol appears).
 	tmp := t.TempDir()
 	f1 := filepath.Join(tmp, "a.go")
-	os.WriteFile(f1, []byte("package tmp\nfunc Alpha() {}\n"), 0o644)
+	if err := os.WriteFile(f1, []byte("package tmp\nfunc Alpha() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile a.go: %v", err)
+	}
 
 	idx := codegraph.NewIndex("tmp")
 	if err := idx.Rebuild(tmp); err != nil {
@@ -104,7 +114,9 @@ func TestIndexIncremental(t *testing.T) {
 
 	// Add a new file
 	f2 := filepath.Join(tmp, "b.go")
-	os.WriteFile(f2, []byte("package tmp\nfunc Beta() {}\n"), 0o644)
+	if err := os.WriteFile(f2, []byte("package tmp\nfunc Beta() {}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile b.go: %v", err)
+	}
 
 	if err := idx.Rebuild(tmp); err != nil {
 		t.Fatalf("second Rebuild: %v", err)

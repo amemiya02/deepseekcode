@@ -37,6 +37,8 @@ func (idx *Index) Rebuild(root string) error {
 
 	seen := map[string]bool{}
 	var changedFiles []string
+	// pendingHashes accumulates new hashes; only committed after a successful parse.
+	pendingHashes := map[string]string{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -49,7 +51,7 @@ func (idx *Index) Rebuild(root string) error {
 		}
 		if idx.hashes[path] != h {
 			changedFiles = append(changedFiles, path)
-			idx.hashes[path] = h
+			pendingHashes[path] = h
 		}
 		return nil
 	})
@@ -57,21 +59,30 @@ func (idx *Index) Rebuild(root string) error {
 		return fmt.Errorf("walk %s: %w", root, err)
 	}
 
-	// Remove hashes for files that no longer exist.
+	// Identify deleted files (present in hashes but not in the current walk).
+	var deletedPaths []string
 	for path := range idx.hashes {
 		if !seen[path] {
-			delete(idx.hashes, path)
+			deletedPaths = append(deletedPaths, path)
 		}
 	}
 
 	// Re-parse changed files by re-building the whole store.
 	// (Full re-parse is correct; file-level incremental is a later optimisation.)
-	if len(changedFiles) > 0 || len(idx.store.AllNodes()) == 0 {
+	if len(changedFiles) > 0 || len(deletedPaths) > 0 || len(idx.store.AllNodes()) == 0 {
 		fresh := NewStore()
 		if pErr := ParseDir(root, idx.pkgPath, fresh); pErr != nil {
 			return pErr
 		}
 		idx.store = fresh
+
+		// Only commit hash updates and deletions after a successful parse.
+		for path, h := range pendingHashes {
+			idx.hashes[path] = h
+		}
+		for _, path := range deletedPaths {
+			delete(idx.hashes, path)
+		}
 	}
 	return nil
 }

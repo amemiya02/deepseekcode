@@ -75,7 +75,8 @@ func TestStripSecretsAPIKey(t *testing.T) {
 					tc.name, tc.must0, tc.input, got)
 			}
 			// Every case that removes something must produce [REDACTED], not an empty hole.
-			if tc.must0 != "" && tc.input != tc.must {
+			// "Removes something" == this case declares a substring that must be gone.
+			if tc.must0 != "" {
 				if !strings.Contains(got, "[REDACTED]") {
 					t.Errorf("expected %q output to contain [REDACTED]\noriginal: %q\ngot: %q",
 						tc.name, tc.input, got)
@@ -119,6 +120,9 @@ func TestRememberStripsSecrets(t *testing.T) {
 	results, err := store.Recall("api key")
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("no recall results; secret-leak assertions would be vacuous")
 	}
 	for _, m := range results {
 		if strings.Contains(m.Content, secret) {

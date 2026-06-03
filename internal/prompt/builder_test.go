@@ -126,11 +126,15 @@ func TestInjectRecalled(t *testing.T) {
 	boundary := DynamicContextBoundary
 
 	cases := []struct {
-		name         string
-		systemPrompt string
-		recalled     string
-		wantPrefix   string // text that must appear before boundary in result
+		name          string
+		systemPrompt  string
+		recalled      string
+		wantPrefix    string // text that must appear before boundary in result
 		wantInDynamic string // text that must appear after boundary in result
+		// wantPreserved is pre-existing trailing dynamic content that must SURVIVE
+		// injection. A regression to a naive append (systemPrompt[:after]+recalled,
+		// dropping systemPrompt[after:]) would silently delete it.
+		wantPreserved string
 	}{
 		{
 			name:          "boundary present, recalled inserted after boundary",
@@ -138,6 +142,7 @@ func TestInjectRecalled(t *testing.T) {
 			recalled:      "recalled fact",
 			wantPrefix:    "Static base.",
 			wantInDynamic: "recalled fact",
+			wantPreserved: "Existing dynamic.",
 		},
 		{
 			name:          "boundary absent, boundary appended then recalled",
@@ -174,6 +179,13 @@ func TestInjectRecalled(t *testing.T) {
 			}
 			if tc.wantInDynamic != "" && !strings.Contains(dynamicPart, tc.wantInDynamic) {
 				t.Errorf("dynamic section %q does not contain %q", dynamicPart, tc.wantInDynamic)
+			}
+			// Pre-existing trailing content after the boundary must be preserved.
+			// This catches a regression to a naive append that drops
+			// systemPrompt[after:].
+			if tc.wantPreserved != "" && !strings.Contains(dynamicPart, tc.wantPreserved) {
+				t.Errorf("pre-existing trailing content %q was dropped from result %q",
+					tc.wantPreserved, result)
 			}
 		})
 	}

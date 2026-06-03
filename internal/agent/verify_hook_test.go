@@ -53,3 +53,18 @@ func TestVerifyHookCommandNotFound(t *testing.T) {
 		t.Fatal("expected fail for missing binary")
 	}
 }
+
+func TestVerifyHookFeedbackMessage(t *testing.T) {
+	h := &VerifyHook{Cmd: "false"}
+	fb, passed := h.Run(context.Background())
+	if passed {
+		t.Fatal("expected fail")
+	}
+	// Feedback must mention the command.
+	if !strings.Contains(fb, "false") {
+		t.Errorf("feedback %q should mention command", fb)
+	}
+	if !strings.Contains(fb, "Verification failed") {
+		t.Errorf("feedback %q should say 'Verification failed'", fb)
+	}
+}

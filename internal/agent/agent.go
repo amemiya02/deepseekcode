@@ -251,6 +251,11 @@ type Agent struct {
 	// model can fix the reported errors on its next turn.
 	Verify *VerifyHook
 
+	// VerifyCmd, when non-empty, is run after each mutating step. On failure
+	// the agent injects feedback and keeps looping. On StopModelDone with a
+	// passing verify run, the stop reason is promoted to StopVerifiedDone.
+	VerifyCmd string
+
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	// Its SchemaHash feeds the epoch's mcp_schema_hash, so startup MCP
 	// discovery is part of the frozen prefix and mid-session schema
@@ -606,9 +611,20 @@ agentLoop:
 		}
 
 		if !hasTools {
+			// Promote StopModelDone to StopVerifiedDone when a verify command is configured
+			// and the last step's verification passed (or no mutating step occurred).
+			reason := StopReason(StopModelDone)
+			if a.VerifyCmd != "" {
+				hook := &VerifyHook{Cmd: a.VerifyCmd}
+				if _, ok := hook.Run(stepCtx); ok {
+					reason = StopVerifiedDone
+				}
+				// If it fails here, keep StopModelDone — the model chose to stop but
+				// the tree is dirty; the caller can inspect and decide.
+			}
 			stepCancel()
-			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage, Model: step.Model})
-			return StopModelDone, nil
+			a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage, Model: step.Model})
+			return reason, nil
 		}
 
 		// Tool execution shares the per-step deadline so a stuck tool
@@ -618,6 +634,18 @@ agentLoop:
 		a.runToolCalls(stepCtx, step.ToolCalls)
 		a.maybeFeedPostEditDiagnostics(stepCtx, step.ToolCalls)
 		a.maybeRunVerifyHook(stepCtx, step.ToolCalls)
+		// Post-step verification hook via VerifyCmd (injected as feedback when snapshotted).
+		if a.VerifyCmd != "" && len(a.steps) > 0 && a.steps[len(a.steps)-1].Snapshotted {
+			hook := &VerifyHook{Cmd: a.VerifyCmd}
+			if fb, ok := hook.Run(stepCtx); !ok {
+				// Inject feedback as a user-role message so the model can correct.
+				a.Messages = append(a.Messages, llm.Message{
+					Role:   "user",
+					Blocks: []llm.ContentBlock{llm.TextBlock{Text: fb}},
+				})
+				a.EmitInfo("verify: failed — injected feedback, continuing loop")
+			}
+		}
 		stepCancel()
 		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 

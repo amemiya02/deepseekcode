@@ -1,0 +1,1 @@
+{"model":"deepseek-chat","messages":[{"role":"user","content":"What is 2+2?"},{"role":"assistant","content":"4"},{"role":"user","content":"Are you sure?"}],"stream":true}

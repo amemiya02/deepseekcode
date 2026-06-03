@@ -3,7 +3,6 @@ package llm
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -52,12 +51,11 @@ func isNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// A *url.Error from the http client already wraps net.OpError-level
+	// failures (connection refused, DNS, TLS handshake), so matching it is
+	// sufficient; a separate *net.OpError branch is dead in this path.
 	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		return true
-	}
-	var netErr *net.OpError
-	return errors.As(err, &netErr)
+	return errors.As(err, &urlErr)
 }
 
 // IsContextOverflow reports whether err is a provider rejection for exceeding

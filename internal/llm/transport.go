@@ -15,9 +15,9 @@ package llm
 import (
 	"context"
 	"crypto/tls"
+	"golang.org/x/net/http/httpproxy"
 	"net"
 	"net/http"
-	"golang.org/x/net/http/httpproxy"
 	"net/url"
 	"os"
 	"strings"
@@ -49,16 +49,16 @@ func ProxyTransport() *http.Transport {
 
 // proxyFromEnv returns a proxy function that checks DEEPSEEKCODE_PROXY first,
 // then delegates to the standard env-based proxy resolution. The
-// httpproxy.Config is captured once at construction time (matching the
-// behaviour of http.ProxyFromEnvironment) so proxy env vars are read at
-// ProxyTransport() call time, not on every request. Tests that need to change
-// the proxy mid-process should call ProxyTransport() again after updating env.
+// httpproxy.Config for the standard HTTP(S)_PROXY / NO_PROXY vars is captured
+// once at construction time (matching http.ProxyFromEnvironment). The
+// DEEPSEEKCODE_PROXY override, however, is read per request so it keeps the
+// late-binding behaviour callers (and tests) rely on: setting that one var
+// after the transport is built still takes effect without rebuilding it.
 func proxyFromEnv() func(*http.Request) (*url.URL, error) {
-	override := os.Getenv("DEEPSEEKCODE_PROXY")
 	cfg := httpproxy.FromEnvironment()
 	proxyFn := cfg.ProxyFunc()
 	return func(req *http.Request) (*url.URL, error) {
-		if override != "" {
+		if override := os.Getenv("DEEPSEEKCODE_PROXY"); override != "" {
 			return url.Parse(override)
 		}
 		return proxyFn(req.URL)

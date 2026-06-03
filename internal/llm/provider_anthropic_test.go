@@ -2,10 +2,77 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
+
+func TestAnthropicProviderStream(t *testing.T) {
+	// Minimal SSE response that Anthropic would emit for a single text delta.
+	// Note: spec used EventText/EventDone; real codebase uses EventTextDelta/EventFinish.
+	sse := strings.Join([]string{
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		``,
+		`event: content_block_delta`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"4"}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") == "" {
+			t.Error("missing x-api-key header")
+		}
+		if r.Header.Get("anthropic-version") == "" {
+			t.Error("missing anthropic-version header")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sse)
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider("anthropic", ProviderConfig{
+		APIKey:  "test-key",
+		BaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	ctx := context.Background()
+	ch, err := p.Stream(ctx, Request{
+		Model:     "claude-sonnet-4-5",
+		Messages:  []Message{{Role: "user", Blocks: []ContentBlock{TextBlock{Text: "2+2?"}}}},
+		MaxTokens: 16,
+		Stream:    true,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	var got []string
+	for ev := range ch {
+		// Adapt: spec used EventText; real codebase uses EventTextDelta
+		if ev.Type == EventTextDelta {
+			got = append(got, ev.Text)
+		}
+	}
+	if len(got) == 0 {
+		t.Error("expected at least one text event")
+	}
+}
 
 // fixedAnthropicRequest returns the canonical fixed request used by all
 // Anthropic golden tests. Adapted from the plan spec to use Message.Blocks

@@ -43,6 +43,8 @@ func NewProvider(name string, cfg ProviderConfig) (Provider, error) {
 		return newDeepSeekProvider(cfg)
 	case "openai-compat":
 		return newOpenAICompatProvider(cfg)
+	case "anthropic":
+		return newAnthropicProvider(cfg)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", name)
 	}

@@ -162,11 +162,15 @@ func renderProject(p ProjectContext) string {
 // DynamicContextBoundary, preventing cache-prefix contamination.
 // If the boundary is not yet present in systemPrompt, it is inserted first.
 func InjectRecalled(systemPrompt, recalled string) string {
-	if !strings.Contains(systemPrompt, DynamicContextBoundary) {
+	i := strings.Index(systemPrompt, DynamicContextBoundary)
+	if i < 0 {
 		// No boundary yet — append boundary then recalled.
 		return systemPrompt + DynamicContextBoundary + recalled
 	}
-	return systemPrompt + recalled
+	// Insert recalled immediately after the boundary marker, preserving any
+	// content that may follow it (e.g. RenderProjectContext appended later).
+	after := i + len(DynamicContextBoundary)
+	return systemPrompt[:after] + recalled + systemPrompt[after:]
 }
 
 // renderSkillDirectory wraps the canonical stable skill directory (from

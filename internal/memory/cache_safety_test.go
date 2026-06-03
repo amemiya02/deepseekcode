@@ -7,26 +7,24 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/prompt"
 )
 
-// TestRecalledMemoryNeverInFrozenPrefix asserts that any text injected
-// by the memory subsystem is placed AFTER DynamicContextBoundary.
-// This test works by building a representative system prompt the way
-// the builder does, then asserting the recalled facts appear only in
-// the dynamic section.
+// TestRecalledMemoryNeverInFrozenPrefix calls InjectRecalled and asserts
+// the recalled fact lands in the dynamic section, never in the frozen prefix.
 func TestRecalledMemoryNeverInFrozenPrefix(t *testing.T) {
 	boundary := prompt.DynamicContextBoundary
 
 	frozenPrefix := "You are a coding assistant.\nBase instructions here."
 	recalledFact := "The agent prefers terse replies in Go."
 
-	// Simulate correct injection: recalled fact placed AFTER boundary.
-	correctPrompt := frozenPrefix + boundary + "Recalled memory:\n" + recalledFact
+	// Use InjectRecalled starting from a prompt that already has the boundary.
+	base := frozenPrefix + boundary + "Existing dynamic content."
+	result := prompt.InjectRecalled(base, recalledFact)
 
-	idx := strings.Index(correctPrompt, boundary)
+	idx := strings.Index(result, boundary)
 	if idx < 0 {
-		t.Fatal("boundary not found in correct prompt")
+		t.Fatal("boundary not found after InjectRecalled")
 	}
-	frozenPart := correctPrompt[:idx]
-	dynamicPart := correctPrompt[idx:]
+	frozenPart := result[:idx]
+	dynamicPart := result[idx:]
 
 	if strings.Contains(frozenPart, recalledFact) {
 		t.Errorf("recalled fact leaked into frozen prefix:\nfrozen: %q", frozenPart)
@@ -36,27 +34,27 @@ func TestRecalledMemoryNeverInFrozenPrefix(t *testing.T) {
 	}
 }
 
-// TestBuggyInjectionBeforeBoundaryIsDetected is a stricter version that
-// simulates a bug (injection before boundary) and asserts the test
-// catches it.
+// TestBuggyInjectionBeforeBoundaryIsDetected verifies that InjectRecalled
+// always places recalled text AFTER the boundary, even when content already
+// follows the boundary in the prompt.
 func TestBuggyInjectionBeforeBoundaryIsDetected(t *testing.T) {
 	boundary := prompt.DynamicContextBoundary
 	recalledFact := "Secret preference injected too early."
 
-	// BUG: fact injected before boundary — this is what we must prevent.
-	buggyPrompt := "Static base. " + recalledFact + boundary + "Dynamic part."
+	// Adversarial input: boundary is present and is followed by existing
+	// dynamic content. InjectRecalled must NOT place recalledFact before
+	// the boundary.
+	adversarial := "Static base." + boundary + "Dynamic part."
+	result := prompt.InjectRecalled(adversarial, recalledFact)
 
-	idx := strings.Index(buggyPrompt, boundary)
+	idx := strings.Index(result, boundary)
 	if idx < 0 {
-		t.Fatal("boundary not found")
+		t.Fatal("boundary not found after InjectRecalled")
 	}
-	frozenPart := buggyPrompt[:idx]
+	frozenPart := result[:idx]
 
-	// The test itself should detect this bug:
-	if !strings.Contains(frozenPart, recalledFact) {
-		t.Fatal("test setup error: buggy prompt does not exhibit the bug")
+	if strings.Contains(frozenPart, recalledFact) {
+		t.Errorf("InjectRecalled placed recalled fact in frozen prefix:\nfrozen: %q\nresult: %q",
+			frozenPart, result)
 	}
-	// If we were checking this in production code, we'd call t.Errorf here.
-	// The test passes by successfully detecting the bug scenario.
-	t.Logf("correctly detected that %q leaked into frozen prefix", recalledFact)
 }

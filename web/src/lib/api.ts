@@ -2,6 +2,12 @@
 // ASSUMPTION (verify): gateway runs at the same origin in production (embedded),
 // and at localhost:7432 in dev (proxied by vite.config.ts).
 
+export interface Epoch {
+  id: string
+  turns: number
+  compacted: boolean
+}
+
 export interface CacheReport {
   total_usage_turns: number
   cache_hit_tokens: number

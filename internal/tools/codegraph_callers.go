@@ -9,6 +9,11 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
 )
 
+const (
+	codegraphCallersMaxNodes = 50
+	codegraphCallersMaxBytes = 32 * 1024 // 32 KiB
+)
+
 // CodegraphCallersTool implements Tool for codegraph_callers.
 type CodegraphCallersTool struct {
 	idx *codegraph.Index
@@ -50,10 +55,18 @@ func (t *CodegraphCallersTool) Execute(ctx context.Context, params json.RawMessa
 	if len(nodes) == 0 {
 		return Result{Content: fmt.Sprintf("no callers found for %q", p.SymbolID)}, nil
 	}
+	// Cap to avoid unbounded output for highly-called symbols.
+	capped := nodes
+	if len(capped) > codegraphCallersMaxNodes {
+		capped = capped[:codegraphCallersMaxNodes]
+	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%d caller(s) of `%s`:\n\n", len(nodes), p.SymbolID))
-	for _, n := range nodes {
+	for _, n := range capped {
 		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s:%d\n", n.Name, n.Kind.String(), n.File, n.Line))
 	}
-	return Result{Content: sb.String()}, nil
+	if len(nodes) > codegraphCallersMaxNodes {
+		sb.WriteString(fmt.Sprintf("\n[showing first %d of %d callers]\n", codegraphCallersMaxNodes, len(nodes)))
+	}
+	return Result{Content: sb.String()}.Truncate(codegraphCallersMaxBytes), nil
 }

@@ -6,6 +6,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  resolve: {
+    conditions: ['browser'],
+  },
   server: {
     proxy: {
       '/v1': {

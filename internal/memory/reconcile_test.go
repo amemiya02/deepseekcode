@@ -28,24 +28,36 @@ func TestReconcileUpdateInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should have updated in place (same ID) rather than creating a new record.
+	// The reconciler must update in place: same ID, not a new record.
 	if id1 != id2 {
-		t.Logf("IDs differ (%q vs %q) — near-duplicate threshold may need tuning; not fatal", id1, id2)
-		// Not a hard failure — threshold tuning is acceptable. Log only.
+		t.Errorf("expected update-in-place (same ID); got %q and %q — near-duplicate reconciliation is broken", id1, id2)
 	}
 
-	// Regardless of reconciliation: Recall should not return two separate
-	// near-identical facts.
+	// Recall must return exactly one entry — the reconciler's core invariant.
 	results, err := store.Recall("JSONL persistent memory")
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := make(map[string]bool)
-	for _, r := range results {
-		if seen[r.ID] {
-			t.Errorf("duplicate ID %q in Recall results", r.ID)
+	if len(results) != 1 {
+		t.Errorf("expected exactly 1 recalled result after update-in-place; got %d", len(results))
+	}
+
+	// The recalled record must carry the updated content.
+	if len(results) == 1 {
+		if results[0].Content != updated {
+			t.Errorf("recalled content not updated: got %q, want %q", results[0].Content, updated)
 		}
-		seen[r.ID] = true
+
+		// Tags must be merged: both "storage" and "disk" must be present.
+		tagSet := make(map[string]bool, len(results[0].Tags))
+		for _, tag := range results[0].Tags {
+			tagSet[tag] = true
+		}
+		for _, want := range []string{"storage", "disk"} {
+			if !tagSet[want] {
+				t.Errorf("expected merged tag %q in recalled record; got tags %v", want, results[0].Tags)
+			}
+		}
 	}
 }
 
@@ -57,14 +69,23 @@ func TestReconcileDistinctFactsNotMerged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	id1, _ := store.Remember("The agent uses Go for backend work.", nil)
-	id2, _ := store.Remember("The user prefers dark mode in VS Code.", nil)
+	id1, err := store.Remember("The agent uses Go for backend work.", nil)
+	if err != nil {
+		t.Fatalf("first Remember: %v", err)
+	}
+	id2, err := store.Remember("The user prefers dark mode in VS Code.", nil)
+	if err != nil {
+		t.Fatalf("second Remember: %v", err)
+	}
 
 	if id1 == id2 {
 		t.Error("completely unrelated facts must not be merged by reconciler")
 	}
 
-	results, _ := store.Recall("Go backend agent")
+	results, err := store.Recall("Go backend agent")
+	if err != nil {
+		t.Fatalf("Recall: %v", err)
+	}
 	found1 := false
 	for _, r := range results {
 		if r.ID == id1 {

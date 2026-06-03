@@ -29,6 +29,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/codegraph"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/doctor"
@@ -380,6 +381,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg := tools.New()
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
+	initCodegraph(reg, cwd)
 
 	// MCP servers: connect, bridge tools into the registry.
 	mcpReg := mcp.NewRegistry()
@@ -946,6 +948,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	cwd, _ := os.Getwd()
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
+	initCodegraph(reg, cwd)
 
 	// MCP servers: connect and bridge tools so one-shot runs match the TUI's
 	// tool surface — and so MCP schema discovery feeds the prefix epoch
@@ -1304,6 +1307,21 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 			e.Reply <- tools.QuestionResponse{Answers: answers}
 		}
 	}
+}
+
+// initCodegraph creates a codegraph Index for the given cwd, performs an
+// initial Rebuild to populate it, and registers the five codegraph tools into
+// reg. The Rebuild is best-effort: if it fails (e.g. on a non-Go project or
+// an unreadable directory), a warning is logged and the tools are still
+// registered against the empty index so the tool surface is stable.
+// Both runTUI and runOneShot call this so the live agent always has the
+// codegraph tools reachable.
+func initCodegraph(reg *tools.Registry, cwd string) {
+	cgIdx := codegraph.NewIndex("github.com/amemiya02/deepseekcode")
+	if err := cgIdx.Rebuild(cwd); err != nil {
+		slog.Warn("codegraph: initial rebuild failed (tools still available)", "err", err)
+	}
+	tools.RegisterCodegraphTools(reg, cgIdx)
 }
 
 // registerSpawnerTools is the single authoritative place that registers the

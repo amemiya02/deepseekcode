@@ -43,16 +43,6 @@ type CompactionConfig struct {
 	// its pre-§3.6 behavior. Comes from a cacheprobe measurement; it never
 	// touches the frozen prefix (the summary is an assistant body message).
 	CacheUnit int
-
-	// BodyTokenBudget triggers a cost-driven compaction when the conversation
-	// body exceeds this many estimated tokens — far below AutoCompactInputTokens.
-	// Its purpose is cache cost, not overflow: a small body is cheap to re-send
-	// when DeepSeek evicts it from the prompt cache (≈ every few turns). 0 disables.
-	BodyTokenBudget int
-	// MinTurnsBetweenBodyCompactions throttles body compaction so a rewrite never
-	// fires more often than the cache would have evicted anyway (≈ every 3 turns in
-	// measurement). 0 means default 3.
-	MinTurnsBetweenBodyCompactions int
 }
 
 // CompactionResult is what CompactSession produces. Summary == ""
@@ -406,25 +396,13 @@ func reconcileCompactThreshold(absolute int, compactRatio float64, maxContextTok
 // fall back to the default rather than crash.
 func DefaultCompactionConfig() CompactionConfig {
 	cfg := CompactionConfig{
-		PreserveRecentMessages:         4,
-		MaxEstimatedTokens:             10_000,
-		AutoCompactInputTokens:         800_000,
-		BodyTokenBudget:                16_000,
-		MinTurnsBetweenBodyCompactions: 3,
+		PreserveRecentMessages: 4,
+		MaxEstimatedTokens:     10_000,
+		AutoCompactInputTokens: 800_000,
 	}
 	if v := os.Getenv("DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			cfg.AutoCompactInputTokens = parsed
-		}
-	}
-	if v := os.Getenv("DEEPSEEKCODE_BODY_TOKEN_BUDGET"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil {
-			switch {
-			case parsed > 0:
-				cfg.BodyTokenBudget = parsed
-			case parsed < 0:
-				cfg.BodyTokenBudget = 0
-			}
 		}
 	}
 	return cfg

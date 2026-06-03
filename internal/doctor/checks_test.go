@@ -225,3 +225,53 @@ func TestCheckProxyConfigured_WithProxy(t *testing.T) {
 		t.Fatalf("expected PASS when HTTPS_PROXY is set, got: %s", r.Detail)
 	}
 }
+
+func TestCheckCacheFieldsInProbe_Present(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+            "id":"test",
+            "choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],
+            "usage":{
+                "prompt_tokens":10,
+                "completion_tokens":1,
+                "prompt_cache_hit_tokens":8,
+                "prompt_cache_miss_tokens":2
+            }
+        }`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{}
+	cfg.API.BaseURL = srv.URL
+	cfg.Providers = map[string]config.ProviderConfigTOML{
+		"deepseek": {Type: "deepseek", BaseURL: srv.URL, APIKey: "sk-test"},
+	}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckCacheFieldsInProbe(context.Background(), cfg, srv.Client())
+	if !r.OK {
+		t.Fatalf("expected PASS when cache fields present, got: %s", r.Detail)
+	}
+}
+
+func TestCheckCacheFieldsInProbe_Missing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// usage block without cache fields
+		w.Write([]byte(`{"choices":[{"message":{"content":"hi"}}],"usage":{"prompt_tokens":10,"completion_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{}
+	cfg.API.BaseURL = srv.URL
+	cfg.Providers = map[string]config.ProviderConfigTOML{
+		"deepseek": {Type: "deepseek", BaseURL: srv.URL, APIKey: "sk-test"},
+	}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckCacheFieldsInProbe(context.Background(), cfg, srv.Client())
+	if r.OK {
+		t.Fatal("expected FAIL when cache fields absent")
+	}
+}

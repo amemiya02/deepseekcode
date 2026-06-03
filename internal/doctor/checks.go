@@ -1,12 +1,15 @@
 package doctor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/onboarding"
@@ -91,9 +94,65 @@ func CheckProxyConfigured(_ context.Context, _ config.Config, _ *http.Client) Ch
 	return CheckResult{Name: "proxy-configured", OK: false, Detail: "no HTTP(S) proxy env vars set (OK if direct access)"}
 }
 
-// CheckCacheFieldsInProbe verifies that cache fields appear in a probe response.
-func CheckCacheFieldsInProbe(_ context.Context, _ config.Config, _ *http.Client) CheckResult {
-	return CheckResult{Name: "cache-fields-in-probe", OK: false, Detail: "not implemented"}
+// CheckCacheFieldsInProbe fires a minimal chat-completions request and checks
+// that the response Usage block contains prompt_cache_hit_tokens and
+// prompt_cache_miss_tokens — verifying that the server is returning cache
+// accounting fields that the cost tracker depends on.
+func CheckCacheFieldsInProbe(ctx context.Context, cfg config.Config, hc *http.Client) CheckResult {
+	const name = "cache-fields-in-probe"
+	if hc == nil {
+		hc = &http.Client{Timeout: 10 * time.Second}
+	}
+	p, ok := cfg.Providers[cfg.Active.Provider]
+	if !ok {
+		return CheckResult{Name: name, OK: false, Detail: "active provider not found"}
+	}
+	key, err := config.ResolveSecret(p)
+	if err != nil || key == "" {
+		return CheckResult{Name: name, OK: false, Detail: "no API key to probe with"}
+	}
+	baseURL := p.BaseURL
+	if baseURL == "" {
+		baseURL = cfg.API.BaseURL
+	}
+
+	endpoint := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	body, _ := json.Marshal(map[string]any{
+		"model":      "deepseek-v4-flash",
+		"max_tokens": 1,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: fmt.Sprintf("build request: %v", err)}
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := hc.Do(req)
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: fmt.Sprintf("request failed: %v", err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return CheckResult{Name: name, OK: false, Detail: fmt.Sprintf("HTTP %d from %s", resp.StatusCode, endpoint)}
+	}
+
+	var payload struct {
+		Usage struct {
+			PromptCacheHitTokens  *int `json:"prompt_cache_hit_tokens"`
+			PromptCacheMissTokens *int `json:"prompt_cache_miss_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return CheckResult{Name: name, OK: false, Detail: fmt.Sprintf("decode response: %v", err)}
+	}
+	if payload.Usage.PromptCacheHitTokens == nil || payload.Usage.PromptCacheMissTokens == nil {
+		return CheckResult{Name: name, OK: false, Detail: "usage block missing prompt_cache_hit_tokens / prompt_cache_miss_tokens — cache accounting unavailable"}
+	}
+	hit := *payload.Usage.PromptCacheHitTokens
+	miss := *payload.Usage.PromptCacheMissTokens
+	return CheckResult{Name: name, OK: true, Detail: fmt.Sprintf("cache fields present (hit=%d miss=%d)", hit, miss)}
 }
 
 // CheckSandboxAvailable verifies that the sandbox environment is available.

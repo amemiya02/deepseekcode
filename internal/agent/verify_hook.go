@@ -38,7 +38,17 @@ func (h *VerifyHook) Run(ctx context.Context) (feedback string, passed bool) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		combined := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
+		outStr := strings.TrimSpace(stdout.String())
+		errStr := strings.TrimSpace(stderr.String())
+		var combined string
+		switch {
+		case outStr != "" && errStr != "":
+			combined = outStr + "\n" + errStr
+		case outStr != "":
+			combined = outStr
+		default:
+			combined = errStr
+		}
 		feedback = fmt.Sprintf(
 			"Verification failed (command: %q).\n\nOutput:\n%s\n\n"+
 				"Please fix the above errors before continuing.",

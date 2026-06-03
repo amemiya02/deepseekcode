@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,9 @@ func TestVerifyHookFail(t *testing.T) {
 	if feedback == "" {
 		t.Fatal("expected non-empty feedback on fail")
 	}
+	if !strings.Contains(feedback, h.Cmd) {
+		t.Fatalf("expected feedback to contain command %q; got: %s", h.Cmd, feedback)
+	}
 }
 
 func TestVerifyHookDisabled(t *testing.T) {
@@ -40,8 +44,8 @@ func TestVerifyHookDisabled(t *testing.T) {
 }
 
 func TestVerifyHookCommandNotFound(t *testing.T) {
-	if _, err := exec.LookPath("true"); err != nil {
-		t.Skip("unix `true` not available")
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
 	}
 	h := &VerifyHook{Cmd: "definitely-not-a-real-binary-xyzzy"}
 	_, passed := h.Run(context.Background())

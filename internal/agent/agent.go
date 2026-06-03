@@ -245,6 +245,12 @@ type Agent struct {
 	// next turn, following the same pattern as injectLoopBreakNudge.
 	PostEditDiagnostics func(ctx context.Context, paths []string) string
 
+	// Verify, when non-nil, runs a shell command after each step that
+	// includes mutating tool calls. When the command exits non-zero, the
+	// synthesized feedback is injected as a synthetic user message so the
+	// model can fix the reported errors on its next turn.
+	Verify *VerifyHook
+
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	// Its SchemaHash feeds the epoch's mcp_schema_hash, so startup MCP
 	// discovery is part of the frozen prefix and mid-session schema
@@ -611,6 +617,7 @@ agentLoop:
 		// block for the model to react to, so there is no abort branch here.
 		a.runToolCalls(stepCtx, step.ToolCalls)
 		a.maybeFeedPostEditDiagnostics(stepCtx, step.ToolCalls)
+		a.maybeRunVerifyHook(stepCtx, step.ToolCalls)
 		stepCancel()
 		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
@@ -1706,6 +1713,44 @@ func (a *Agent) maybeFeedPostEditDiagnostics(ctx context.Context, calls []llm.To
 	}
 
 	msg := []llm.ContentBlock{llm.TextBlock{Text: text}}
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: msg})
+	if a.Persister != nil {
+		_, _ = a.Persister.AppendUserMessage(ctx, msg)
+	}
+}
+
+// maybeRunVerifyHook runs the configured VerifyHook after steps that include
+// mutating tool calls. When the hook reports a failure, the feedback is
+// injected as a synthetic user message so the model can fix reported errors on
+// its next turn. No-op when Verify is nil, Cmd is empty, or the step had no
+// mutating tool calls.
+func (a *Agent) maybeRunVerifyHook(ctx context.Context, calls []llm.ToolCall) {
+	if a.Verify == nil || a.Verify.Cmd == "" {
+		return
+	}
+	// Only run after steps that include at least one mutating tool call.
+	hasMutating := false
+	for _, call := range calls {
+		tool, ok := a.Tools.Get(call.Function.Name)
+		if !ok {
+			continue
+		}
+		if ro, ok := tool.(tools.ReadOnlyHint); ok && ro.IsReadOnly() {
+			continue
+		}
+		hasMutating = true
+		break
+	}
+	if !hasMutating {
+		return
+	}
+
+	feedback, passed := a.Verify.Run(ctx)
+	if passed {
+		return
+	}
+
+	msg := []llm.ContentBlock{llm.TextBlock{Text: feedback}}
 	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: msg})
 	if a.Persister != nil {
 		_, _ = a.Persister.AppendUserMessage(ctx, msg)

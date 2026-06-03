@@ -35,10 +35,14 @@ func RankByPageRank(s *Store, iterations int) []*Node {
 		}
 		for _, id := range ids {
 			outEdges := s.OutEdges(id)
+			// Only count out-edges whose target is a registered node so the
+			// denominator matches the mass actually distributed.
 			var callOut int
 			for _, e := range outEdges {
 				if e.Kind == EdgeCalls {
-					callOut++
+					if _, ok := set[e.To]; ok {
+						callOut++
+					}
 				}
 			}
 			if callOut == 0 {
@@ -61,9 +65,10 @@ func RankByPageRank(s *Store, iterations int) []*Node {
 		score = next
 	}
 
+	// Reuse the allNodes slice directly to avoid a redundant Store lookup.
 	sorted := make([]*Node, 0, n)
-	for _, id := range ids {
-		sorted = append(sorted, s.Node(id))
+	for i := range allNodes {
+		sorted = append(sorted, allNodes[i])
 	}
 	sort.Slice(sorted, func(i, j int) bool {
 		return score[sorted[i].ID] > score[sorted[j].ID]

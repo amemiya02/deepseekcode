@@ -1,0 +1,124 @@
+// Package llm — transport.go provides a proxy-aware http.Transport constructor
+// and environment-driven Client constructors for China-friendly deployments.
+//
+// Priority chain for proxy selection:
+//  1. DEEPSEEKCODE_PROXY  (explicit per-tool override)
+//  2. HTTPS_PROXY / HTTP_PROXY / NO_PROXY  (standard Go / curl conventions)
+//
+// Priority chain for base URL:
+//  1. DEEPSEEKCODE_BASE_URL
+//  2. Default: https://api.deepseek.com
+//
+// No new external dependencies. Uses only net/http, net/url, os.
+package llm
+
+import (
+	"context"
+	"crypto/tls"
+	"net"
+	"net/http"
+	"golang.org/x/net/http/httpproxy"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+)
+
+const defaultBaseURL = "https://api.deepseek.com"
+
+// ProxyTransport returns an *http.Transport configured to:
+//   - Use DEEPSEEKCODE_PROXY if set (highest priority).
+//   - Fall back to http.ProxyFromEnvironment (HTTPS_PROXY / HTTP_PROXY / NO_PROXY).
+//   - Apply China-latency-appropriate dial and TLS timeouts.
+func ProxyTransport() *http.Transport {
+	proxyFunc := proxyFromEnv()
+	return &http.Transport{
+		Proxy: proxyFunc,
+		DialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 0, // streaming: governed by Client timeouts
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+}
+
+// proxyFromEnv returns a proxy function that checks DEEPSEEKCODE_PROXY first,
+// then delegates to the standard env-based proxy resolution. We use
+// httpproxy.FromEnvironment() (reading env vars fresh on every call) instead
+// of http.ProxyFromEnvironment to avoid the per-process caching that
+// http.ProxyFromEnvironment applies — important for test isolation and for
+// processes that set DEEPSEEKCODE_PROXY after startup.
+func proxyFromEnv() func(*http.Request) (*url.URL, error) {
+	return func(req *http.Request) (*url.URL, error) {
+		if v := os.Getenv("DEEPSEEKCODE_PROXY"); v != "" {
+			return url.Parse(v)
+		}
+		return httpproxy.FromEnvironment().ProxyFunc()(req.URL)
+	}
+}
+
+// NewClientWithEnv constructs a Client whose transport honours proxy env vars
+// and whose base URL is read from DEEPSEEKCODE_BASE_URL (fallback:
+// https://api.deepseek.com). API key is read from DEEPSEEKCODE_API_KEY.
+func NewClientWithEnv() *Client {
+	apiKey := os.Getenv("DEEPSEEKCODE_API_KEY")
+	baseURL := os.Getenv("DEEPSEEKCODE_BASE_URL")
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	c := NewClient(apiKey, baseURL)
+	c.HTTPClient = &http.Client{
+		Transport: ProxyTransport(),
+		Timeout:   0, // streaming: no global timeout
+	}
+	return c
+}
+
+// NewClientWithMirrors constructs a Client that will try each mirror URL in
+// order when StreamWithMirrors is called. The first mirror is also the
+// primary BaseURL for regular Stream calls.
+func NewClientWithMirrors(apiKey string, mirrors []string) *Client {
+	base := defaultBaseURL
+	if len(mirrors) > 0 {
+		base = mirrors[0]
+	}
+	c := NewClient(apiKey, base)
+	c.HTTPClient = &http.Client{
+		Transport: ProxyTransport(),
+		Timeout:   0,
+	}
+	return c
+}
+
+// StreamWithMirrors attempts Stream against each mirror in turn, stopping at
+// the first success. It returns the first non-transient error or the last
+// error if all mirrors fail.
+func (c *Client) StreamWithMirrors(ctx context.Context, req Request, mirrors []string) (<-chan Event, error) {
+	if len(mirrors) == 0 {
+		return c.Stream(ctx, req)
+	}
+
+	var lastErr error
+	for _, mirror := range mirrors {
+		mirror = strings.TrimRight(mirror, "/")
+		// Temporarily override BaseURL for this attempt.
+		orig := c.BaseURL
+		c.BaseURL = mirror
+		ch, err := c.Stream(ctx, req)
+		c.BaseURL = orig
+		if err == nil {
+			return ch, nil
+		}
+		lastErr = err
+		// Only continue to the next mirror for transient errors.
+		if !IsTransient(err) {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}

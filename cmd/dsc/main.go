@@ -255,6 +255,7 @@ func run() error {
 	flag.BoolVar(&autoRoute, "auto-route", false, "enable per-turn Flash-first cost-aware routing (escalates hard turns to the pro tier)")
 	flag.BoolVar(&autoClarify, "auto-clarify", false, "ask one clarifying question on a vague prompt before spending a turn")
 	flag.StringVar(&escalationModel, "escalation-model", "", "pro-tier model --auto-route escalates to (default deepseek-v4-pro when --auto-route is set)")
+	verifyCmd := flag.String("verify-cmd", "", "shell command to run after each mutating step (e.g. \"go build ./...\")")
 	flag.Parse()
 
 	// Env fallback so the benchmark harness can request a trace without
@@ -356,10 +357,10 @@ func run() error {
 	}
 
 	if !tuiMode {
-		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL, resumeAt: resumeAt})
+		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL, resumeAt: resumeAt, verifyCmd: *verifyCmd})
 	}
 
-	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction}, newSession, continueSes, resumeSes)
+	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, verifyCmd: *verifyCmd}, newSession, continueSes, resumeSes)
 }
 
 // runTUI launches the Bubble Tea TUI. Persistence (session store +
@@ -464,6 +465,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 	applyRoutingConfig(a, cfg)
+	applyVerifyCmd(a, mf.verifyCmd)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
@@ -842,6 +844,15 @@ type modeFlags struct {
 	disableSemanticCompaction bool
 	traceJSONL                string // one-shot trace sink path; "" disables
 	resumeAt                  string // --resume-at checkpoint name or step index; "" disables
+	verifyCmd                 string // --verify-cmd shell command; "" disables
+}
+
+// applyVerifyCmd sets agent.Verify when cmd is non-empty.
+// When cmd is empty, Verify is left untouched (nil by default).
+func applyVerifyCmd(a *agent.Agent, cmd string) {
+	if cmd != "" {
+		a.Verify = &agent.VerifyHook{Cmd: cmd}
+	}
 }
 
 // applyResumeAtTruncation trims a.Messages to messageCount when messageCount
@@ -1011,6 +1022,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 	applyRoutingConfig(a, cfg)
+	applyVerifyCmd(a, mf.verifyCmd)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait

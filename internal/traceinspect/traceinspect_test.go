@@ -25,13 +25,16 @@ func TestInspectTraceSummarizesEpochUsageAndSubagents(t *testing.T) {
 	if report.TotalUsageTurns != 2 {
 		t.Fatalf("TotalUsageTurns = %d, want 2", report.TotalUsageTurns)
 	}
-	if report.CacheHitRate < 0.47 || report.CacheHitRate > 0.48 {
-		t.Fatalf("CacheHitRate = %.4f, want about 0.475", report.CacheHitRate)
+	// CacheHitRate is computed over warm turns only (turns 2+ of each epoch).
+	// Turn 1 of e1 is the expected cold-start miss (0 hit / 1000 miss) and is
+	// excluded. Turn 2 has 950 hit / 50 miss → warm rate = 950/1000 = 0.95.
+	if report.CacheHitRate < 0.94 || report.CacheHitRate > 0.96 {
+		t.Fatalf("CacheHitRate = %.4f, want about 0.950 (warm turns only)", report.CacheHitRate)
 	}
 	if report.SubagentEpochs != 1 {
 		t.Fatalf("SubagentEpochs = %d, want 1", report.SubagentEpochs)
 	}
-	if got := RenderText(report); !strings.Contains(got, "cache 47.5%") || !strings.Contains(got, "subagents 1") {
+	if got := RenderText(report); !strings.Contains(got, "cache 95.0%") || !strings.Contains(got, "subagents 1") {
 		t.Fatalf("RenderText missing expected summary:\n%s", got)
 	}
 }

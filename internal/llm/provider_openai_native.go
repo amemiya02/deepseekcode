@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ── Wire types (OpenAI Chat Completions API) ──────────────────────────────────
@@ -105,6 +107,9 @@ func (p *OpenAINativeProvider) ValidatePro(_ context.Context, _ string) (bool, s
 }
 
 // Stream sends req to the OpenAI Chat Completions endpoint and returns Events.
+// It enforces the same two-tier timeout semantics as client.go readSSE:
+// FirstTokenTimeout caps the wait until the first SSE event, and
+// ChunkStallTimeout caps the gap between subsequent events.
 func (p *OpenAINativeProvider) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	body, err := openaiNativeMarshal(req)
 	if err != nil {
@@ -125,35 +130,133 @@ func (p *OpenAINativeProvider) Stream(ctx context.Context, req Request) (<-chan 
 		return nil, fmt.Errorf("openai native do: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
-		return nil, fmt.Errorf("openai native status %d", resp.StatusCode)
+		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, &APIError{Status: resp.StatusCode, Body: string(buf)}
 	}
 
 	ch := make(chan Event, 32)
-	go func() {
-		defer close(ch)
-		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				ch <- Event{Type: EventFinish, FinishReason: "stop"}
-				return
-			}
-			ev := parseOpenAINativeSSEData(data)
-			if ev != nil {
-				ch <- *ev
-			}
-		}
-	}()
+	go p.readOpenAINativeSSE(ctx, resp.Body, ch)
 	return ch, nil
 }
 
+// readOpenAINativeSSE consumes an OpenAI SSE stream and dispatches typed Events.
+// It enforces a two-tier timeout (first-token vs chunk-stall) matching client.go.
+// EventFinish is emitted exactly once, from the [DONE] sentinel.
+func (p *OpenAINativeProvider) readOpenAINativeSSE(ctx context.Context, body io.ReadCloser, out chan<- Event) {
+	defer close(out)
+	defer func() { _ = body.Close() }()
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Split(bufio.ScanLines)
+
+	var (
+		finishReason  string
+		seenFirstByte bool
+	)
+
+	// Two-tier timeout mirroring client.go readSSE.
+	firstTimer := time.NewTimer(p.client.FirstTokenTimeout)
+	stallTimer := time.NewTimer(p.client.ChunkStallTimeout)
+	stallTimer.Stop() // not started until first byte arrives
+
+	defer firstTimer.Stop()
+	defer stallTimer.Stop()
+
+	type scanResult struct {
+		line string
+		ok   bool
+		err  error
+	}
+	lines := make(chan scanResult, 1)
+	go func() {
+		for scanner.Scan() {
+			lines <- scanResult{line: scanner.Text(), ok: true}
+		}
+		lines <- scanResult{ok: false, err: scanner.Err()}
+		close(lines)
+	}()
+
+	emit := func(e Event) bool {
+		select {
+		case out <- e:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	for {
+		var sr scanResult
+		select {
+		case <-ctx.Done():
+			emit(Event{Type: EventError, Err: ctx.Err()})
+			return
+		case <-firstTimer.C:
+			if !seenFirstByte {
+				emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrFirstTokenTimeout, p.client.FirstTokenTimeout)})
+				return
+			}
+		case <-stallTimer.C:
+			emit(Event{Type: EventError, Err: fmt.Errorf("%w after %s", ErrChunkStall, p.client.ChunkStallTimeout)})
+			return
+		case sr = <-lines:
+		}
+
+		if !sr.ok {
+			if sr.err != nil {
+				emit(Event{Type: EventError, Err: sr.err})
+				return
+			}
+			break
+		}
+
+		if !seenFirstByte {
+			seenFirstByte = true
+			firstTimer.Stop()
+		}
+		// Reset stall timer on every received line.
+		if !stallTimer.Stop() {
+			select {
+			case <-stallTimer.C:
+			default:
+			}
+		}
+		stallTimer.Reset(p.client.ChunkStallTimeout)
+
+		line := strings.TrimSpace(sr.line)
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			// Emit EventFinish exactly once here, not in parseOpenAINativeSSEData.
+			emit(Event{Type: EventFinish, FinishReason: finishReason})
+			return
+		}
+		ev := parseOpenAINativeSSEData(data)
+		if ev != nil {
+			if ev.Type == EventFinish {
+				// Capture finish_reason but do NOT emit yet; [DONE] will emit.
+				finishReason = ev.FinishReason
+			} else {
+				if !emit(*ev) {
+					return
+				}
+			}
+		}
+	}
+
+	// Stream ended without [DONE] (connection closed). Emit finish with
+	// whatever finish_reason was collected, matching client.go behaviour.
+	emit(Event{Type: EventFinish, FinishReason: finishReason})
+}
+
 // parseOpenAINativeSSEData decodes one OpenAI SSE data line.
+// It returns EventTextDelta for content deltas, and EventFinish (FinishReason
+// only, not to be emitted directly) when finish_reason=="stop" is seen.
+// The caller (readOpenAINativeSSE) controls when EventFinish is actually sent.
 func parseOpenAINativeSSEData(data string) *Event {
 	var raw struct {
 		Choices []struct {
@@ -173,8 +276,8 @@ func parseOpenAINativeSSEData(data string) *Event {
 	if c.Delta.Content != "" {
 		return &Event{Type: EventTextDelta, Text: c.Delta.Content}
 	}
-	if c.FinishReason != nil && *c.FinishReason == "stop" {
-		return &Event{Type: EventFinish, FinishReason: "stop"}
+	if c.FinishReason != nil && *c.FinishReason != "" {
+		return &Event{Type: EventFinish, FinishReason: *c.FinishReason}
 	}
 	return nil
 }

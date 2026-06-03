@@ -144,13 +144,27 @@ func TestOpenAINativeProviderStream(t *testing.T) {
 		t.Fatalf("Stream: %v", err)
 	}
 
-	var got []string
+	// Collect all events by type.
+	byType := map[EventType][]Event{}
 	for ev := range ch {
-		if ev.Type == EventTextDelta {
-			got = append(got, ev.Text)
-		}
+		byType[ev.Type] = append(byType[ev.Type], ev)
 	}
-	if len(got) == 0 {
-		t.Error("expected at least one text event")
+
+	// Must have at least one text delta.
+	if len(byType[EventTextDelta]) == 0 {
+		t.Error("expected at least one EventTextDelta")
+	}
+
+	// Must have exactly one EventFinish with FinishReason=="stop".
+	finishes := byType[EventFinish]
+	if len(finishes) != 1 {
+		t.Errorf("expected exactly 1 EventFinish, got %d", len(finishes))
+	} else if finishes[0].FinishReason != "stop" {
+		t.Errorf("expected EventFinish.FinishReason=stop, got %q", finishes[0].FinishReason)
+	}
+
+	// Must have no EventError.
+	if errs := byType[EventError]; len(errs) != 0 {
+		t.Errorf("expected no EventError, got %d: first=%v", len(errs), errs[0].Err)
 	}
 }

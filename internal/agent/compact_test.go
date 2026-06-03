@@ -417,6 +417,49 @@ func TestAgentMaybeCompactTriggers(t *testing.T) {
 	}
 }
 
+// TestNoCompactionBelowOverflow guards the post-revert invariant: with the
+// body-discipline (cost-driven sub-1M) compaction removed, a conversation far
+// below the 800K overflow trigger must NOT compact. It fails loudly if a future
+// change re-introduces a low-threshold cost compaction that rewrites the prefix
+// and detonates DeepSeek's block cache — the net-negative behavior reverted on
+// 2026-06-03 (compaction ON cost ~40% MORE billable + doubled turns vs OFF).
+func TestNoCompactionBelowOverflow(t *testing.T) {
+	a := New(nil, nil, nil, "m")
+	// Real shipped triggers: 800K deterministic overflow + default semantic
+	// (pressure-based, fires only near the 1M window). Neither may fire here.
+	a.CompactionCfg = CompactionConfig{
+		PreserveRecentMessages: 4,
+		AutoCompactInputTokens: 800_000,
+	}
+	// ~60K tokens: far above any plausible re-introduced cost budget (the
+	// reverted one was 16K), far below the 800K overflow trigger. 60 messages ×
+	// 8000 chars at the calibrated ~8 chars/token ≈ 60K tokens.
+	for i := 0; i < 60; i++ {
+		a.Messages = append(a.Messages, llm.Message{
+			Role:   "user",
+			Blocks: []llm.ContentBlock{llm.TextBlock{Text: strings.Repeat("x", 8000)}},
+		})
+	}
+	if est := EstimateInputTokens(a.Messages, defaultCharsPerToken); est < 50_000 || est > 800_000 {
+		t.Fatalf("precondition: body est=%d tokens, want in (50K, 800K)", est)
+	}
+	before := len(a.Messages)
+	a.maybeCompact(context.Background())
+	if len(a.Messages) != before {
+		t.Fatalf("a sub-1M conversation compacted: %d -> %d messages "+
+			"(a re-introduced cost compaction would rewrite the prefix and kill the cache)",
+			before, len(a.Messages))
+	}
+	select {
+	case ev := <-a.Events():
+		if _, ok := ev.(EventCompaction); ok {
+			t.Fatal("EventCompaction emitted below the overflow threshold; want none")
+		}
+	default:
+		// no event — correct
+	}
+}
+
 // toolTurn returns a paired assistant tool_use + tool tool_result for one
 // tool, so it survives adjustBoundary inside a compaction window (an unpaired
 // use would be pulled out as an orphan).

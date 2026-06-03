@@ -6,10 +6,23 @@ import (
 	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/prompt"
+	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
+// productionScale, when true, swaps the small synthetic prefix below for
+// productionPrefix() — dsc's real default system prompt + real registered tool
+// set (≈ the live ~8K-token static prefix). It is OFF by default so the fast
+// unit tests keep using the small, deterministic baseSystemPrompt/fixedTools
+// pair; main.go flips it on via a flag for a production-scale run. Every
+// prefix builder (stable/drift/naive) reads the active base through
+// activeSystemPrompt()/activeBaseTools(), so the existing drift/naive logic is
+// reused verbatim regardless of scale.
+var productionScale = false
+
 // baseSystemPrompt is a realistic, sizeable system prompt — large enough that
-// system+tools clears DeepSeek's ~1,024-token cache floor in a real run.
+// system+tools clears DeepSeek's ~1,024-token cache floor in a real run, but
+// still far below dsc's real ~8K-token prefix (see productionPrefix).
 var baseSystemPrompt = strings.Repeat(
 	"You are deepseekcode, a terminal coding agent for DeepSeek V4. "+
 		"Use the provided tools to read and edit files and run commands. "+
@@ -30,10 +43,63 @@ func fixedTools() []llm.Tool {
 	}
 }
 
+// realToolSet returns dsc's real registered tool surface, serialized exactly as
+// the agent would send it (name-sorted, same descriptions and JSON-Schema). It
+// is built from the live tools.RegisterBuiltins registry (plus the lazy
+// struct-search tool) rather than copy-pasting bytes, so the demo's production
+// prefix tracks dsc's real tool JSON if the tool set changes. The CWD/byte-limit
+// args do not affect the serialized prefix bytes, so zero/empty values are fine.
+func realToolSet() []llm.Tool {
+	r := tools.New()
+	tools.RegisterBuiltins(r, 0, 0, "")
+	r.RegisterWithTier(tools.NewStructSearchTool(""), tools.TierLazy)
+	return r.AsLLMTools()
+}
+
+// productionSystemPrompt is dsc's real binary-versioned static base prompt
+// (prompt.BasePromptV1) — the exact cache-stable head the SystemPromptBuilder
+// freezes by default (builder.go: empty StaticBase falls back to BasePromptV1).
+// It is the real prefix base, not the small behavioral snippet, so the demo's
+// large arm exercises the same bytes a live session would freeze. Session-once
+// instruction files (DEEPSEEK.md/AGENTS.md) and the skill directory push a real
+// session well past this; they are session-specific, so we intentionally do not
+// fabricate them here.
+var productionSystemPrompt = prompt.BasePromptV1
+
+// productionPrefix is the production-scale static prefix: dsc's real base prompt
+// (productionSystemPrompt) plus the real registered tool set (realToolSet),
+// totalling roughly 3.3K tokens (~1.2K base + ~2.2K tool JSON) — about 3x the
+// synthetic ~1.1K prefix. The synthetic prefix is small enough that the
+// mid-session-drift cache penalty hides under output-token variance; this one
+// is large enough for the drift miss to register against the cache floor.
+// Gated behind productionScale so the fast unit tests keep the small prefix.
+func productionPrefix() llm.StaticPrefix {
+	return llm.StaticPrefix{System: productionSystemPrompt, Tools: realToolSet()}
+}
+
+// activeSystemPrompt is the system text the current scale uses as the prefix
+// base. Every prefix builder routes through it so drift/naive logic is
+// scale-agnostic.
+func activeSystemPrompt() string {
+	if productionScale {
+		return productionSystemPrompt
+	}
+	return baseSystemPrompt
+}
+
+// activeBaseTools is the base tool set the current scale uses as the prefix
+// base. driftPrefix appends its "notify" tool on top of this slice.
+func activeBaseTools() []llm.Tool {
+	if productionScale {
+		return realToolSet()
+	}
+	return fixedTools()
+}
+
 // stablePrefix is the byte-identical static prefix used on every turn of the
 // cache-stable arm.
 func stablePrefix() llm.StaticPrefix {
-	return llm.StaticPrefix{System: baseSystemPrompt, Tools: fixedTools()}
+	return llm.StaticPrefix{System: activeSystemPrompt(), Tools: activeBaseTools()}
 }
 
 // driftPrefix models Reasonix's append-only tool growth: the prefix is
@@ -47,7 +113,8 @@ func driftPrefix(turn, driftAt int, nonce string) llm.StaticPrefix {
 	if turn < driftAt {
 		return stablePrefix()
 	}
-	tools := append(fixedTools(), llm.Tool{
+	base := activeBaseTools()
+	drifted := append(append([]llm.Tool{}, base...), llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "notify",
@@ -55,7 +122,7 @@ func driftPrefix(turn, driftAt int, nonce string) llm.StaticPrefix {
 			Parameters:  []byte(`{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}`),
 		},
 	})
-	return llm.StaticPrefix{System: baseSystemPrompt, Tools: tools}
+	return llm.StaticPrefix{System: activeSystemPrompt(), Tools: drifted}
 }
 
 // naivePrefix mutates the system prompt per turn and per run (a volatile
@@ -66,8 +133,8 @@ func driftPrefix(turn, driftAt int, nonce string) llm.StaticPrefix {
 // keeping the naive-vs-stable contrast intact.
 func naivePrefix(turn int, nonce string) llm.StaticPrefix {
 	return llm.StaticPrefix{
-		System: fmt.Sprintf("Session %s turn %d.\n%s", nonce, turn, baseSystemPrompt),
-		Tools:  fixedTools(),
+		System: fmt.Sprintf("Session %s turn %d.\n%s", nonce, turn, activeSystemPrompt()),
+		Tools:  activeBaseTools(),
 	}
 }
 

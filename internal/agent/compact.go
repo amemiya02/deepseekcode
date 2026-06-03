@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/amemiya02/deepseekcode/internal/cacheunit"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 )
@@ -32,6 +33,16 @@ type CompactionConfig struct {
 	// value, compaction fires (default 100_000; override via env
 	// DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS).
 	AutoCompactInputTokens int
+
+	// CacheUnit, when > 0, is the measured DeepSeek cache-unit boundary
+	// (tokens) used to align the rebuilt post-compaction tail (§3.6). After a
+	// compaction the live transcript is [summary || kept-tail]; padding the
+	// summary message so the whole rebuilt body lands on a cache-unit multiple
+	// maximizes the reusable, fully-persisted portion on the next turn. 0
+	// (default) = disabled, in which case CompactSession is byte-identical to
+	// its pre-§3.6 behavior. Comes from a cacheprobe measurement; it never
+	// touches the frozen prefix (the summary is an assistant body message).
+	CacheUnit int
 }
 
 // CompactionResult is what CompactSession produces. Summary == ""
@@ -156,6 +167,12 @@ func CompactSession(messages []llm.Message, cfg CompactionConfig, charsPerToken 
 	}
 	kept := make([]llm.Message, len(messages)-toIdx)
 	copy(kept, messages[toIdx:])
+	// §3.6: align the rebuilt tail ([summary || kept]) to a cache-unit boundary
+	// so the post-compaction body ends on a fully-persisted cache block. Pads
+	// the summary (an assistant BODY message), never the frozen prefix, so the
+	// Prefix Fingerprint is untouched. cfg.CacheUnit==0 (default) = no-op:
+	// alignTailToCacheUnit returns summaryMsg unchanged → byte-identical output.
+	summaryMsg = alignTailToCacheUnit(summaryMsg, kept, cfg.CacheUnit)
 	return CompactionResult{
 		Summary:        summary,
 		FromIdx:        fromIdx,
@@ -164,6 +181,50 @@ func CompactSession(messages []llm.Message, cfg CompactionConfig, charsPerToken 
 		SummaryMessage: summaryMsg,
 		KeptMessages:   kept,
 	}
+}
+
+// alignTailToCacheUnit pads the post-compaction summary message so the rebuilt
+// live tail ([summaryMsg || kept]) ends on a DeepSeek cache-unit boundary (§3.6).
+// V4 reuses a stored prefix only up to its last COMPLETE compression block, so
+// landing the rebuilt body on a unit multiple maximizes the reusable portion of
+// the next turn's prompt. unit comes from a cacheprobe measurement.
+//
+// Gated on unit>0: when unit<=0 (the default everywhere today) it returns
+// summaryMsg UNCHANGED, so CompactSession's output is byte-identical to its
+// pre-§3.6 behavior. The padding is added as a SEPARATE trailing TextBlock so
+// the summary's first block stays exactly "<summary>...</summary>" — keeping
+// priorSummaryText's detection intact across multi-round compaction — and it
+// only ever touches an assistant BODY message, never the frozen Static Prefix,
+// so the Prefix Fingerprint is unaffected (guarded by
+// TestCompactionPreservesFrozenPrefix).
+func alignTailToCacheUnit(summaryMsg llm.Message, kept []llm.Message, unit int) llm.Message {
+	if unit <= 0 {
+		return summaryMsg
+	}
+	tail := append([]llm.Message{summaryMsg}, kept...)
+	// Measure the tail and the pad with the SAME deterministic char estimator so
+	// the boundary arithmetic is self-consistent (the exact-tokenizer path is
+	// intentionally not used here: the pad is filler whose only job is to land
+	// the body on a unit multiple under one consistent measure).
+	have := EstimateTokensCalibrated(tail, defaultCharsPerToken)
+	// The pad is appended as a TextBlock to an existing message, so its token
+	// contribution is just the calibrated char estimate of its own text, net of
+	// the per-message overhead the estimator adds to the synthetic wrapper.
+	count := func(s string) int {
+		return EstimateTokensCalibrated(
+			[]llm.Message{{Blocks: []llm.ContentBlock{llm.TextBlock{Text: s}}}},
+			defaultCharsPerToken,
+		) - perMessageOverhead
+	}
+	pad := cacheunit.PadText(have, unit, count)
+	if pad == "" {
+		return summaryMsg
+	}
+	blocks := make([]llm.ContentBlock, len(summaryMsg.Blocks), len(summaryMsg.Blocks)+1)
+	copy(blocks, summaryMsg.Blocks)
+	blocks = append(blocks, llm.TextBlock{Text: pad})
+	summaryMsg.Blocks = blocks
+	return summaryMsg
 }
 
 // adjustBoundary tweaks toIdx so the compaction window doesn't

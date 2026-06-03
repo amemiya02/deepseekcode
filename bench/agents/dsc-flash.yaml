@@ -1,0 +1,8 @@
+id: dsc-flash
+command: ./bin/dsc
+args: [-model, deepseek-v4-flash, -p]
+input_mode: prompt_arg
+env: { DEEPSEEK_API_KEY: required }
+trace_path: bench/traces/dsc-flash/
+usage_parser: deepseekcode
+enforce_cache_gate: false

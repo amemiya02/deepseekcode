@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/cacheunit"
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -87,6 +88,16 @@ type Agent struct {
 	Model    string
 	Thinking bool
 
+	// ThinkingMode, when set (on|off|adaptive), overrides per-turn thinking
+	// selection for cost experiments (env DEEPSEEKCODE_THINKING_MODE). Empty
+	// keeps the legacy Thinking/AutoReasoning behavior. "off" never thinks;
+	// "adaptive" reasons on the first turn (plan) or a repair turn, terse
+	// otherwise — cutting the 2x-priced reasoning_content tax on routine turns.
+	ThinkingMode string
+	// turnsSeen counts runStep invocations this session; selectTurnThinking
+	// reads it so "adaptive" mode can reason on the first turn only.
+	turnsSeen int
+
 	// Temperature and TopP, when non-nil, are sent on every model request as
 	// the OpenAI-shaped sampling controls. nil (the default) omits the field
 	// entirely so the main-loop wire bytes — and thus the cache fingerprint —
@@ -142,6 +153,14 @@ type Agent struct {
 
 	// System is the system prompt. Cache-stable across turns by design.
 	System string
+
+	// cacheUnit, when > 0, pads the static system prompt so the frozen prefix
+	// ends on a DeepSeek cache-unit boundary (§3.4). The padding is injected at
+	// the EpochComponents build site, BEFORE the epoch is created/hashed, so it
+	// lives inside the frozen, fingerprinted prefix and stays byte-stable across
+	// turns. The value comes from a bench/cmd/cacheprobe measurement; 0 (the
+	// default) disables padding entirely — zero behavior change, no wire bytes.
+	cacheUnit int
 
 	// PromptBuilder, when non-nil, overrides System with the builder's
 	// output at the start of Run. The builder owns the static + dynamic
@@ -312,6 +331,12 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		stormBreaker:         repair.NewStormBreaker(6, 3),
 		schemaComplexEmitted: make(map[string]bool),
 		schemaAdapters:       make(map[string]repair.SchemaAdapter),
+	}
+
+	// ThinkingMode (on|off|adaptive) is env-settable for cost A/Bs; empty keeps
+	// the legacy default behavior so the shipped default is unchanged.
+	if m := os.Getenv("DEEPSEEKCODE_THINKING_MODE"); m != "" {
+		a.ThinkingMode = m
 	}
 
 	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
@@ -905,8 +930,19 @@ func (a *Agent) buildEpochComponents() EpochComponents {
 		a.schemaAdapters = make(map[string]repair.SchemaAdapter)
 	}
 
+	// §3.4: pad the static system so the prefix ends on a DeepSeek cache-unit
+	// boundary. Applied HERE, before the epoch is created/hashed, so the padding
+	// is inside the frozen, fingerprinted prefix and stays byte-stable across
+	// turns. unit comes from a cacheprobe measurement; 0 (default) = disabled, in
+	// which case staticSystem is exactly a.staticSystem() — zero behavior change.
+	staticSystem := a.staticSystem()
+	if a.cacheUnit > 0 {
+		pre := tokenizer.Count(staticSystem)
+		staticSystem += cacheunit.PadText(pre, a.cacheUnit, tokenizer.Count)
+	}
+
 	return EpochComponents{
-		StaticSystem:   a.staticSystem(),
+		StaticSystem:   staticSystem,
 		ToolSpecs:      epochTools,
 		Model:          a.Model,
 		AgentProfileID: a.currentProfileID(),
@@ -960,6 +996,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 
 	lastUserText := a.lastUserText()
 	turnModel, turnThinking, turnEffort := a.routeTurn(lastUserText, 0)
+	a.turnsSeen++ // after routeTurn so the first turn reads turnsSeen==0 (adaptive plan turn)
 
 	req := llm.Request{
 		Model:           turnModel,
@@ -1973,16 +2010,36 @@ func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
 	return llm.ReasoningEffortMax
 }
 
+// selectTurnThinking resolves whether to think this turn. ThinkingMode (set via
+// DEEPSEEKCODE_THINKING_MODE for cost A/Bs) overrides the legacy path:
+//   "off"      -> never think
+//   "adaptive" -> think on the first turn (plan) or a repair turn, else terse
+//   "on"/""    -> legacy: AutoReasoning ? SelectThinking : Thinking
+//
+// Thinking on/off changes only the wire reasoning_effort field (and whether the
+// model emits reasoning_content); it does NOT touch the Static Prefix, so it
+// cannot cause prefix drift.
+func (a *Agent) selectTurnThinking(userText string, repairErrorsLastTurn int) bool {
+	switch a.ThinkingMode {
+	case "off":
+		return false
+	case "adaptive":
+		return a.turnsSeen == 0 || repairErrorsLastTurn > 0
+	default:
+		if a.AutoReasoning {
+			return llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
+		}
+		return a.Thinking
+	}
+}
+
 // routeTurn returns the per-turn (model, thinking, effort) to use. When
 // AutoRoute is off (or no escalation target) it returns the loop defaults
 // unchanged. It updates a.lastRoute for stickiness. Model/effort never affect
 // the Static Prefix, so this cannot cause prefix drift.
 func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bool, llm.ReasoningEffort) {
 	if !a.AutoRoute || a.EscalationModel == "" {
-		thinking := a.Thinking
-		if a.AutoReasoning {
-			thinking = llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
-		}
+		thinking := a.selectTurnThinking(userText, repairErrorsLastTurn)
 		return a.Model, thinking, a.effectiveReasoningEffort(thinking)
 	}
 	d := routing.Classify(

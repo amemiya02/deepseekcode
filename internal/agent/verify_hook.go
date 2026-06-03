@@ -9,8 +9,15 @@ import (
 )
 
 // VerifyHook runs a shell command after mutating steps and reports whether
-// the working tree is in a good state. It is configured once via Agent.VerifyCmd
-// and called from the agent loop's post-step path.
+// the working tree is in a good state. It is configured via Agent.Verify and
+// called from two points in the agent loop:
+//
+//  1. After every step that includes at least one mutating tool call
+//     (via maybeRunVerifyHook): on failure the feedback is injected as a
+//     synthetic user message so the model can fix errors on its next turn.
+//  2. At model-stop time when the model emits no tool calls: on success the
+//     stop reason is promoted from StopModelDone to StopVerifiedDone; on
+//     failure the feedback is injected into a.Messages before returning.
 //
 // When Cmd is empty, the hook is disabled and always reports pass.
 type VerifyHook struct {

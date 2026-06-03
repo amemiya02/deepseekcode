@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -82,5 +83,65 @@ func TestRun_Output(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCheckKeyPresent_Missing(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Providers = map[string]config.ProviderConfigTOML{}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckKeyPresent(context.Background(), cfg, nil)
+	if r.OK {
+		t.Fatal("expected FAIL for missing key")
+	}
+}
+
+func TestCheckKeyPresent_Present(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Providers = map[string]config.ProviderConfigTOML{
+		"deepseek": {Type: "deepseek", APIKey: "sk-present"},
+	}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckKeyPresent(context.Background(), cfg, nil)
+	if !r.OK {
+		t.Fatalf("expected PASS, got: %s", r.Detail)
+	}
+}
+
+func TestCheckKeyValid_ValidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"content":"hi"}}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{}
+	cfg.API.BaseURL = srv.URL
+	cfg.Providers = map[string]config.ProviderConfigTOML{
+		"deepseek": {Type: "deepseek", BaseURL: srv.URL, APIKey: "sk-test"},
+	}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckKeyValid(context.Background(), cfg, srv.Client())
+	if !r.OK {
+		t.Fatalf("expected PASS, got: %s", r.Detail)
+	}
+}
+
+func TestCheckKeyValid_InvalidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"Invalid API key"}}`))
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{}
+	cfg.API.BaseURL = srv.URL
+	cfg.Providers = map[string]config.ProviderConfigTOML{
+		"deepseek": {Type: "deepseek", BaseURL: srv.URL, APIKey: "sk-bad"},
+	}
+	cfg.Active.Provider = "deepseek"
+	r := doctor.CheckKeyValid(context.Background(), cfg, srv.Client())
+	if r.OK {
+		t.Fatal("expected FAIL for invalid key")
 	}
 }

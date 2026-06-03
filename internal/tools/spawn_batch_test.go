@@ -110,4 +110,7 @@ func TestSpawnBatchMissingDescription(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("outer error unexpected: %s", res.Content)
 	}
+	if !strings.Contains(res.Content, "[error: description is required]") {
+		t.Errorf("expected per-task error in output, got: %s", res.Content)
+	}
 }

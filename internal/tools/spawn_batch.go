@@ -73,7 +73,6 @@ type batchTaskSpec struct {
 }
 
 type batchResult struct {
-	idx     int
 	summary string
 }
 
@@ -103,13 +102,18 @@ func (t *SpawnBatchTool) Execute(ctx context.Context, args json.RawMessage) (Res
 
 	for i, task := range p.Tasks {
 		if task.Description == "" {
-			results[i] = batchResult{idx: i, summary: "[error: description is required]"}
+			results[i] = batchResult{summary: "[error: description is required]"}
 			continue
 		}
 		wg.Add(1)
 		go func(idx int, req batchTaskSpec) {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				results[idx] = batchResult{summary: fmt.Sprintf("[error: %v]", ctx.Err())}
+				return
+			}
 			defer func() { <-sem }()
 			res, err := t.s.Spawn(ctx, SpawnRequest{
 				Agent:       req.Agent,
@@ -117,14 +121,14 @@ func (t *SpawnBatchTool) Execute(ctx context.Context, args json.RawMessage) (Res
 				Tools:       req.Tools,
 			})
 			if err != nil {
-				results[idx] = batchResult{idx: idx, summary: fmt.Sprintf("[error: %v]", err)}
+				results[idx] = batchResult{summary: fmt.Sprintf("[error: %v]", err)}
 				return
 			}
 			sum := res.Summary
 			if sum == "" {
 				sum = "(no summary)"
 			}
-			results[idx] = batchResult{idx: idx, summary: sum}
+			results[idx] = batchResult{summary: sum}
 		}(i, task)
 	}
 	wg.Wait()

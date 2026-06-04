@@ -136,3 +136,9 @@ button { font-family: inherit; }
 .composer__btn--send { background: var(--accent); color: var(--text-on-accent); }
 .composer__btn--send:disabled { opacity: 0.5; cursor: default; }
 .composer__btn--stop { background: var(--danger); color: var(--text-on-accent); }
+
+/* AttachmentDrop */
+.attach { position: relative; }
+.attach--over { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+.attach__btn { background: none; border: none; color: var(--text-2); cursor: pointer; display: inline-flex; padding: 2px; }
+.attach__btn:hover { color: var(--text); }

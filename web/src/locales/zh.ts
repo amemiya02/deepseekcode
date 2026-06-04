@@ -85,4 +85,6 @@ export const zhCN: Record<string, string> = {
   'settings.extensionsEmpty': '尚未配置任何内容。',
   'settings.enabled': '已启用',
   'settings.disabled': '已禁用',
+  'settings.doctorRun': '重新运行',
+  'settings.doctorRunning': '正在运行诊断…',
 }

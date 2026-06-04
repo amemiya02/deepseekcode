@@ -87,4 +87,6 @@ export const en: Record<string, string> = {
   'settings.extensionsEmpty': 'Nothing configured yet.',
   'settings.enabled': 'enabled',
   'settings.disabled': 'disabled',
+  'settings.doctorRun': 'Run again',
+  'settings.doctorRunning': 'Running diagnostics…',
 }

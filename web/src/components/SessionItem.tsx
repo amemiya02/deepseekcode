@@ -51,7 +51,7 @@ export function SessionItem({
   if (renaming) {
     return (
       <div
-        className={`${styles.item} ${active ? styles.active : ''} ${styles.renaming}`}
+        className={`${styles.item} ${active ? styles.active : ''} ${styles.renaming} session-item`}
         data-testid="session-item"
         aria-current={active ? 'true' : undefined}
       >
@@ -92,7 +92,7 @@ export function SessionItem({
   return (
     <button
       type="button"
-      className={`${styles.item} ${active ? styles.active : ''}`}
+      className={`${styles.item} ${active ? styles.active : ''} session-item`}
       data-testid="session-item"
       aria-current={active ? 'true' : undefined}
       onClick={() => onSelect?.(session.id)}

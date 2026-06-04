@@ -23,7 +23,7 @@ export function TitleBar({ branch = 'main', onOpenPalette }: TitleBarProps) {
   }
 
   return (
-    <header className={styles.titlebar}>
+    <header className={`${styles.titlebar} titlebar`}>
       <div className={styles.titlebarLeft}>
         <Logo size={20} className={styles.titlebarLogo} />
         <span className={styles.appName}>DeepSeekCode</span>

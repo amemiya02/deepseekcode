@@ -98,7 +98,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       data-workspace-collapsed={workspaceCollapsed}
       style={gridStyle}
     >
-      <aside className={`${styles.zone} ${styles.zoneSessions}`}>{!sessionsCollapsed && sessions}</aside>
+      <aside className={`${styles.zone} ${styles.zoneSessions} shell-rail`}>{!sessionsCollapsed && sessions}</aside>
 
       <div
         className={styles.splitter}
@@ -108,7 +108,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
         onMouseDown={(e) => onDown('left', e)}
       />
 
-      <main className={`${styles.zone} ${styles.zoneConversation}`}>
+      <main className={`${styles.zone} ${styles.zoneConversation} shell-main`}>
         <button
           className={`${styles.collapseTab} ${styles.collapseTabLeft}`}
           data-testid="collapse-sessions"
@@ -136,7 +136,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
         onMouseDown={(e) => onDown('right', e)}
       />
 
-      <aside className={`${styles.zone} ${styles.zoneWorkspace}`}>{!workspaceCollapsed && workspace}</aside>
+      <aside className={`${styles.zone} ${styles.zoneWorkspace} shell-panel`}>{!workspaceCollapsed && workspace}</aside>
     </div>
   )
 }

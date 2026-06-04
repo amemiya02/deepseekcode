@@ -39,7 +39,7 @@ export function StatusBar({
   retryMax?: number
 }) {
   return (
-    <footer className={styles.statusBar} role="status">
+    <footer className={`${styles.statusBar} status-bar`} role="status">
       <span className={styles.dot} data-testid="status-dot" data-status={status} aria-label={t(`status.${status}`, status)} />
 
       <span className={`${styles.seg} ${styles.model}`} title={t('status.model', 'Model')}>{model}</span>

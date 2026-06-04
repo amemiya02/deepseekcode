@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SessionItem } from './SessionItem'
-import type { Session } from '../lib/api'
+import { listSessions, type Session } from '../lib/api'
 
 const base: Session = { id: 's1', title: 'Fix login bug', turns: 3, updated_at: 0, created_at: 0 }
 
@@ -37,5 +37,24 @@ describe('SessionItem', () => {
     await userEvent.click(screen.getByTestId('session-delete'))
     expect(onDelete).toHaveBeenCalledWith('s1')
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  // Contract regression: run the EXACT JSON the Go gateway emits for GET /v1/sessions
+  // (see internal/gateway/sessions.go) through the real listSessions() parser into the
+  // real component. A field mismatch (backend `turn_count` vs frontend `turns`) used to
+  // render the literal placeholder "{n} turns" — this guards the cross-stack contract.
+  it('renders the live gateway wire shape: turns is interpolated, never "{n}"', async () => {
+    const wire = {
+      sessions: [{ id: 'sess-1', title: 'sess-1', turns: 0, created_at: 1780565710666, updated_at: 1780565710666 }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => wire }) as unknown as Response))
+    try {
+      const sessions = await listSessions()
+      render(<SessionItem session={sessions[0]} active={false} />)
+      expect(screen.getByText('0 turns')).toBeInTheDocument()
+      expect(screen.queryByText(/\{n\}/)).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

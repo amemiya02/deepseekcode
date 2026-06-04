@@ -17,8 +17,9 @@ import (
 type sessionMeta struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
-	CreatedAt string `json:"created_at"`
-	TurnCount int    `json:"turn_count"`
+	Turns     int    `json:"turns"`
+	CreatedAt int64  `json:"created_at"` // epoch ms — matches the SPA Session contract
+	UpdatedAt int64  `json:"updated_at"` // epoch ms
 }
 
 // sessionStore is an in-memory metadata store keyed by session id. It is
@@ -80,7 +81,7 @@ func (s *sessionStore) list() []sessionMeta {
 		out = append(out, *m)
 	}
 	s.mu.Unlock()
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt > out[j].UpdatedAt })
 	return out
 }
 
@@ -99,7 +100,8 @@ func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "create session: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		m := &sessionMeta{ID: id, Title: body.Title, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		now := time.Now().UnixMilli()
+		m := &sessionMeta{ID: id, Title: body.Title, CreatedAt: now, UpdatedAt: now}
 		if m.Title == "" {
 			m.Title = id
 		}
@@ -139,8 +141,8 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{
-			"id": m.ID, "title": m.Title, "created_at": m.CreatedAt,
-			"turn_count": m.TurnCount, "messages": []any{},
+			"id": m.ID, "title": m.Title, "turns": m.Turns,
+			"created_at": m.CreatedAt, "updated_at": m.UpdatedAt, "messages": []any{},
 		})
 	case http.MethodPatch:
 		var body struct {
@@ -154,6 +156,7 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			if body.Title != "" {
 				m.Title = body.Title
 			}
+			m.UpdatedAt = time.Now().UnixMilli()
 		})
 		if !ok {
 			http.Error(w, "session not found", http.StatusNotFound)

@@ -24,5 +24,7 @@ export default defineConfig({
     },
     globals: true,
     setupFiles: ['./vitest-setup.ts'],
+    // Exclude Playwright e2e specs — those run via `npx playwright test`, not vitest.
+    exclude: ['**/node_modules/**', '**/e2e/**'],
   },
 })

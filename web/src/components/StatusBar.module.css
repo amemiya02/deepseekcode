@@ -1,0 +1,22 @@
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-3);
+  height: 28px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font: var(--type-label);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+.dot[data-status='idle'] { background: var(--text-3); }
+.dot[data-status='streaming'] { background: var(--accent); }
+.dot[data-status='waiting'] { background: var(--warning); }
+.dot[data-status='error'] { background: var(--danger); }
+.seg { display: inline-flex; align-items: center; gap: var(--s-1); white-space: nowrap; }
+.model { color: var(--text); }
+.cache { color: var(--success); }
+.warn { color: var(--danger); }
+.retry { color: var(--warning); }
+.spacer { flex: 1; }

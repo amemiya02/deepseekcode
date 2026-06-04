@@ -7,7 +7,7 @@ interface SessionState {
   loading: boolean
   error: string
   load: () => Promise<void>
-  create: (workingDir: string) => Promise<void>
+  create: (workingDir: string) => Promise<Session>
   rename: (id: string, title: string) => Promise<void>
   remove: (id: string) => Promise<void>
   setActive: (id: string) => void
@@ -35,6 +35,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   async create(workingDir) {
     const s = await createSession(workingDir)
     set({ sessions: [s, ...get().sessions], activeId: s.id })
+    return s
   },
 
   async rename(id, title) {

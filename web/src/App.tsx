@@ -202,13 +202,16 @@ function AppInner() {
   }, [setActiveSession])
 
   const onNewSession = useCallback(async () => {
-    await createSession('')
-    // create() sets activeId to the new session; mirror it into turn state and
-    // clear the transcript for a fresh conversation.
-    const newId = useSessionStore.getState().activeId
-    setSessionId(newId)
-    setItems([])
-    setPlanItems([])
+    // create() returns the new session; use its id directly (never reach back into
+    // the store, which would read a stale activeId if create() failed).
+    try {
+      const s = await createSession('')
+      setSessionId(s.id)
+      setItems([])
+      setPlanItems([])
+    } catch {
+      // create failed; sessionStore records the error. Leave turn state unchanged.
+    }
   }, [createSession])
 
   const onDeleteSession = useCallback(

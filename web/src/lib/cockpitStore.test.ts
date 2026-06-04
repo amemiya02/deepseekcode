@@ -58,4 +58,21 @@ describe('cockpitStore', () => {
     useCockpitStore.getState().connect('s2')
     expect(useCockpitStore.getState().routing).toHaveLength(0)
   })
+
+  it('refcounts the shared stream: opens once for two subscribers, closes on the last disconnect', () => {
+    const openCalls = () =>
+      (api.GatewayClient.prototype.openEventStream as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    const closeCalls = () =>
+      (api.GatewayClient.prototype.close as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    // Two consumers (the Cockpit panel + the always-mounted hero StatusBar) subscribe to one session.
+    useCockpitStore.getState().connect('s1')
+    useCockpitStore.getState().connect('s1')
+    expect(openCalls()).toBe(1) // opened once, not once per consumer
+    // One consumer unmounts (e.g. the workspace tab switches off the Cockpit): stream stays open.
+    useCockpitStore.getState().disconnect()
+    expect(closeCalls()).toBe(0)
+    // The last consumer unmounts: now the shared stream closes.
+    useCockpitStore.getState().disconnect()
+    expect(closeCalls()).toBe(1)
+  })
 })

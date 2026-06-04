@@ -135,28 +135,27 @@ export function Composer({
       {menuMode === 'at' && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
       <ContextPills items={pills} onRemove={(id) => setPills((prev) => prev.filter((p) => p.id !== id))} />
       <AttachmentDrop onAttach={(f) => setFiles((prev) => [...prev, ...f])}>
-        <div className="composer">
-          <textarea
-            ref={taRef}
-            data-testid="composer-input"
-            className="composer__input"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={t('composer.placeholder', 'Ask, plan, or build…')}
-            rows={1}
-            disabled={disabled}
-          />
-          <SendStopButton
-            streaming={streaming}
-            disabled={disabled || (!text.trim() && pills.length === 0 && files.length === 0)}
-            onSend={submit}
-            onCancel={onCancel}
-          />
-        </div>
+        <textarea
+          ref={taRef}
+          data-testid="composer-input"
+          className="composer__input"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={t('composer.placeholder', 'Ask, plan, or build…')}
+          rows={1}
+          disabled={disabled}
+        />
       </AttachmentDrop>
-      <div className="composer-meta">
+      {/* Action row: mode toggle inline on the left, send/stop on the right. */}
+      <div className="composer-actions">
         <AutonomyToggle mode={mode} onChange={onModeChange} />
+        <SendStopButton
+          streaming={streaming}
+          disabled={disabled || (!text.trim() && pills.length === 0 && files.length === 0)}
+          onSend={submit}
+          onCancel={onCancel}
+        />
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { IconGitBranch, IconCommand, IconSun, IconMoon, IconPalette } from '../../lib/icons'
+import { IconGitBranch, IconSun, IconMoon, IconPalette, IconSettings } from '../../lib/icons'
 import { useT } from '../../lib/i18n'
 import { useThemeStore, setThemeSettings } from '../../lib/theme/store'
 import { THEMES } from '../../lib/theme/tokens'
@@ -7,10 +7,12 @@ import styles from './index.module.css'
 
 export interface TitleBarProps {
   branch?: string
+  /** Kept so callers can still wire the Cmd+K palette; no titlebar pill renders it. */
   onOpenPalette?: () => void
+  onOpenSettings?: () => void
 }
 
-export function TitleBar({ branch = 'main', onOpenPalette }: TitleBarProps) {
+export function TitleBar({ branch = 'main', onOpenSettings }: TitleBarProps) {
   const t = useT()
   const settings = useThemeStore((s) => s.settings)
   const isDark = settings.mode === 'dark'
@@ -33,13 +35,16 @@ export function TitleBar({ branch = 'main', onOpenPalette }: TitleBarProps) {
         </span>
       </div>
 
-      <button className={styles.paletteTrigger} data-testid="open-palette" onClick={() => onOpenPalette?.()}>
-        <IconCommand size={14} />
-        <span>{t('app.openPalette')}</span>
-        <kbd>⌘K</kbd>
-      </button>
-
       <div className={styles.titlebarRight}>
+        <button
+          className={styles.iconBtn}
+          data-testid="open-settings"
+          aria-label={t('settings.title', 'Settings')}
+          title={t('settings.title', 'Settings')}
+          onClick={() => onOpenSettings?.()}
+        >
+          <IconSettings size={16} />
+        </button>
         <button className={styles.iconBtn} aria-label={t('titlebar.theme')} onClick={cycleTheme} data-testid="cycle-theme">
           <IconPalette size={16} />
         </button>

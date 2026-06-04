@@ -24,12 +24,17 @@ describe('TitleBar', () => {
     expect(screen.getByText('feat/x')).toBeInTheDocument()
   })
 
-  it('fires onOpenPalette when the palette trigger is clicked', async () => {
+  it('no longer renders the command-palette pill (Cmd+K replaces it)', () => {
+    renderTitleBar()
+    expect(screen.queryByTestId('open-palette')).toBeNull()
+  })
+
+  it('fires onOpenSettings when the settings gear is clicked', async () => {
     const user = userEvent.setup()
-    const onOpenPalette = vi.fn()
-    renderTitleBar({ onOpenPalette })
-    await user.click(screen.getByTestId('open-palette'))
-    expect(onOpenPalette).toHaveBeenCalledOnce()
+    const onOpenSettings = vi.fn()
+    renderTitleBar({ onOpenSettings })
+    await user.click(screen.getByTestId('open-settings'))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
   })
 
   it('toggles light/dark mode via the mode button', async () => {

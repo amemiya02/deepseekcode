@@ -183,3 +183,8 @@
   cursor: pointer;
   font: var(--type-ui);
 }
+
+/* App composition */
+.appRoot { display: flex; flex-direction: column; height: 100%; }
+.appBody { flex: 1; min-height: 0; }
+.zonePad { padding: var(--s-4); color: var(--text-3); font: var(--type-label); text-transform: uppercase; }

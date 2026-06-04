@@ -20,7 +20,28 @@ const (
 	EventKindTextDelta EventKind = iota
 	EventKindInfo
 	EventKindDone
+	EventKindPermission // a tool call awaits user approval (carries Respond)
+	EventKindAsk        // the agent asks the user question(s) (carries Answer)
+	EventKindToolStart  // a tool call started executing
+	EventKindToolEnd    // a tool call finished executing
 )
+
+// PermissionDecision is the user's answer to a permission request, mirroring
+// the SPA's 4-tier choice. Only Allow* decisions permit the tool call; the acp
+// layer maps every Allow* to agent.PermissionResponse{Allow:true} (the agent
+// has no session/always concept — persistence of "session"/"always" is the
+// gateway/UI's concern, layered on later waves).
+type PermissionDecision int
+
+const (
+	PermissionDeny PermissionDecision = iota
+	PermissionAllowOnce
+	PermissionAllowSession
+	PermissionAllowAlways
+)
+
+// Allowed reports whether the decision lets the tool call proceed.
+func (d PermissionDecision) Allowed() bool { return d != PermissionDeny }
 
 // AgentEvent is the unified event from an AgentRunner.
 type AgentEvent struct {
@@ -28,6 +49,39 @@ type AgentEvent struct {
 	Text       string // for TextDelta and Info
 	StopReason string // for Done
 	Err        error  // for Done
+
+	// Permission (EventKindPermission): the tool call awaiting approval and the
+	// closure that delivers the user's decision back to the parked agent.
+	PermID   string
+	ToolName string
+	ToolArgs string
+	Respond  func(PermissionDecision)
+
+	// Ask (EventKindAsk): the questions and the closure that delivers the
+	// per-question selected labels back to the parked agent.
+	AskID     string
+	Questions []AskQuestion
+	Answer    func(answers [][]string)
+
+	// Tool (EventKindToolStart / EventKindToolEnd): structured tool-call info.
+	ToolCallID string
+	ToolResult string
+	ToolIsErr  bool
+}
+
+// AskQuestion is a UI-facing copy of one tools.Question, decoupled from the
+// tools package so the gateway can serialize it without importing tools.
+type AskQuestion struct {
+	Question string      `json:"question"`
+	Header   string      `json:"header"`
+	Multiple bool        `json:"multiple"`
+	Options  []AskOption `json:"options"`
+}
+
+// AskOption is one selectable answer.
+type AskOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 // AgentRunner is the interface the acp layer uses to drive an agent.

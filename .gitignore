@@ -48,9 +48,7 @@ web/package-lock.json
 webapp/dist/
 
 # Desktop build artifacts (compiled binaries, app bundles, generated JS bindings)
-desktop/build/bin/
-desktop/build/appicon.png
-desktop/build/darwin/Info.plist
+desktop/build/
 desktop/frontend/wailsjs/
 
 # Competitive / strategic analysis docs (session-generated; not tracked source)
@@ -59,3 +57,4 @@ desktop/frontend/wailsjs/
 docs/competitive/2026-06-03-coding-agent-ref-gap-analysis.md
 docs/competitive/2026-06-03-industrial-execution-plan.md
 docs/competitive/2026-06-03-reasonix-1.0-strategic-analysis.md
+.superpowers/

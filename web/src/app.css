@@ -121,3 +121,12 @@ button { font-family: inherit; }
 .autonomy--auto-edit .autonomy__dot { background: var(--info); }
 .autonomy--plan .autonomy__dot { background: var(--accent); }
 .autonomy--yolo .autonomy__dot { background: var(--danger); }
+
+/* ModelSwitcher / EffortSwitcher (shared .modelsw) */
+.modelsw { position: relative; display: inline-flex; }
+.modelsw__trigger { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--text-2); font: var(--type-label); cursor: pointer; padding: 2px 4px; }
+.modelsw__backdrop { position: fixed; inset: 0; z-index: 10; }
+.modelsw__menu { position: absolute; bottom: 100%; left: 0; z-index: 11; min-width: 160px; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); padding: 4px; }
+.modelsw__item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); padding: 4px var(--s-2); border-radius: var(--r-sm); }
+.modelsw__item--current { color: var(--accent); }
+.modelsw__empty { color: var(--text-3); font: var(--type-label); padding: 4px var(--s-2); }

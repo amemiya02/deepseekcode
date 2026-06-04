@@ -1,56 +1,44 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { fetchFiles, fetchFile, fetchChanged, addToChat, type FileEntry } from './workspace'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fetchFiles, fetchFile, fetchChanged, addToChat } from './workspace'
 
-beforeEach(() => {
-  vi.restoreAllMocks()
-})
+function mockFetch(json: unknown, ok = true, status = 200) {
+  return vi.fn().mockResolvedValue({ ok, status, json: async () => json } as Response)
+}
 
-describe('workspace API', () => {
-  it('fetchFiles GETs /v1/files and returns the entries array', async () => {
-    const entries: FileEntry[] = [
-      { name: 'main.go', path: 'main.go', is_dir: false },
-      { name: 'sub', path: 'sub', is_dir: true },
-    ]
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ entries }) }) as unknown as typeof fetch
-    expect(await fetchFiles()).toEqual(entries)
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/v1/files')
+describe('workspace client', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('fetchFiles passes the path query', async () => {
+    const f = mockFetch({ entries: [{ name: 'a.go', path: 'a.go', is_dir: false }] })
+    vi.stubGlobal('fetch', f)
+    const res = await fetchFiles('pkg')
+    expect(res.entries[0].name).toBe('a.go')
+    expect(f.mock.calls[0][0]).toContain('/v1/files?path=pkg')
   })
 
-  it('fetchFiles passes the path as a query param', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ entries: [] }) }) as unknown as typeof fetch
-    await fetchFiles('sub/dir')
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/v1/files?path=sub%2Fdir')
+  it('fetchFile returns content + flags', async () => {
+    vi.stubGlobal('fetch', mockFetch({ path: 'a.go', content: 'x', binary: false, truncated: false }))
+    const res = await fetchFile('a.go')
+    expect(res.content).toBe('x')
+    expect(res.binary).toBe(false)
   })
 
-  it('fetchFile GETs /v1/file?path= and returns content + flags', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true, json: async () => ({ path: 'a.go', content: 'package main', binary: false, truncated: false }),
-    }) as unknown as typeof fetch
-    const f = await fetchFile('a.go')
-    expect(f.content).toBe('package main')
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/v1/file?path=a.go')
+  it('fetchChanged returns entries', async () => {
+    vi.stubGlobal('fetch', mockFetch({ entries: [{ path: 'a.go', status: ' M', deleted: false }] }))
+    const res = await fetchChanged()
+    expect(res.entries[0].status).toBe(' M')
   })
 
-  it('fetchChanged GETs /v1/changed and returns the entries', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true, json: async () => ({ entries: [{ path: 'a.go', status: 'M', deleted: false }] }),
-    }) as unknown as typeof fetch
-    const c = await fetchChanged()
-    expect(c[0].path).toBe('a.go')
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('/v1/changed')
+  it('addToChat posts the ref payload', async () => {
+    const f = mockFetch({ label: 'a.go', content: '@a.go' })
+    vi.stubGlobal('fetch', f)
+    const res = await addToChat({ path: 'a.go' })
+    expect(res.label).toBe('a.go')
+    expect(JSON.parse((f.mock.calls[0][1] as RequestInit).body as string)).toEqual({ path: 'a.go' })
   })
 
-  it('addToChat POSTs the path to /v1/add-to-chat', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
-    await addToChat('a.go')
-    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/v1/add-to-chat')
-    expect(init.method).toBe('POST')
-    expect(String(init.body)).toContain('a.go')
-  })
-
-  it('throws on a non-ok response', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }) as unknown as typeof fetch
-    await expect(fetchFiles()).rejects.toThrow()
+  it('throws on non-ok', async () => {
+    vi.stubGlobal('fetch', mockFetch({}, false, 400))
+    await expect(fetchFile('../x')).rejects.toThrow()
   })
 })

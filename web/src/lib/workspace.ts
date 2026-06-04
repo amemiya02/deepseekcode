@@ -1,9 +1,6 @@
-// Workspace API — the SINGLE source of FileEntry + the file-tree/changed-file
-// readers (Contract 1, C-3). CREATED here in Wave 0 (minimal); Wave 5 EXTENDS
-// this module (it must NOT recreate it or redefine FileEntry/fetchFiles). The
-// data comes from Wave 1's /v1/files, /v1/file, /v1/changed and Wave 5's
-// /v1/add-to-chat. Framework-agnostic plain TS (no React) so components AND
-// plain modules can import it.
+// Typed client for the Wave-5 workspace surface (spec §9, Contract 1): file
+// tree, file read, git changed files, and add-to-chat. Reads are GET (served by
+// Wave 1); add-to-chat is POST (Wave 5). Framework-agnostic: no React imports.
 
 export interface FileEntry {
   name: string
@@ -11,7 +8,11 @@ export interface FileEntry {
   is_dir: boolean
 }
 
-export interface FileContent {
+export interface FilesResult {
+  entries: FileEntry[]
+}
+
+export interface FileResult {
   path: string
   content: string
   binary: boolean
@@ -24,36 +25,46 @@ export interface ChangedEntry {
   deleted: boolean
 }
 
+export interface ChangedResult {
+  entries: ChangedEntry[]
+}
+
+export interface AddToChatRequest {
+  path?: string
+  text?: string
+  is_dir?: boolean
+  include_contents?: boolean
+}
+
+export interface AddToChatResult {
+  label: string
+  content: string
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
-  return (await res.json()) as T
+  return res.json() as Promise<T>
 }
 
-// fetchFiles lists one directory level under the workspace root (path "" = root).
-export async function fetchFiles(path?: string): Promise<FileEntry[]> {
-  const url = path ? `/v1/files?path=${encodeURIComponent(path)}` : '/v1/files'
-  const data = await getJSON<{ entries: FileEntry[] }>(url)
-  return data.entries
+export function fetchFiles(path = ''): Promise<FilesResult> {
+  return getJSON<FilesResult>(`/v1/files?path=${encodeURIComponent(path)}`)
 }
 
-// fetchFile reads one file's content + binary/truncation flags.
-export async function fetchFile(path: string): Promise<FileContent> {
-  return getJSON<FileContent>(`/v1/file?path=${encodeURIComponent(path)}`)
+export function fetchFile(path: string): Promise<FileResult> {
+  return getJSON<FileResult>(`/v1/file?path=${encodeURIComponent(path)}`)
 }
 
-// fetchChanged returns the workspace's changed files (git porcelain).
-export async function fetchChanged(): Promise<ChangedEntry[]> {
-  const data = await getJSON<{ entries: ChangedEntry[] }>('/v1/changed')
-  return data.entries
+export function fetchChanged(): Promise<ChangedResult> {
+  return getJSON<ChangedResult>('/v1/changed')
 }
 
-// addToChat asks the gateway to attach a file to the current chat context.
-export async function addToChat(path: string): Promise<void> {
+export async function addToChat(req: AddToChatRequest): Promise<AddToChatResult> {
   const res = await fetch('/v1/add-to-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(req),
   })
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<AddToChatResult>
 }

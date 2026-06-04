@@ -1,0 +1,39 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface);
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+}
+.tabActive {
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+.body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 0;
+}
+.list {
+  border-right: 1px solid var(--border);
+  overflow: auto;
+}
+.viewer {
+  min-width: 0;
+  overflow: hidden;
+}

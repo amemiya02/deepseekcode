@@ -130,3 +130,9 @@ button { font-family: inherit; }
 .modelsw__item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); padding: 4px var(--s-2); border-radius: var(--r-sm); }
 .modelsw__item--current { color: var(--accent); }
 .modelsw__empty { color: var(--text-3); font: var(--type-label); padding: 4px var(--s-2); }
+
+/* SendStopButton */
+.composer__btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--border); cursor: pointer; }
+.composer__btn--send { background: var(--accent); color: var(--text-on-accent); }
+.composer__btn--send:disabled { opacity: 0.5; cursor: default; }
+.composer__btn--stop { background: var(--danger); color: var(--text-on-accent); }

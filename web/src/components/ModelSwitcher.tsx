@@ -7,7 +7,15 @@ import { Check, ChevronsUpDown } from 'lucide-react'
 import { fetchModels, type ModelInfo } from '../lib/api'
 import { useT } from '../lib/i18n'
 
-export function ModelSwitcher({ label, onPick }: { label: string; onPick: (id: string) => void }) {
+export function ModelSwitcher({
+  label,
+  activeId,
+  onPick,
+}: {
+  label: string
+  activeId?: string
+  onPick: (id: string) => void
+}) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -29,18 +37,23 @@ export function ModelSwitcher({ label, onPick }: { label: string; onPick: (id: s
           <div className="modelsw__backdrop" onClick={() => setOpen(false)} />
           <div className="modelsw__menu" role="listbox">
             {models.length === 0 && <div className="modelsw__empty">{t('status.noModels', 'No models')}</div>}
-            {models.map((m) => (
-              <button
-                key={m.id}
-                role="option"
-                aria-selected={m.label === label}
-                className={`modelsw__item ${m.label === label ? 'modelsw__item--current' : ''}`}
-                onClick={() => pick(m.id)}
-              >
-                <span className="modelsw__model">{m.label}</span>
-                {m.label === label && <Check size={13} className="modelsw__check" />}
-              </button>
-            ))}
+            {models.map((m) => {
+              const isCurrent = m.id === activeId
+              return (
+                <div
+                  key={m.id}
+                  role="option"
+                  tabIndex={0}
+                  aria-selected={isCurrent}
+                  className={`modelsw__item${isCurrent ? ' modelsw__item--current' : ''}`}
+                  onClick={() => pick(m.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(m.id) } }}
+                >
+                  <span className="modelsw__model">{m.label}</span>
+                  {isCurrent && <Check size={13} className="modelsw__check" />}
+                </div>
+              )
+            })}
           </div>
         </>
       )}

@@ -151,25 +151,11 @@ describe('App workspace zone (Wave 5)', () => {
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
     // The workspace zone is now tabbed (Cockpit ‖ Workspace); select the
-    // Workspace tab to mount the WorkspacePanel.
+    // Workspace tab to mount the WorkspacePanel. WorkspacePanel now shows only
+    // the Changed view (the Files tab was removed — /v1/files 400s without a
+    // workspace root under `dsc serve`).
     fireEvent.click(within(zone).getByTestId('ws-tab-workspace'))
-    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
-  })
-
-  it('add-to-chat appends content to the composer draft (Contract 4)', async () => {
-    render(<App />)
-    // WorkspacePanel exposes an add-to-chat button per file; simulate it by
-    // finding the first such button after the panel mounts.
-    const zone = screen.getByTestId('zone-workspace')
-    fireEvent.click(within(zone).getByTestId('ws-tab-workspace'))
-    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
-    // Locate the add-to-chat button rendered by FileTree for the mock file.
-    // FileTree renders data-testid={`add-${entry.name}`}.
-    const addBtn = await screen.findByTestId('add-main.go')
-    fireEvent.click(addBtn)
-    // The composer input should now contain the appended content.
-    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
-    await waitFor(() => expect(input.value).toContain('main.go'))
+    await waitFor(() => expect(zone.querySelector('[data-testid="tab-changed"]')).not.toBeNull())
   })
 })
 
@@ -241,12 +227,12 @@ describe('App — full shell integration (Wave 0)', () => {
     expect(within(zone).getByTestId('ws-tab-workspace')).toBeInTheDocument()
   })
 
-  it('switches the workspace zone to the Workspace (files) tab', async () => {
+  it('switches the workspace zone to the Workspace (changed) tab', async () => {
     const user = userEvent.setup()
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
     await user.click(within(zone).getByTestId('ws-tab-workspace'))
-    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
+    await waitFor(() => expect(zone.querySelector('[data-testid="tab-changed"]')).not.toBeNull())
   })
 
   it('opens the SettingsWindow via the titlebar gear button', async () => {

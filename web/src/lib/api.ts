@@ -194,10 +194,16 @@ export async function setEffort(sessionId: string, effort: string): Promise<void
 export async function setOutputStyle(sessionId: string, style: string): Promise<void> {
   await postJSON('/v1/output-style', { session_id: sessionId, style })
 }
+// GET /v1/models returns {active, effort, models: string[]} (internal/gateway/
+// models.go). Map the bare id list into ModelInfo[] the picker expects. We also
+// tolerate a server that already returns ModelInfo[] (array) for forward-compat.
 export async function fetchModels(): Promise<ModelInfo[]> {
   const res = await fetch('/v1/models')
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
-  return (await res.json()) as ModelInfo[]
+  const data = (await res.json()) as unknown
+  if (Array.isArray(data)) return data as ModelInfo[]
+  const ids = (data as { models?: string[] }).models ?? []
+  return ids.map((id) => ({ id, label: id }))
 }
 
 export class GatewayClient {

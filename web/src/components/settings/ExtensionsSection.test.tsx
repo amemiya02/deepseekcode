@@ -41,4 +41,21 @@ describe('ExtensionsSection', () => {
       expect(screen.getByText('PreToolUse')).toBeInTheDocument()
     })
   })
+
+  it('renders the empty state (never an error banner) on a non-200 response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('not found', { status: 404 }),
+    )
+    render(<ExtensionsSection />)
+    await waitFor(() => expect(screen.getByText('Nothing configured yet.')).toBeInTheDocument())
+    // No error banner: StateView error uses role="alert".
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('degrades to the empty state when fetch rejects (never an error banner)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'))
+    render(<ExtensionsSection />)
+    await waitFor(() => expect(screen.getByText('Nothing configured yet.')).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 })

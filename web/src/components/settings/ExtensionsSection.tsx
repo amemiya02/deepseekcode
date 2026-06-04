@@ -23,20 +23,29 @@ export function ExtensionsSection() {
   const [active, setActive] = useState<TabId>('mcp')
   const [items, setItems] = useState<ExtItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
+  // Read-only enumeration of the real subsystems via /v1/{mcp,skills,hooks,memory}
+  // (internal/gateway/extensions.go), each returning 200 {"items":[{id,name,enabled}]}.
+  // These endpoints never 404 and return 200 {"items":[]} when nothing is
+  // configured — so an unreachable/empty subsystem falls through to the honest
+  // "Nothing configured yet." empty state instead of an error banner.
   async function loadTab(id: TabId) {
     const tab = TABS.find((x) => x.id === id)!
     setLoading(true)
-    setError('')
     setItems([])
     try {
       const res = await fetch(tab.path, { headers: { Accept: 'application/json' } })
-      if (!res.ok) throw new Error(`gateway error ${res.status}`)
+      if (!res.ok) {
+        // Defensive: a non-200 (e.g. a stale gateway without the route) is
+        // rendered as the empty state, not a low-level error banner.
+        setItems([])
+        return
+      }
       const body = await res.json()
       setItems((body.items ?? []) as ExtItem[])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+    } catch {
+      // Network/parse failures degrade to the empty state — never an error.
+      setItems([])
     } finally {
       setLoading(false)
     }
@@ -66,8 +75,6 @@ export function ExtensionsSection() {
 
       {loading ? (
         <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
-      ) : error ? (
-        <StateView kind="error" message={error} onRetry={() => void loadTab(active)} />
       ) : items.length === 0 ? (
         <StateView kind="empty" title={t('settings.extensionsEmpty', 'Nothing configured yet.')} />
       ) : (

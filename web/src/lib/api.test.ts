@@ -264,7 +264,17 @@ describe('REST control helpers', () => {
     await setOutputStyle('s', 'concise')
     expect((global.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('/v1/output-style', expect.objectContaining({ method: 'POST' }))
   })
-  it('fetchModels returns the parsed list', async () => {
+  it('fetchModels maps the {active,effort,models:[]} payload to ModelInfo[]', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: 'deepseek-v4-flash', effort: 'max', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] }),
+    }) as unknown as typeof fetch
+    expect(await fetchModels()).toEqual([
+      { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
+      { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro' },
+    ])
+  })
+  it('fetchModels tolerates a bare ModelInfo[] response', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [{ id: 'a', label: 'A' }] }) as unknown as typeof fetch
     expect(await fetchModels()).toEqual([{ id: 'a', label: 'A' }])
   })

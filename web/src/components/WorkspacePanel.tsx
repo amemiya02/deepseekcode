@@ -1,22 +1,25 @@
 // Adapted from deepseek-reasonix (MIT) — components/WorkspacePanel.tsx
-// (Files/Changed tab shell + tree ‖ preview split). Simplified to consume our
-// HTTP workspace client and mount into the App workspace zone (Contract 4).
-import { useEffect, useState } from 'react'
-import { FileText, GitBranch } from 'lucide-react'
-import { FileTree } from './FileTree'
+// (Changed-files list ‖ preview split). Simplified to consume our HTTP workspace
+// client and mount into the App workspace zone (Contract 4). The Files tab was
+// removed: in `dsc serve` the gateway is built without a workspace root, so
+// /v1/files?path= returns 400 on every empty-path listing. The panel now shows
+// only the git Changed list (GET /v1/changed, which returns 200 even with no
+// root) and never calls /v1/files with an empty path.
+import { useState } from 'react'
+import { GitBranch } from 'lucide-react'
 import { ChangedFiles } from './ChangedFiles'
 import { CodeViewer } from './CodeViewer'
-import { fetchFiles, fetchFile, addToChat, type FileEntry } from '../lib/workspace'
+import { fetchFile } from '../lib/workspace'
 import { t } from '../lib/i18n'
 import styles from './WorkspacePanel.module.css'
-
-type Tab = 'files' | 'changed'
 
 export interface WorkspacePanelProps {
   // Bumped by the conversation after each turn so ChangedFiles re-fetches.
   refreshKey?: number
-  // Called with the formatted pill content when the user adds a file/folder to
-  // chat; App appends it to the composer.
+  // Retained for API compatibility with App.tsx (add-to-chat from the workspace
+  // surface). The Files tree that produced these pills was removed; ChangedFiles
+  // does not add to chat, so this is currently unused but kept to avoid churning
+  // the App wiring that a sibling phase owns.
   onAddToChat?: (content: string) => void
 }
 
@@ -29,28 +32,11 @@ interface OpenFile {
 
 const EMPTY_FILE: OpenFile = { path: '', content: '', binary: false, truncated: false }
 
-// WorkspacePanel is the tabbed Files/Changed drawer for the App workspace zone.
-// Files tab: a filtered FileTree over the root listing + a CodeViewer preview.
-// Changed tab: the git ChangedFiles list, also previewing into the CodeViewer.
-export function WorkspacePanel({ refreshKey = 0, onAddToChat }: WorkspacePanelProps) {
-  const [tab, setTab] = useState<Tab>('files')
-  const [entries, setEntries] = useState<FileEntry[]>([])
+// WorkspacePanel is the Changed-files drawer for the App workspace zone: the git
+// ChangedFiles list previewing into a CodeViewer. Clicking a changed row reads
+// that file via /v1/file (a concrete path, never empty) and previews it.
+export function WorkspacePanel({ refreshKey = 0 }: WorkspacePanelProps) {
   const [open, setOpen] = useState<OpenFile>(EMPTY_FILE)
-
-  // Load the root tree once on mount.
-  useEffect(() => {
-    let live = true
-    fetchFiles('')
-      .then((r) => {
-        if (live) setEntries(r.entries)
-      })
-      .catch(() => {
-        if (live) setEntries([])
-      })
-    return () => {
-      live = false
-    }
-  }, [])
 
   async function openPath(path: string) {
     try {
@@ -61,30 +47,14 @@ export function WorkspacePanel({ refreshKey = 0, onAddToChat }: WorkspacePanelPr
     }
   }
 
-  async function add(entry: FileEntry) {
-    const r = await addToChat({ path: entry.path, is_dir: entry.is_dir })
-    onAddToChat?.(r.content)
-  }
-
   return (
     <div className={styles.workspace}>
       <div className={styles.tabs} role="tablist">
         <button
           role="tab"
-          aria-selected={tab === 'files'}
-          className={`${styles.tab} ${tab === 'files' ? styles.tabActive : ''}`}
-          data-testid="tab-files"
-          onClick={() => setTab('files')}
-        >
-          <FileText size={13} aria-hidden />
-          {t('workspace.filesTab', 'Files')}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'changed'}
-          className={`${styles.tab} ${tab === 'changed' ? styles.tabActive : ''}`}
+          aria-selected={true}
+          className={`${styles.tab} ${styles.tabActive}`}
           data-testid="tab-changed"
-          onClick={() => setTab('changed')}
         >
           <GitBranch size={13} aria-hidden />
           {t('workspace.changedTab', 'Changed')}
@@ -93,11 +63,7 @@ export function WorkspacePanel({ refreshKey = 0, onAddToChat }: WorkspacePanelPr
 
       <div className={styles.body}>
         <div className={styles.list}>
-          {tab === 'files' ? (
-            <FileTree entries={entries} onOpen={openPath} onAddToChat={add} />
-          ) : (
-            <ChangedFiles refreshKey={refreshKey} onOpen={openPath} />
-          )}
+          <ChangedFiles refreshKey={refreshKey} onOpen={openPath} />
         </div>
         <div className={styles.viewer}>
           <CodeViewer

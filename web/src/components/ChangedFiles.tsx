@@ -56,7 +56,7 @@ export function ChangedFiles({ refreshKey = 0, onOpen }: ChangedFilesProps) {
       <ul className={styles.list}>
         {entries.map((entry) => (
           <li key={entry.path} className={styles.row}>
-            <span className={styles.status}>{entry.status.trim() || '·'}</span>
+            <span className={styles.status}>{(entry.status ?? '').trim() || '·'}</span>
             <button className={styles.path} onClick={() => onOpen?.(entry.path)}>
               {entry.path}
             </button>

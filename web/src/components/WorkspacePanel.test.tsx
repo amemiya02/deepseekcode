@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { WorkspacePanel } from './WorkspacePanel'
 
 function mockFetch(json: unknown) {
@@ -10,16 +9,22 @@ function mockFetch(json: unknown) {
 describe('WorkspacePanel', () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  it('shows the Files tab by default with tree entries', async () => {
-    vi.stubGlobal('fetch', mockFetch({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] }))
-    render(<WorkspacePanel />)
-    await waitFor(() => expect(screen.getByText('main.go')).toBeInTheDocument())
-  })
-
-  it('switches to the Changed tab', async () => {
+  it('shows the Changed tab by default with changed entries', async () => {
     vi.stubGlobal('fetch', mockFetch({ entries: [{ path: 'a.go', status: ' M', deleted: false }] }))
     render(<WorkspacePanel />)
-    await userEvent.click(screen.getByTestId('tab-changed'))
+    // The Changed tab is selected and the changed file renders.
+    expect(screen.getByTestId('tab-changed')).toHaveAttribute('aria-selected', 'true')
     await waitFor(() => expect(screen.getByText('a.go')).toBeInTheDocument())
+  })
+
+  it('never requests /v1/files with an empty path (Files tab removed)', async () => {
+    const fetchMock = mockFetch({ entries: [] })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<WorkspacePanel />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    // Only /v1/changed should be hit; no /v1/files?path= (the 400 noise).
+    expect(urls.some((u) => u.includes('/v1/changed'))).toBe(true)
+    expect(urls.some((u) => u.includes('/v1/files'))).toBe(false)
   })
 })

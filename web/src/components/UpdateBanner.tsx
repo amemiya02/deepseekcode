@@ -1,24 +1,13 @@
 // Adapted from deepseek-reasonix (MIT) — UpdateBanner.tsx (dismissible top banner; download/dismiss actions).
 import { X } from 'lucide-react'
 import { t } from '../lib/i18n'
+import { openDownload } from '../lib/desktopBridge'
 import type { UpdateInfo } from '../lib/system'
 import styles from './UpdateBanner.module.css'
 
 export interface UpdateBannerProps {
   info: UpdateInfo
   onDismiss?: () => void
-}
-
-// openDownload opens the signature-verified download page. In the desktop build
-// the Wails runtime is present (runtime.BrowserOpenURL); in a plain browser it
-// falls back to window.open.
-function openDownload(url: string) {
-  const rt = (window as unknown as { runtime?: { BrowserOpenURL?: (u: string) => void } }).runtime
-  if (rt?.BrowserOpenURL) {
-    rt.BrowserOpenURL(url)
-  } else {
-    window.open(url, '_blank', 'noopener')
-  }
 }
 
 export function UpdateBanner({ info, onDismiss }: UpdateBannerProps) {

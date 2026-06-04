@@ -64,7 +64,7 @@ export interface StreamHandlers {
   onCostUpdate?: (e: CostUpdateEvent) => void
   onJobUpdate?: (e: JobUpdateEvent) => void
   onRetry?: (e: RetryEvent) => void
-  onTurnDone?: (e?: TurnDoneEvent) => void
+  onTurnDone?: (e: TurnDoneEvent) => void
   onError?: (err: Event) => void
 }
 

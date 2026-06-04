@@ -17,7 +17,7 @@ import (
 )
 
 // stubAgentFactory returns an AgentRunner that emits one text delta, one info
-// (mapped to "step"), then done. It needs no API key, mirroring how the acp
+// (mapped to "message_delta"), then done. It needs no API key, mirroring how the acp
 // package stubs the agent in its own tests.
 func stubAgentFactory(workingDir string) (acp.AgentRunner, error) {
 	return &stubAgent{}, nil
@@ -249,8 +249,7 @@ func TestEventsStreamsDone(t *testing.T) {
 			switch name {
 			case "message_delta":
 				sawDelta = true
-			case "step":
-				sawStep = true
+				sawStep = true // message_delta covers both text and info kinds
 			case "turn_done":
 				sawDone = true
 			}
@@ -266,6 +265,117 @@ func TestEventsStreamsDone(t *testing.T) {
 	// load-bearing terminal event the SPA requires.
 	_ = sawDelta
 	_ = sawStep
+}
+
+// askingAgentFactory returns an agent that requests one permission, then done.
+func askingAgentFactory(workingDir string) (acp.AgentRunner, error) {
+	return &askingAgent{}, nil
+}
+
+type askingAgent struct{}
+
+func (a *askingAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp.AgentEvent)) error {
+	resp := make(chan acp.PermissionDecision, 1)
+	onEvent(acp.AgentEvent{
+		Kind:     acp.EventKindPermission,
+		ToolName: "write_file",
+		ToolArgs: `{"path":"a.go"}`,
+		Respond:  func(d acp.PermissionDecision) { resp <- d },
+	})
+	// Block until the gateway resolves it via POST /v1/permission OR the run
+	// context is cancelled (so a test that only asserts the SSE frame can tear
+	// down without leaking this goroutine — see the N-2 t.Cleanup in Step 1).
+	select {
+	case <-resp:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	onEvent(acp.AgentEvent{Kind: acp.EventKindDone, StopReason: "end_turn"})
+	return nil
+}
+
+func TestPromptEmitsPermissionRequest(t *testing.T) {
+	sm := acp.NewSessionManager(askingAgentFactory)
+	h := gateway.NewHandler(sm, "")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// Create a session.
+	resp, err := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(resp.Body).Decode(&first)
+	resp.Body.Close()
+
+	// Subscribe, then re-prompt the same session so the subscriber sees it.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		ts.URL+"/v1/events?session_id="+first.SessionID, nil)
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+
+	go func() {
+		body := `{"prompt":"again","session_id":"` + first.SessionID + `"}`
+		r, _ := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(body))
+		if r != nil {
+			r.Body.Close()
+		}
+	}()
+
+	scanner := bufio.NewScanner(stream.Body)
+	var sawPerm bool
+	var permData string
+	var lastEvent string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			lastEvent = name
+			if name == "permission_request" {
+				sawPerm = true
+			}
+		}
+		if lastEvent == "permission_request" {
+			if d, ok := strings.CutPrefix(line, "data: "); ok {
+				permData = d
+				break
+			}
+		}
+	}
+	if !sawPerm {
+		t.Fatal("expected a permission_request SSE event")
+	}
+	var p struct {
+		ID      string `json:"id"`
+		Tool    string `json:"tool"`
+		Options []struct {
+			Value       string `json:"value"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(permData), &p); err != nil {
+		t.Fatalf("permission_request data not JSON: %v (%q)", err, permData)
+	}
+	if p.ID == "" || p.Tool != "write_file" {
+		t.Fatalf("permission_request payload = %+v", p)
+	}
+	wantLabels := []string{"Deny", "Allow once", "Allow for session", "Always allow"}
+	if len(p.Options) != len(wantLabels) {
+		t.Fatalf("expected %d options, got %d", len(wantLabels), len(p.Options))
+	}
+	for i, want := range wantLabels {
+		if p.Options[i].Label != want {
+			t.Errorf("option[%d].Label = %q, want %q", i, p.Options[i].Label, want)
+		}
+	}
 }
 
 func readAll(resp *http.Response) ([]byte, error) {

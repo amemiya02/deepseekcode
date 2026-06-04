@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,14 +29,47 @@ import (
 	"github.com/amemiya02/deepseekcode/webapp"
 )
 
+// pendingPermission is an in-flight permission awaiting POST /v1/permission.
+type pendingPermission struct {
+	respond func(acp.PermissionDecision)
+}
+
+// pendingAsk is an in-flight question awaiting POST /v1/answer.
+type pendingAsk struct {
+	answer func(answers [][]string)
+}
+
+// permissionOption is one SPA-facing permission choice. value is the wire
+// string POSTed back to /v1/permission (deny|once|session|always); label and
+// description are the human-readable UI text (the SPA routes them through t()).
+type permissionOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// permissionOptions returns the canonical 4-tier permission choices (spec §7.B).
+func permissionOptions() []permissionOption {
+	return []permissionOption{
+		{Value: "deny", Label: "Deny", Description: "Reject this tool call"},
+		{Value: "once", Label: "Allow once", Description: "Permit this one call"},
+		{Value: "session", Label: "Allow for session", Description: "Permit this tool for the rest of this session"},
+		{Value: "always", Label: "Always allow", Description: "Permit this tool from now on"},
+	}
+}
+
 // Handler is the gateway's composite http.Handler: the three /v1 routes plus a
 // catch-all that serves the embedded SPA.
 type Handler struct {
-	mux       *http.ServeMux
-	sm        *acp.SessionManager
-	tracePath string
-	hub       *hub
-	reqSeq    atomic.Int64
+	mux         *http.ServeMux
+	sm          *acp.SessionManager
+	tracePath   string
+	hub         *hub
+	reqSeq      atomic.Int64
+	mu          sync.Mutex
+	pendingPerm map[string]pendingPermission
+	pendingAsk  map[string]pendingAsk
+	intSeq      atomic.Int64 // interaction id sequence
 }
 
 // NewHandler builds the gateway handler over an existing SessionManager. The
@@ -44,10 +78,12 @@ type Handler struct {
 // zero-valued report rather than an error.
 func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
 	h := &Handler{
-		mux:       http.NewServeMux(),
-		sm:        sm,
-		tracePath: tracePath,
-		hub:       newHub(),
+		mux:         http.NewServeMux(),
+		sm:          sm,
+		tracePath:   tracePath,
+		hub:         newHub(),
+		pendingPerm: make(map[string]pendingPermission),
+		pendingAsk:  make(map[string]pendingAsk),
 	}
 	h.mux.HandleFunc("/v1/prompt", h.handlePrompt)
 	h.mux.HandleFunc("/v1/cache", h.handleCache)
@@ -140,7 +176,27 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		onEvent := func(ev acp.AgentEvent) {
-			h.hub.broadcast(sid, mapAgentEvent(ev))
+			switch ev.Kind {
+			case acp.EventKindPermission:
+				id := fmt.Sprintf("perm-%d", h.intSeq.Add(1))
+				h.mu.Lock()
+				h.pendingPerm[id] = pendingPermission{respond: ev.Respond}
+				h.mu.Unlock()
+				h.hub.broadcast(sid, sseEvent{name: "permission_request", data: mustJSON(map[string]any{
+					"id": id, "tool": ev.ToolName, "args": ev.ToolArgs,
+					"options": permissionOptions(),
+				})})
+			case acp.EventKindAsk:
+				id := fmt.Sprintf("ask-%d", h.intSeq.Add(1))
+				h.mu.Lock()
+				h.pendingAsk[id] = pendingAsk{answer: ev.Answer}
+				h.mu.Unlock()
+				h.hub.broadcast(sid, sseEvent{name: "ask_request", data: mustJSON(map[string]any{
+					"id": id, "questions": ev.Questions,
+				})})
+			default:
+				h.hub.broadcast(sid, mapAgentEvent(ev))
+			}
 		}
 		if err := h.sm.Prompt(runCtx, sid, prompt, onEvent); err != nil {
 			// Ensure subscribers see a terminal "turn_done" even on dispatch failure

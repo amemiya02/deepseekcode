@@ -65,7 +65,10 @@ async function startTurn(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('App — Wave 4 wiring', () => {
-  beforeEach(() => { captured = null })
+  beforeEach(() => {
+    captured = null
+    vi.clearAllMocks()
+  })
 
   it('shows a PermissionModal on permission_request and routes the decision', async () => {
     const api = await import('./lib/api')

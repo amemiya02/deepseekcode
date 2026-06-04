@@ -101,8 +101,11 @@ function AppInner() {
   }
 
   async function onStop() {
-    if (sessionId) await cancelTurn(sessionId)
-    setStreaming(false)
+    try {
+      if (sessionId) await cancelTurn(sessionId)
+    } finally {
+      setStreaming(false)
+    }
   }
 
   const commands = useMemo<Command[]>(

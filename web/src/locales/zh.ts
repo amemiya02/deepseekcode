@@ -63,4 +63,11 @@ export const zhCN: Record<string, string> = {
   'settings.theme': '主题',
   'settings.accent': '强调色',
   'settings.density': '密度',
+  'settings.apiKey': 'API 密钥',
+  'settings.baseUrl': '基础 URL',
+  'settings.model': '模型',
+  'settings.validateConnect': '验证并连接',
+  'settings.validating': '验证中…',
+  'settings.keyConnected': '已连接 — 密钥有效。',
+  'settings.saved': '已保存',
 }

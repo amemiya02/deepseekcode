@@ -65,4 +65,11 @@ export const en: Record<string, string> = {
   'settings.theme': 'Theme',
   'settings.accent': 'Accent',
   'settings.density': 'Density',
+  'settings.apiKey': 'API key',
+  'settings.baseUrl': 'Base URL',
+  'settings.model': 'Model',
+  'settings.validateConnect': 'Validate & connect',
+  'settings.validating': 'Validating…',
+  'settings.keyConnected': 'Connected — key is valid.',
+  'settings.saved': 'Saved',
 }

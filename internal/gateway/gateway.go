@@ -64,6 +64,7 @@ type Handler struct {
 	mux         *http.ServeMux
 	sm          *acp.SessionManager
 	tracePath   string
+	root        string // workspace root for /v1/files, /v1/file, /v1/changed
 	hub         *hub
 	reqSeq      atomic.Int64
 	mu          sync.Mutex
@@ -80,10 +81,19 @@ type Handler struct {
 // tests). tracePath is read on demand by /v1/cache; an absent file yields a
 // zero-valued report rather than an error.
 func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
+	return NewHandlerWithRoot(sm, tracePath, "")
+}
+
+// NewHandlerWithRoot is like NewHandler but also sets the workspace root used
+// by the /v1/files, /v1/file and /v1/changed endpoints. When root is empty
+// those endpoints return "no workspace root" (400). In production, Start passes
+// the process working directory; tests pass a hermetic temp dir.
+func NewHandlerWithRoot(sm *acp.SessionManager, tracePath, root string) http.Handler {
 	h := &Handler{
 		mux:         http.NewServeMux(),
 		sm:          sm,
 		tracePath:   tracePath,
+		root:        root,
 		hub:         newHub(),
 		pendingPerm: make(map[string]pendingPermission),
 		pendingAsk:  make(map[string]pendingAsk),
@@ -105,6 +115,9 @@ func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
 	h.mux.HandleFunc("/v1/effort", h.handleEffort)
 	h.mux.HandleFunc("/v1/balance", h.handleBalance)
 	h.mux.HandleFunc("/v1/output-style", h.handleOutputStyle)
+	h.mux.HandleFunc("/v1/files", h.handleFiles)
+	h.mux.HandleFunc("/v1/file", h.handleFile)
+	h.mux.HandleFunc("/v1/changed", h.handleChanged)
 	// Catch-all: anything not under /v1 is served by the embedded SPA. The
 	// "/" pattern is the lowest-priority match in a ServeMux, so the explicit
 	// /v1/* patterns above always win.

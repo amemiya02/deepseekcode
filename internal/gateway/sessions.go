@@ -110,10 +110,24 @@ func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSessionByID implements GET/PATCH/DELETE /v1/sessions/{id}.
+// handleSessionByID implements GET/PATCH/DELETE /v1/sessions/{id} and
+// dispatches sub-resource requests (e.g. /v1/sessions/{id}/timeline).
 func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
-	if id == "" || strings.Contains(id, "/") {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/sessions/")
+	// Dispatch sub-resources before the plain-id validation so that paths like
+	// "someID/timeline" reach their handler without a 400.
+	if id, suffix, ok := strings.Cut(rest, "/"); ok {
+		switch suffix {
+		case "timeline":
+			_ = id // accepted but not yet used for per-session filtering
+			h.handleSessionTimeline(w, r)
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+		return
+	}
+	id := rest
+	if id == "" {
 		http.Error(w, "bad session id", http.StatusBadRequest)
 		return
 	}

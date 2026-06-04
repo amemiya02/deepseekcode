@@ -62,7 +62,7 @@ export function Composer({
   useEffect(() => {
     if (atFrag === null) { setEntries([]); return }
     let live = true
-    fetchFiles('').then((es) => { if (live) setEntries(es) }).catch(() => {})
+    fetchFiles('').then((r) => { if (live) setEntries(r.entries) }).catch(() => {})
     return () => { live = false }
   }, [atFrag === null])
 

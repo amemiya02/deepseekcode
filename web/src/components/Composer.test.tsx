@@ -17,7 +17,7 @@ describe('Composer', () => {
   })
 
   it('typing "@" opens the FileMenu from fetchFiles', async () => {
-    vi.spyOn(workspace, 'fetchFiles').mockResolvedValue([{ name: 'main.go', path: 'main.go', is_dir: false }])
+    vi.spyOn(workspace, 'fetchFiles').mockResolvedValue({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] })
     wrap(<Composer streaming={false} mode="ask" commands={commands} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />)
     await userEvent.type(screen.getByTestId('composer-input'), 'see @ma')
     expect(await screen.findByText('main.go')).toBeInTheDocument()

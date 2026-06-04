@@ -32,3 +32,10 @@ button { font-family: inherit; }
 .markdown-body code.md-code { font: var(--type-mono); }
 .markdown-body table { border-collapse: collapse; }
 .markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 8px; }
+
+/* ThinkingBlock */
+.thinking { border-left: 2px solid var(--border); padding-left: var(--s-2); margin: var(--s-2) 0; }
+.thinking__toggle { background: none; border: none; color: var(--text-3); font: var(--type-label); cursor: pointer; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
+.thinking__chevron { transition: transform var(--dur-fast) var(--ease-standard); }
+.thinking__chevron--open { transform: rotate(90deg); }
+.thinking__body { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-2); font: var(--type-mono); opacity: 0.85; }

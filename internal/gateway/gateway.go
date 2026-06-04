@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
+	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/webapp"
 )
 
@@ -65,6 +67,8 @@ type Handler struct {
 	sm          *acp.SessionManager
 	tracePath   string
 	root        string // workspace root for /v1/files, /v1/file, /v1/changed
+	store       *session.Store     // optional: wired by WithStore (Wave 5 checkpoint endpoints)
+	snaps       *snapshots.Manager // optional: wired by WithSnapshots (Wave 5 code-rewind)
 	hub         *hub
 	reqSeq      atomic.Int64
 	mu          sync.Mutex
@@ -80,26 +84,24 @@ type Handler struct {
 // SessionManager supplies the AgentFactory (real in production, a stub in
 // tests). tracePath is read on demand by /v1/cache; an absent file yields a
 // zero-valued report rather than an error.
-func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
-	return NewHandlerWithRoot(sm, tracePath, "")
-}
-
-// NewHandlerWithRoot is like NewHandler but also sets the workspace root used
-// by the /v1/files, /v1/file and /v1/changed endpoints. When root is empty
-// those endpoints return "no workspace root" (400). In production, Start passes
-// the process working directory; tests pass a hermetic temp dir.
-func NewHandlerWithRoot(sm *acp.SessionManager, tracePath, root string) http.Handler {
+//
+// Optional functional options (WithStore, WithSnapshots, WithWorkspaceRoot) may
+// be passed to wire Wave-5 checkpoint/workspace behaviour; callers that pass no
+// options retain the pre-Wave-5 behaviour unchanged.
+func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.Handler {
 	h := &Handler{
 		mux:         http.NewServeMux(),
 		sm:          sm,
 		tracePath:   tracePath,
-		root:        root,
 		hub:         newHub(),
 		pendingPerm: make(map[string]pendingPermission),
 		pendingAsk:  make(map[string]pendingAsk),
 		sessions:    newSessionStore(),
 		models:      newModelState(),
 		outputStyle: newOutputStyleState(),
+	}
+	for _, opt := range opts {
+		opt(h)
 	}
 	h.mux.HandleFunc("/v1/prompt", h.handlePrompt)
 	h.mux.HandleFunc("/v1/cache", h.handleCache)
@@ -118,11 +120,29 @@ func NewHandlerWithRoot(sm *acp.SessionManager, tracePath, root string) http.Han
 	h.mux.HandleFunc("/v1/files", h.handleFiles)
 	h.mux.HandleFunc("/v1/file", h.handleFile)
 	h.mux.HandleFunc("/v1/changed", h.handleChanged)
+	// Wave 5: checkpoint/branch control.
+	h.mux.HandleFunc("/v1/rewind", h.handleRewind)
+	h.mux.HandleFunc("/v1/fork", h.handleFork)
+	h.mux.HandleFunc("/v1/branch", h.handleBranch)
+	h.mux.HandleFunc("/v1/switch", h.handleSwitch)
+	h.mux.HandleFunc("/v1/summarize", h.handleSummarize)
+	// Wave 5: add-to-chat (workspace READS /v1/files,/v1/file,/v1/changed are Wave 1).
+	h.mux.HandleFunc("/v1/add-to-chat", h.handleAddToChat)
 	// Catch-all: anything not under /v1 is served by the embedded SPA. The
 	// "/" pattern is the lowest-priority match in a ServeMux, so the explicit
 	// /v1/* patterns above always win.
 	h.mux.Handle("/", webapp.Handler())
 	return h
+}
+
+// NewHandlerWithRoot is like NewHandler but also sets the workspace root used
+// by the /v1/files, /v1/file and /v1/changed endpoints. When root is empty
+// those endpoints return "no workspace root" (400). In production, Start passes
+// the process working directory; tests pass a hermetic temp dir.
+//
+// Deprecated: pass WithWorkspaceRoot as an Option to NewHandler instead.
+func NewHandlerWithRoot(sm *acp.SessionManager, tracePath, root string) http.Handler {
+	return NewHandler(sm, tracePath, WithWorkspaceRoot(root))
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +344,15 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// Wave-5 stub handlers — replaced by real implementations in Tasks 2–7.
+// /v1/files, /v1/file, /v1/changed are owned by Wave 1 (workspace.go).
+func (h *Handler) handleRewind(w http.ResponseWriter, r *http.Request)    { http.Error(w, "not implemented", http.StatusNotImplemented) }
+func (h *Handler) handleFork(w http.ResponseWriter, r *http.Request)      { http.Error(w, "not implemented", http.StatusNotImplemented) }
+func (h *Handler) handleBranch(w http.ResponseWriter, r *http.Request)    { http.Error(w, "not implemented", http.StatusNotImplemented) }
+func (h *Handler) handleSwitch(w http.ResponseWriter, r *http.Request)    { http.Error(w, "not implemented", http.StatusNotImplemented) }
+func (h *Handler) handleSummarize(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
+func (h *Handler) handleAddToChat(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
 
 // Start builds a default gateway (real agent factory, default trace path) and
 // runs it on 127.0.0.1:port until ctx is cancelled. It is what the desktop

@@ -13,6 +13,7 @@ export function HistoryDrawer({
   now = Date.now(),
   onResume,
   onDelete,
+  onRename,
   onClose,
 }: {
   open?: boolean
@@ -20,6 +21,7 @@ export function HistoryDrawer({
   now?: number
   onResume?: (id: string) => void
   onDelete?: (id: string) => void
+  onRename?: (id: string, title: string) => void
   onClose?: () => void
 }) {
   const [query, setQuery] = useState('')
@@ -57,7 +59,7 @@ export function HistoryDrawer({
           />
         </label>
         <div className={styles.scroll}>
-          <SessionList sessions={filtered} activeId="" now={now} onSelect={onResume} onDelete={onDelete} />
+          <SessionList sessions={filtered} activeId="" now={now} onSelect={onResume} onDelete={onDelete} onRename={onRename} />
         </div>
       </div>
     </>

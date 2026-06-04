@@ -12,6 +12,7 @@ export function SessionRail({
   onNew,
   onSelect,
   onDelete,
+  onRename,
   onOpenHistory,
 }: {
   sessions?: Session[]
@@ -20,6 +21,7 @@ export function SessionRail({
   onNew?: () => void
   onSelect?: (id: string) => void
   onDelete?: (id: string) => void
+  onRename?: (id: string, title: string) => void
   onOpenHistory?: () => void
 }) {
   const [query, setQuery] = useState('')
@@ -47,7 +49,7 @@ export function SessionRail({
       </label>
 
       <div className={styles.scroll}>
-        <SessionList sessions={filtered} activeId={activeId} now={now} onSelect={onSelect} onDelete={onDelete} />
+        <SessionList sessions={filtered} activeId={activeId} now={now} onSelect={onSelect} onDelete={onDelete} onRename={onRename} />
       </div>
 
       <button type="button" className={styles.history} data-testid="session-history" onClick={() => onOpenHistory?.()}>

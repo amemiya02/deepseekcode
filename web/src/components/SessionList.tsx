@@ -11,12 +11,14 @@ export function SessionList({
   now = Date.now(),
   onSelect,
   onDelete,
+  onRename,
 }: {
   sessions?: Session[]
   activeId?: string
   now?: number
   onSelect?: (id: string) => void
   onDelete?: (id: string) => void
+  onRename?: (id: string, title: string) => void
 }) {
   const labels: Record<DayKey, string> = {
     today: t('session.group.today', 'Today'),
@@ -45,6 +47,7 @@ export function SessionList({
               active={s.id === activeId}
               onSelect={onSelect}
               onDelete={onDelete}
+              onRename={onRename}
             />
           ))}
         </section>

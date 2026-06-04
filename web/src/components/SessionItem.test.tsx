@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SessionItem } from './SessionItem'
 import { listSessions, type Session } from '../lib/api'
@@ -37,6 +37,43 @@ describe('SessionItem', () => {
     await userEvent.click(screen.getByTestId('session-delete'))
     expect(onDelete).toHaveBeenCalledWith('s1')
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('shows the rename button on hover and enters rename mode when clicked', async () => {
+    const onRename = vi.fn()
+    render(<SessionItem session={base} active={false} onRename={onRename} />)
+    await userEvent.click(screen.getByTestId('session-rename'))
+    expect(screen.getByTestId('session-rename-input')).toBeInTheDocument()
+  })
+
+  it('calls onRename with new title when Enter is pressed', async () => {
+    const onRename = vi.fn()
+    render(<SessionItem session={base} active={false} onRename={onRename} />)
+    await userEvent.click(screen.getByTestId('session-rename'))
+    const input = screen.getByTestId('session-rename-input')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'New title{Enter}')
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith('s1', 'New title'))
+  })
+
+  it('cancels rename on Escape and does not call onRename', async () => {
+    const onRename = vi.fn()
+    render(<SessionItem session={base} active={false} onRename={onRename} />)
+    await userEvent.click(screen.getByTestId('session-rename'))
+    await userEvent.keyboard('{Escape}')
+    expect(onRename).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('session-rename-input')).not.toBeInTheDocument()
+  })
+
+  it('commits rename when the confirm button is clicked', async () => {
+    const onRename = vi.fn()
+    render(<SessionItem session={base} active={false} onRename={onRename} />)
+    await userEvent.click(screen.getByTestId('session-rename'))
+    const input = screen.getByTestId('session-rename-input')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'Committed')
+    await userEvent.click(screen.getByTestId('session-rename-commit'))
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith('s1', 'Committed'))
   })
 
   // Contract regression: run the EXACT JSON the Go gateway emits for GET /v1/sessions

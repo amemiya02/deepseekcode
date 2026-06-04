@@ -45,3 +45,48 @@
 .item:hover .del,
 .item:focus-within .del { opacity: 1; }
 .del:hover { color: var(--danger); }
+
+.rename {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--s-1);
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+.item:hover .rename,
+.item:focus-within .rename { opacity: 1; }
+.rename:hover { color: var(--accent); }
+
+.renaming {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+}
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: var(--type-ui);
+  padding: 2px 6px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-weak);
+}
+.renameAction {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: var(--s-1);
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.renameAction:hover { color: var(--accent); }

@@ -96,3 +96,9 @@ button { font-family: inherit; }
 
 /* Transcript */
 .transcript { display: flex; flex-direction: column; padding: var(--s-3); overflow-y: auto; }
+
+/* ContextPills */
+.context-pills { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.context-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 1px 4px 1px 8px; font: var(--type-label); }
+.context-pill__remove { background: none; border: none; color: var(--text-3); cursor: pointer; display: inline-flex; padding: 0; }
+.context-pill__remove:hover { color: var(--danger); }

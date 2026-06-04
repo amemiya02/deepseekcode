@@ -86,11 +86,13 @@ web-test:
 	cd web && npm install --legacy-peer-deps && npm test
 
 # ---------- Wails desktop (v3) ----------
-# Builds the embedded SPA first (web), then the v3 desktop binary. Requires the
-# wails3 CLI (https://v3.wails.io). If wails3 is unavailable, this target fails
-# loudly — the SPA + gateway paths (build-web, dsc serve) do not depend on it.
+# Builds the embedded SPA first (web), then packages the macOS .app using only
+# Go + stock macOS tools (sips, iconutil, plutil, codesign) — no wails3 CLI or
+# go-task required. Output: bin/DeepSeekCode.app. The CLI-based path stays
+# available for anyone who has it installed:
+#   cd desktop && wails3 build -tags withwebapp   (or: wails3 package ...)
 desktop: web
-	cd desktop && wails3 build -tags withwebapp
+	bash desktop/package-darwin.sh
 
 # ---------- CI gate ----------
 ci: web-test test

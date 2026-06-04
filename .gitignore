@@ -54,7 +54,5 @@ desktop/frontend/wailsjs/
 # Competitive / strategic analysis docs (session-generated; not tracked source)
 # List only the three untracked session files explicitly so the five already-tracked
 # files in docs/competitive/ remain visible to editors, CI diff viewers, and `git add`.
-docs/competitive/2026-06-03-coding-agent-ref-gap-analysis.md
-docs/competitive/2026-06-03-industrial-execution-plan.md
-docs/competitive/2026-06-03-reasonix-1.0-strategic-analysis.md
+docs/competitive/
 .superpowers/

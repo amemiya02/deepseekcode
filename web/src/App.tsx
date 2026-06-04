@@ -31,6 +31,7 @@ import {
   respondPermission,
   respondAnswer,
   cancelTurn,
+  renameSession,
 } from './lib/api'
 import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem } from './lib/api'
 import { applyEvent } from './lib/transcript'
@@ -226,6 +227,14 @@ function AppInner() {
     [removeSession, sessionId],
   )
 
+  const onRenameSession = useCallback(
+    async (id: string, title: string) => {
+      await renameSession(id, title)
+      await loadSessions()
+    },
+    [loadSessions],
+  )
+
   // Wave-5: per-user-message rewind/fork/summarize callbacks that drive
   // web/src/lib/checkpoint.ts then repaint via switchSession.
   const onRewind = async (keepMessages: number, scope: 'code' | 'conversation' | 'both') => {
@@ -283,6 +292,7 @@ function AppInner() {
         onNew={() => void onNewSession()}
         onSelect={(id) => void onSelectSession(id)}
         onDelete={(id) => void onDeleteSession(id)}
+        onRename={(id, title) => void onRenameSession(id, title)}
         onOpenHistory={() => setHistoryOpen(true)}
       />
       <HistoryDrawer
@@ -290,6 +300,7 @@ function AppInner() {
         sessions={sessions}
         onResume={(id) => void onSelectSession(id)}
         onDelete={(id) => void onDeleteSession(id)}
+        onRename={(id, title) => void onRenameSession(id, title)}
         onClose={() => setHistoryOpen(false)}
       />
     </div>

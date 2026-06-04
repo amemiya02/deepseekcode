@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { App } from './App'
 import { useThemeStore, DEFAULT_THEME_SETTINGS } from './lib/theme/store'
 import * as system from './lib/system'
+import * as api from './lib/api'
 
 beforeEach(() => {
   localStorage.clear()
@@ -279,5 +280,48 @@ describe('App — full shell integration (Wave 0)', () => {
     })
     render(<App />)
     expect(await screen.findByText('1.2.0')).toBeInTheDocument()
+  })
+
+  it('calls renameSession PATCH when onRename fires from SessionRail (App wiring)', async () => {
+    const renameSpy = vi.spyOn(api, 'renameSession').mockResolvedValue(undefined)
+    const user = userEvent.setup()
+
+    // Seed one session so the rename pencil is reachable.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/v1/sessions')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              sessions: [{ id: 'rename-sess', title: 'Original title', turns: 2, created_at: 0, updated_at: 0 }],
+            }),
+          } as Response)
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as Response)
+      }),
+    )
+
+    render(<App />)
+
+    // Wait for the session item to appear in the rail.
+    const zone = screen.getByTestId('zone-sessions')
+    expect(await within(zone).findByText('Original title')).toBeInTheDocument()
+
+    // Click the rename pencil to enter rename mode.
+    await user.click(within(zone).getByTestId('session-rename'))
+
+    // Clear the input and type a new title, then confirm with Enter.
+    const input = within(zone).getByTestId('session-rename-input')
+    await user.clear(input)
+    await user.type(input, 'Renamed title{Enter}')
+
+    // The App wiring must have called renameSession (the PATCH endpoint).
+    await waitFor(() =>
+      expect(renameSpy).toHaveBeenCalledWith('rename-sess', 'Renamed title'),
+    )
+
+    renameSpy.mockRestore()
   })
 })

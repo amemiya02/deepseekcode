@@ -49,7 +49,10 @@ func TestUpdateUpToDate(t *testing.T) {
 	t.Cleanup(func() { gateway.ResetUpdateSeam() })
 
 	ts := newTestServer(t, "")
-	resp, _ := http.Get(ts.URL + "/v1/update")
+	resp, err := http.Get(ts.URL + "/v1/update")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	var out struct {
 		UpdateAvailable bool `json:"updateAvailable"`

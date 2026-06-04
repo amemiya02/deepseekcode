@@ -13,6 +13,7 @@ const baseCfg: system.ConfigDTO = {
   duetEnabled: false, sandboxEnabled: false, sandboxNetwork: false,
   autoReasoning: false, autoClarify: false,
   proxyMode: 'auto', proxyScheme: 'http', proxyUrl: '', noProxy: '',
+  permissionDefault: 'ask',
 }
 
 describe('GeneralSection', () => {

@@ -267,6 +267,28 @@ func TestEventsStreamsDone(t *testing.T) {
 	_ = sawStep
 }
 
+// questionAgentFactory asks one question, then done.
+func questionAgentFactory(workingDir string) (acp.AgentRunner, error) {
+	return &questionAgent{}, nil
+}
+
+type questionAgent struct{}
+
+func (a *questionAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp.AgentEvent)) error {
+	resp := make(chan [][]string, 1)
+	onEvent(acp.AgentEvent{
+		Kind: acp.EventKindAsk,
+		Questions: []acp.AskQuestion{{
+			Question: "Pick one", Header: "choice",
+			Options: []acp.AskOption{{Label: "A"}, {Label: "B"}},
+		}},
+		Answer: func(ans [][]string) { resp <- ans },
+	})
+	<-resp
+	onEvent(acp.AgentEvent{Kind: acp.EventKindDone, StopReason: "end_turn"})
+	return nil
+}
+
 // askingAgentFactory returns an agent that requests one permission, then done.
 func askingAgentFactory(workingDir string) (acp.AgentRunner, error) {
 	return &askingAgent{}, nil

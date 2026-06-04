@@ -79,6 +79,70 @@ func TestPermissionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAskRoundTrip(t *testing.T) {
+	sm := acp.NewSessionManager(questionAgentFactory)
+	h := gateway.NewHandler(sm, "")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	resp, _ := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+	var first struct{ SessionID string `json:"session_id"` }
+	json.NewDecoder(resp.Body).Decode(&first)
+	resp.Body.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		ts.URL+"/v1/events?session_id="+first.SessionID, nil)
+	stream, _ := http.DefaultClient.Do(req)
+	defer stream.Body.Close()
+
+	go func() {
+		body := `{"prompt":"again","session_id":"` + first.SessionID + `"}`
+		r, _ := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(body))
+		if r != nil {
+			r.Body.Close()
+		}
+	}()
+
+	scanner := bufio.NewScanner(stream.Body)
+	var lastEvent, askID string
+	var sawDone bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			lastEvent = name
+		}
+		if d, ok := strings.CutPrefix(line, "data: "); ok {
+			switch lastEvent {
+			case "ask_request":
+				var p struct{ ID string `json:"id"` }
+				json.Unmarshal([]byte(d), &p)
+				askID = p.ID
+				body := `{"id":"` + askID + `","answers":[["A"]]}`
+				ar, _ := http.Post(ts.URL+"/v1/answer", "application/json", strings.NewReader(body))
+				if ar != nil {
+					if ar.StatusCode != http.StatusOK {
+						t.Errorf("POST /v1/answer: got %d", ar.StatusCode)
+					}
+					ar.Body.Close()
+				}
+			case "turn_done":
+				sawDone = true
+			}
+		}
+		if sawDone {
+			break
+		}
+	}
+	if askID == "" {
+		t.Fatal("never saw an ask id")
+	}
+	if !sawDone {
+		t.Fatal("turn never completed after answering")
+	}
+}
+
 func TestCancelUnknownSession(t *testing.T) {
 	sm := acp.NewSessionManager(stubAgentFactory)
 	h := gateway.NewHandler(sm, "")

@@ -58,3 +58,17 @@ button { font-family: inherit; }
 .tool__body { margin: 0; padding: var(--s-2); border-top: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 280px; overflow: auto; }
 .tool__body--err { color: var(--del-fg); }
 .tool__note { padding: 4px var(--s-2); color: var(--warning); font: var(--type-label); border-top: 1px solid var(--border); }
+
+/* DiffView */
+.diffview { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; font: var(--type-mono); }
+.diffview__path { padding: 4px var(--s-2); background: var(--surface); border-bottom: 1px solid var(--border); color: var(--text-2); }
+.hunk { border-bottom: 1px solid var(--border); }
+.hunk[data-decided='true'] { opacity: 0.55; }
+.hunk__head { display: flex; align-items: center; justify-content: space-between; padding: 2px var(--s-2); background: var(--surface); color: var(--text-3); }
+.hunk__actions button { display: inline-flex; align-items: center; gap: 3px; font: var(--type-label); margin-left: 4px; background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: var(--r-sm); padding: 1px 8px; cursor: pointer; }
+.hunk__actions button:disabled { opacity: 0.5; cursor: default; }
+.line { display: flex; }
+.line__gutter { width: 1.5ch; text-align: center; color: var(--text-3); user-select: none; }
+.line__text { white-space: pre-wrap; word-break: break-word; }
+.line--add { background: var(--add-bg); color: var(--add-fg); }
+.line--del { background: var(--del-bg); color: var(--del-fg); }

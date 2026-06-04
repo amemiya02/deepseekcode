@@ -1,0 +1,13 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3, 12px);
+  padding: var(--s-2, 8px) var(--s-4, 16px);
+  background: var(--accent-weak);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  font: var(--type-ui);
+}
+.text { flex: 1; }
+.action { background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--r-sm, 4px); padding: var(--s-1, 4px) var(--s-3, 12px); cursor: pointer; font: var(--type-ui); }
+.dismiss { display: grid; place-items: center; background: none; border: none; color: var(--text-3); cursor: pointer; }

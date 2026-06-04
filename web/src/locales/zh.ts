@@ -87,4 +87,7 @@ export const zhCN: Record<string, string> = {
   'settings.disabled': '已禁用',
   'settings.doctorRun': '重新运行',
   'settings.doctorRunning': '正在运行诊断…',
+  'update.available': '有新版本可用：',
+  'update.download': '下载',
+  'update.dismiss': '关闭',
 }

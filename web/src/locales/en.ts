@@ -89,4 +89,7 @@ export const en: Record<string, string> = {
   'settings.disabled': 'disabled',
   'settings.doctorRun': 'Run again',
   'settings.doctorRunning': 'Running diagnostics…',
+  'update.available': 'A new version is available:',
+  'update.download': 'Download',
+  'update.dismiss': 'Dismiss',
 }

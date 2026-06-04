@@ -1,13 +1,24 @@
 .banner {
   display: flex;
   align-items: center;
-  gap: var(--s-3, 12px);
-  padding: var(--s-2, 8px) var(--s-4, 16px);
-  background: var(--accent-weak);
-  color: var(--text);
-  border-bottom: 1px solid var(--border);
-  font: var(--type-ui);
+  gap: var(--s-2, 8px);
+  padding: var(--s-1, 4px) var(--s-3, 12px);
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+  color: var(--text-2);
+  border-bottom: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border));
+  font: var(--type-label);
 }
 .text { flex: 1; }
-.action { background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--r-sm, 4px); padding: var(--s-1, 4px) var(--s-3, 12px); cursor: pointer; font: var(--type-ui); }
+.action {
+  background: var(--accent-grad);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--r-sm, 4px);
+  padding: 2px var(--s-2, 8px);
+  cursor: pointer;
+  font: var(--type-label);
+  box-shadow: var(--glow-accent);
+}
+.action:hover { filter: brightness(1.08); }
 .dismiss { display: grid; place-items: center; background: none; border: none; color: var(--text-3); cursor: pointer; }
+.dismiss:hover { color: var(--text); }

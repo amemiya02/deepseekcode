@@ -1,9 +1,10 @@
 .item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: var(--s-2);
-  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-2) var(--s-2) calc(var(--s-2) + 3px);
+  border-radius: var(--r-md);
   cursor: pointer;
   color: var(--text-2);
   text-align: left;
@@ -11,11 +12,25 @@
   background: none;
   border: none;
   font: var(--type-ui);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
-.item:hover { background: var(--surface); }
-.active { background: var(--accent-weak); color: var(--text); }
+.item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: height var(--dur-fast) var(--ease-standard);
+}
+.item:hover { background: var(--elevated); color: var(--text); }
+.active { background: color-mix(in oklch, var(--accent) 14%, var(--surface)); color: var(--text); }
+.active::before { height: 58%; box-shadow: var(--glow-accent); }
 .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta { color: var(--text-3); font: var(--type-label); flex-shrink: 0; }
+.meta { color: var(--text-3); font: var(--type-label); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .del {
   background: none;
   border: none;
@@ -25,6 +40,7 @@
   border-radius: var(--r-sm);
   display: inline-flex;
   opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 .item:hover .del,
 .item:focus-within .del { opacity: 1; }

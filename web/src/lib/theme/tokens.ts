@@ -55,7 +55,8 @@ function surfaceLightness(mode: Mode): number[] {
     case 'light':
       return [0.985, 0.965, 0.94, 0.99, 0.92]
     case 'dark':
-      return [0.16, 0.2, 0.24, 0.22, 0.28]
+      // bg .. card climb for elevation; overlay is the dim scrim (darkest).
+      return [0.155, 0.19, 0.225, 0.205, 0.1]
     case 'hc':
       return [0.08, 0.12, 0.16, 0.14, 0.2]
   }
@@ -100,26 +101,46 @@ export function buildTokens(input: TokenInput): Record<string, string> {
   const step = spacingScale(input.density)
   const sp = (n: number) => `${step * n}px`
 
+  // Dark + high-contrast share a dark canvas; light is the exception.
+  const isDarkish = input.mode !== 'light'
+  // Surfaces carry a faint blue undertone on dark canvases (deep-space, not dead gray).
+  const sc = isDarkish ? bc + 0.012 : bc
+  const accentCss = oklch(accentL, accent.c, accent.h)
+
   return {
-    // Surface ladder
-    '--bg': oklch(sl[0], bc, bh),
-    '--surface': oklch(sl[1], bc, bh),
-    '--elevated': oklch(sl[2], bc, bh),
-    '--card': oklch(sl[3], bc, bh),
-    '--overlay': oklch(sl[4], bc, bh),
+    // Surface ladder (faint blue undertone on dark canvases for depth)
+    '--bg': oklch(sl[0], sc, bh),
+    '--surface': oklch(sl[1], sc, bh),
+    '--elevated': oklch(sl[2], sc, bh),
+    '--card': oklch(sl[3], sc, bh),
+    '--overlay': oklch(sl[4], sc, bh),
     // Lines
-    '--border': oklch(borderL, bc, bh),
-    '--border-strong': oklch(borderStrongL, bc, bh),
-    '--focus-ring': oklch(accentL, accent.c, accent.h),
+    '--border': oklch(borderL, sc, bh),
+    '--border-strong': oklch(borderStrongL, sc, bh),
+    '--focus-ring': accentCss,
+    // Glass edge — a 1px top highlight so panels read as lifted, not painted-on.
+    '--glass-edge': isDarkish ? 'oklch(1 0 0 / 0.055)' : 'oklch(1 0 0 / 0.9)',
+    // Elevation shadows
+    '--shadow-1': isDarkish ? '0 1px 2px oklch(0 0 0 / 0.4)' : '0 1px 2px oklch(0 0 0 / 0.08)',
+    '--shadow-2': isDarkish ? '0 10px 34px -8px oklch(0 0 0 / 0.55)' : '0 10px 30px -10px oklch(0 0 0 / 0.18)',
+    '--shadow-pop': isDarkish ? '0 24px 64px -16px oklch(0 0 0 / 0.7)' : '0 24px 64px -16px oklch(0 0 0 / 0.25)',
     // Text
     '--text': oklch(tl[0], bc, bh),
     '--text-2': oklch(tl[1], bc, bh),
     '--text-3': oklch(tl[2], bc, bh),
     '--text-on-accent': accentL > 0.6 ? oklch(0.16, 0, 0) : oklch(0.99, 0, 0),
-    // Accent
-    '--accent': oklch(accentL, accent.c, accent.h),
-    '--accent-text': oklch(isLight ? 0.42 : 0.78, accent.c, accent.h),
-    '--accent-weak': oklch(isLight ? 0.94 : 0.28, accent.c * 0.5, accent.h),
+    // Accent (+ a secondary for the signature indigo→cyan gradient + glow)
+    '--accent': accentCss,
+    '--accent-2': oklch(isDarkish ? 0.8 : 0.62, 0.12, 200),
+    '--accent-text': oklch(isLight ? 0.42 : 0.82, accent.c, accent.h),
+    '--accent-weak': oklch(isLight ? 0.94 : 0.26, accent.c * 0.55, accent.h),
+    '--accent-grad': `linear-gradient(135deg, ${accentCss}, ${oklch(isDarkish ? 0.8 : 0.62, 0.12, 200)})`,
+    '--glow-accent': isDarkish ? `0 0 24px -2px ${accentCss.replace(')', ' / 0.45)')}` : 'none',
+    // Telemetry — the cockpit signal colors (cache=cyan, cost=amber, route=violet)
+    '--cache': oklch(isDarkish ? 0.82 : 0.55, 0.13, 195),
+    '--cost': oklch(isDarkish ? 0.84 : 0.6, 0.12, 85),
+    '--route': oklch(isDarkish ? 0.78 : 0.58, 0.15, 300),
+    '--ring-track': oklch(isDarkish ? 0.27 : 0.9, sc, bh),
     // Semantic
     '--success': oklch(0.62, 0.15, 152),
     '--danger': oklch(0.6, 0.18, 26),
@@ -135,7 +156,7 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--type-body': '400 14px/22px 0',
     '--type-ui': '500 13px/18px 0',
     '--type-label': '600 11px/14px 0.04em',
-    '--type-mono': "400 13px/20px 0 'Geist Mono', 'JetBrains Mono', monospace",
+    '--type-mono': "400 13px/20px 0 'JetBrains Mono', 'Geist Mono', 'Noto Sans Mono CJK SC', monospace",
     // Spacing (4px grid, compact = 3px)
     '--s-1': sp(1),
     '--s-2': sp(2),

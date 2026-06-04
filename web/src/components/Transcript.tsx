@@ -7,6 +7,7 @@ import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCard } from './ToolCard'
 import { RoutingActivity } from './RoutingActivity'
+import { t } from '../lib/i18n'
 
 export interface TranscriptRewindHandlers {
   onRewind?: (keepMessages: number, scope: RewindScope) => void
@@ -17,6 +18,23 @@ export interface TranscriptRewindHandlers {
 export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[]; rewindHandlers?: TranscriptRewindHandlers }) {
   return (
     <div className="transcript" data-testid="transcript">
+      {items.length === 0 && (
+        <div className="empty-convo" data-testid="empty-convo">
+          <div className="empty-convo__mark" aria-hidden="true">d</div>
+          <h2 className="empty-convo__title">{t('empty.title', 'Ready when you are')}</h2>
+          <p className="empty-convo__sub">
+            {t(
+              'empty.sub',
+              'Ask a question, plan a change, or build something — cache, cost, and routing stay in view the whole way.',
+            )}
+          </p>
+          <div className="empty-convo__chips" aria-hidden="true">
+            <span className="empty-convo__chip">{t('empty.ex1', 'Explain this codebase')}</span>
+            <span className="empty-convo__chip">{t('empty.ex2', 'Write a failing test, then fix it')}</span>
+            <span className="empty-convo__chip">{t('empty.ex3', 'Refactor for readability')}</span>
+          </div>
+        </div>
+      )}
       {items.map((item, i) => {
         switch (item.type) {
           case 'user':

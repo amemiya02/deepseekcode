@@ -1,17 +1,77 @@
 .card {
-  background: var(--card);
+  background: linear-gradient(var(--card), var(--surface));
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   padding: var(--s-3);
   display: flex;
   flex-direction: column;
+  gap: var(--s-3);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--glass-edge);
+}
+.title {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
   gap: var(--s-2);
 }
-.title { margin: 0; font: var(--type-label); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
-.metrics { display: flex; gap: var(--s-5); }
-.metric { display: flex; flex-direction: column; }
-.big { font: var(--type-display); color: var(--success); }
+.title::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cache);
+  box-shadow: 0 0 8px var(--cache);
+}
+
+.gaugeRow { display: flex; align-items: center; gap: var(--s-4); }
+
+/* Radial cache-hit gauge: a conic ring whose sweep tracks --pct (0..1). */
+.gauge {
+  --pct: 0;
+  --gaugeColor: var(--cache);
+  position: relative;
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  background:
+    radial-gradient(closest-side, var(--card) 77%, transparent 78% 100%),
+    conic-gradient(var(--gaugeColor) calc(var(--pct) * 360deg), var(--ring-track) 0);
+  transition: background var(--dur-slow) var(--ease-standard);
+}
+.gauge[data-state='good'] { --gaugeColor: var(--cache); }
+.gauge[data-state='low'] { --gaugeColor: var(--warning); }
+.gauge[data-state='evict'] { --gaugeColor: var(--danger); }
+.gaugeVal {
+  font: 700 19px/1 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.gaugeCap {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.side { display: flex; flex-direction: column; gap: 2px; }
+.avg {
+  font: 600 26px/1 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--cache);
+  letter-spacing: -0.01em;
+}
 .lbl { font: var(--type-label); color: var(--text-3); }
+
 .proof { display: flex; align-items: center; gap: var(--s-1); margin: 0; font: var(--type-label); }
-.ok { color: var(--success); }
-.warn { color: var(--danger); }
+.ok { color: var(--cache); }
+.warn { color: var(--warning); }

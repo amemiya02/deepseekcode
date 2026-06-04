@@ -8,9 +8,10 @@ body {
      Use individual font-* properties instead of the `font` shorthand so this family
      stack is not silently reset (the `font` shorthand resets font-family to the value
      embedded in the token; --type-body has no family, which would drop the CJK chain). */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+  font-family: 'Schibsted Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'Noto Sans', 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC',
     'Microsoft YaHei', sans-serif;
+  letter-spacing: -0.005em;
   font-size: 14px;
   line-height: 22px;
   font-weight: 400;
@@ -20,7 +21,7 @@ body {
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 button { font-family: inherit; }
 .plain-code, .code, code {
-  font-family: 'Geist Mono', 'JetBrains Mono', 'Noto Sans Mono CJK SC', monospace;
+  font-family: 'JetBrains Mono', 'Geist Mono', 'Noto Sans Mono CJK SC', monospace;
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -137,8 +138,9 @@ button { font-family: inherit; }
 
 /* SendStopButton */
 .composer__btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--border); cursor: pointer; }
-.composer__btn--send { background: var(--accent); color: var(--text-on-accent); }
-.composer__btn--send:disabled { opacity: 0.5; cursor: default; }
+.composer__btn--send { background: var(--accent-grad); color: var(--text-on-accent); border-color: transparent; box-shadow: var(--glow-accent); }
+.composer__btn--send:hover:not(:disabled) { filter: brightness(1.08); }
+.composer__btn--send:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 .composer__btn--stop { background: var(--danger); color: var(--text-on-accent); }
 
 /* AttachmentDrop */
@@ -148,8 +150,102 @@ button { font-family: inherit; }
 .attach__btn:hover { color: var(--text); }
 
 /* Composer */
-.composer-wrap { position: relative; display: flex; flex-direction: column; gap: 4px; padding: var(--s-2); border-top: 1px solid var(--border); background: var(--surface); }
+.composer-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: 0 var(--s-3) var(--s-3);
+  padding: var(--s-2) var(--s-2) var(--s-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: linear-gradient(var(--elevated), var(--surface));
+  box-shadow: var(--shadow-2), inset 0 1px 0 var(--glass-edge);
+  transition: border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+}
+.composer-wrap:focus-within {
+  border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+  box-shadow: var(--shadow-2), var(--glow-accent), inset 0 1px 0 var(--glass-edge);
+}
 .composer { display: flex; align-items: flex-end; gap: var(--s-2); }
-.composer__input { flex: 1; resize: none; min-height: 38px; max-height: 240px; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text); font: var(--type-body); padding: 8px 10px; }
-.composer__input:focus { outline: none; border-color: var(--border-strong); }
+.composer__input { flex: 1; resize: none; min-height: 44px; max-height: 240px; background: transparent; border: none; color: var(--text); font: var(--type-body); padding: 8px 6px; }
+.composer__input:focus { outline: none; }
+.composer__input::placeholder { color: var(--text-3); }
 .composer-meta { display: flex; align-items: center; gap: 8px; }
+
+/* ───────────────────────── Mission Console polish ───────────────────────── */
+
+/* Tabular figures so telemetry numbers never jitter as they tick. */
+.msg__stream, .tool__body, .modelsw__item,
+.routing, .fold__body, .context-pill { font-variant-numeric: tabular-nums; }
+
+/* Transcript breathing room + readable measure. */
+.transcript { gap: var(--s-1); }
+.msg__text, .msg__stream { max-width: 78ch; }
+
+/* User message — a soft accent-tinted bubble that reads as "you". */
+.msg--user {
+  background: linear-gradient(var(--elevated), var(--surface));
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--glass-edge);
+  border-radius: var(--r-lg);
+}
+.msg__label--assistant { letter-spacing: 0.06em; }
+
+/* Tool / diff / fold cards lift off the canvas. */
+.tool, .diffview, .fold {
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--glass-edge);
+  border-radius: var(--r-md);
+}
+.tool__name, .slashmenu__name, .routing__to { font-weight: 600; }
+.routing {
+  background: color-mix(in oklch, var(--route) 14%, transparent);
+  border-color: color-mix(in oklch, var(--route) 35%, var(--border));
+}
+.routing__to { color: var(--route); }
+
+/* Designed empty conversation — replaces the black void with a soul. */
+.empty-convo {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  text-align: center;
+  padding: var(--s-6);
+  animation: rise var(--dur-slow) var(--ease-standard) both;
+}
+.empty-convo__mark {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-lg);
+  background: var(--accent-grad);
+  color: var(--text-on-accent);
+  font: 800 26px/1 'Schibsted Grotesk', sans-serif;
+  box-shadow: var(--glow-accent), inset 0 1px 0 var(--glass-edge);
+}
+.empty-convo__title { margin: 0; font: var(--type-display); color: var(--text); letter-spacing: -0.02em; }
+.empty-convo__sub { margin: 0; max-width: 44ch; color: var(--text-3); font: var(--type-body); }
+.empty-convo__chips { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; margin-top: var(--s-1); }
+.empty-convo__chip {
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-2);
+  font: var(--type-ui);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+.empty-convo__chip:hover {
+  color: var(--text);
+  border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
+  transform: translateY(-1px);
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

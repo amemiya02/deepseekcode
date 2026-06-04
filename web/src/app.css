@@ -72,3 +72,8 @@ button { font-family: inherit; }
 .line__text { white-space: pre-wrap; word-break: break-word; }
 .line--add { background: var(--add-bg); color: var(--add-fg); }
 .line--del { background: var(--del-bg); color: var(--del-fg); }
+
+/* RoutingActivity */
+.routing { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--accent-weak); color: var(--text-2); font: var(--type-label); margin: var(--s-1) 0; }
+.routing__to { color: var(--accent); font-weight: 600; }
+.routing__arrow, .routing__reason { color: var(--text-3); }

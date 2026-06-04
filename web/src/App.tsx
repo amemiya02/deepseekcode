@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WorkspacePanel } from './components/WorkspacePanel'
-import { RewindMenu } from './components/RewindMenu'
 import { rewind, fork, summarize, switchSession } from './lib/checkpoint'
+import type { TranscriptMessage } from './lib/checkpoint'
 import { LocaleProvider, useLocale, useT } from './lib/i18n'
 import { ThemeProvider } from './components/shell/ThemeProvider'
 import { ErrorBoundary } from './components/shell/ErrorBoundary'
@@ -41,8 +41,10 @@ function AppInner() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [mode, setMode] = useState<AutonomyMode>('ask')
-  const [items, dispatch] = useReducer(
-    (state: TranscriptItem[], event: Parameters<typeof applyEvent>[1]) => applyEvent(state, event),
+  const [items, setItems] = useState<TranscriptItem[]>([])
+  // dispatch wraps applyEvent so existing call sites need no changes.
+  const dispatch = useCallback(
+    (event: Parameters<typeof applyEvent>[1]) => setItems((s) => applyEvent(s, event)),
     [],
   )
 
@@ -133,28 +135,39 @@ function AppInner() {
     // TODO(wave-5): wire into Composer draft when Composer accepts a controlled value prop
   }
 
+  // Map the flat TranscriptMessage[] returned by switchSession back to the
+  // typed TranscriptItem[] the Transcript component renders.
+  function transcriptFromMessages(msgs: TranscriptMessage[]): TranscriptItem[] {
+    return msgs.map((m): TranscriptItem => {
+      if (m.role === 'user') return { type: 'user', text: m.text }
+      return { type: 'assistant', text: m.text, streaming: false }
+    })
+  }
+
   // Wave-5: per-user-message rewind/fork/summarize callbacks that drive
   // web/src/lib/checkpoint.ts then repaint via switchSession.
   const onRewind = async (keepMessages: number, scope: 'code' | 'conversation' | 'both') => {
     if (!sessionId) return
     await rewind(sessionId, keepMessages, scope)
     const res = await switchSession(sessionId)
-    // Repaint transcript from truncated history.
-    res.messages.forEach(() => {}) // switchSession result drives store in future; no-op here until sessionStore lands
+    // Repaint transcript from truncated history (Contract 4 non-negotiable).
+    setItems(transcriptFromMessages(res.messages))
     setWorkspaceRefreshKey((k) => k + 1)
   }
 
   const onFork = async () => {
     if (!sessionId) return
     const child = await fork(sessionId)
-    await switchSession(child.session_id)
+    const res = await switchSession(child.session_id)
     setSessionId(child.session_id)
+    setItems(transcriptFromMessages(res.messages))
   }
 
   const onSummarize = async (mode: 'from' | 'upto', index: number) => {
     if (!sessionId) return
     await summarize(sessionId, mode, index, '')
-    await switchSession(sessionId)
+    const res = await switchSession(sessionId)
+    setItems(transcriptFromMessages(res.messages))
   }
 
   const commands = useMemo<Command[]>(
@@ -176,7 +189,7 @@ function AppInner() {
 
   const conversation = (
     <div data-testid="zone-conversation" className="conversation-zone">
-      <Transcript items={items} />
+      <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
       <PlanTodoPanel items={planItems} onDismiss={() => setPlanItems([])} />
       {pendingAsk && <AskCard request={pendingAsk} onAnswer={onAskAnswer} onDismiss={onAskDismiss} />}
       <Composer

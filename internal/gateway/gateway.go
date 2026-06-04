@@ -182,10 +182,18 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 				h.mu.Lock()
 				h.pendingPerm[id] = pendingPermission{respond: ev.Respond}
 				h.mu.Unlock()
-				h.hub.broadcast(sid, sseEvent{name: "permission_request", data: mustJSON(map[string]any{
-					"id": id, "tool": ev.ToolName, "args": ev.ToolArgs,
-					"options": permissionOptions(),
-				})})
+				// ev.ToolArgs is a raw JSON string; unmarshal into RawMessage so
+			// the SSE payload carries args as a JSON object (Record<string,unknown>),
+			// not a double-encoded JSON string — Contract 2.
+			var argsRaw json.RawMessage
+			if err := json.Unmarshal([]byte(ev.ToolArgs), &argsRaw); err != nil {
+				// Fallback: wrap as a single-field object so the wire type stays object.
+				argsRaw = json.RawMessage(`{"_raw":` + mustJSON(ev.ToolArgs) + `}`)
+			}
+			h.hub.broadcast(sid, sseEvent{name: "permission_request", data: mustJSON(map[string]any{
+				"id": id, "tool": ev.ToolName, "args": argsRaw,
+				"options": permissionOptions(),
+			})})
 			case acp.EventKindAsk:
 				id := fmt.Sprintf("ask-%d", h.intSeq.Add(1))
 				h.mu.Lock()

@@ -322,9 +322,14 @@ func TestPromptEmitsPermissionRequest(t *testing.T) {
 	}
 	defer stream.Body.Close()
 
+	promptCtx, promptCancel := context.WithCancel(context.Background())
+	t.Cleanup(promptCancel)
 	go func() {
 		body := `{"prompt":"again","session_id":"` + first.SessionID + `"}`
-		r, _ := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(body))
+		req2, _ := http.NewRequestWithContext(promptCtx, http.MethodPost, ts.URL+"/v1/prompt",
+			strings.NewReader(body))
+		req2.Header.Set("Content-Type", "application/json")
+		r, _ := http.DefaultClient.Do(req2)
 		if r != nil {
 			r.Body.Close()
 		}
@@ -353,8 +358,9 @@ func TestPromptEmitsPermissionRequest(t *testing.T) {
 		t.Fatal("expected a permission_request SSE event")
 	}
 	var p struct {
-		ID      string `json:"id"`
-		Tool    string `json:"tool"`
+		ID      string                 `json:"id"`
+		Tool    string                 `json:"tool"`
+		Args    map[string]interface{} `json:"args"`
 		Options []struct {
 			Value       string `json:"value"`
 			Label       string `json:"label"`
@@ -366,6 +372,13 @@ func TestPromptEmitsPermissionRequest(t *testing.T) {
 	}
 	if p.ID == "" || p.Tool != "write_file" {
 		t.Fatalf("permission_request payload = %+v", p)
+	}
+	// Contract 2: args must be a JSON object (Record<string,unknown>), not a string.
+	if p.Args == nil {
+		t.Fatalf("permission_request args must be a JSON object, got nil (was it double-encoded as a string?)")
+	}
+	if _, ok := p.Args["path"]; !ok {
+		t.Errorf("permission_request args missing 'path' key, got %v", p.Args)
 	}
 	wantLabels := []string{"Deny", "Allow once", "Allow for session", "Always allow"}
 	if len(p.Options) != len(wantLabels) {

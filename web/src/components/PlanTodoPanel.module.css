@@ -1,0 +1,72 @@
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  padding: 0;
+}
+.title {
+  font-weight: 600;
+  font-size: 0.85em;
+}
+.progress {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-family: var(--font-mono);
+}
+.dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85em;
+}
+.icoDone {
+  color: var(--success);
+}
+.icoActive {
+  color: var(--accent);
+}
+.icoPending {
+  color: var(--text-faint);
+}
+.text {
+  color: var(--text);
+}
+.textDone {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}

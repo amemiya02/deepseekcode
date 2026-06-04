@@ -17,6 +17,8 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
 	"github.com/amemiya02/deepseekcode/internal/gateway"
+	"github.com/amemiya02/deepseekcode/internal/session"
+	"github.com/amemiya02/deepseekcode/internal/snapshots"
 )
 
 // stdinForServe is the reader used by the ACP path. It defaults to os.Stdin
@@ -145,7 +147,25 @@ func hostOf(addr string) string {
 // print it. Factored out of runServe so the auth decision is unit-testable
 // without binding a socket or driving a signal.
 func buildServeHandler(sm *acp.SessionManager, bindAddr string) (http.Handler, string) {
-	handler := gateway.NewHandler(sm, os.Getenv("DEEPSEEKCODE_TRACE_JSONL"))
+	// Wire the same capabilities the in-process desktop gateway (DefaultHandler)
+	// gets, so `dsc serve` is not a degraded shell: the process working dir as the
+	// workspace root (makes /v1/files, /v1/file and /v1/add-to-chat work instead of
+	// 400 "no workspace root"), a session.Store and a snapshots.Manager (enable the
+	// checkpoint/rewind/fork endpoints). The session store is best-effort: if it
+	// cannot open we warn and keep serving — file/agent features still work, only
+	// checkpoint/rewind degrade to 501.
+	wd, _ := os.Getwd()
+	opts := []gateway.Option{
+		gateway.WithWorkspaceRoot(wd),
+		gateway.WithSnapshots(snapshots.New("")),
+	}
+	if store, err := session.Open(""); err != nil {
+		fmt.Fprintf(os.Stderr, "dsc serve: session store unavailable (%v) — checkpoint/rewind disabled\n", err)
+	} else {
+		opts = append(opts, gateway.WithStore(store))
+	}
+
+	handler := gateway.NewHandler(sm, os.Getenv("DEEPSEEKCODE_TRACE_JSONL"), opts...)
 	if isLoopbackHost(hostOf(bindAddr)) {
 		return handler, ""
 	}

@@ -50,6 +50,7 @@ function AppInner() {
 
   // Wave-5 state
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+  const [composerDraft, setComposerDraft] = useState<string | undefined>(undefined)
 
   // Wave-4 state
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
@@ -128,11 +129,9 @@ function AppInner() {
   }
 
   // Wave-5: add-to-chat handler — content is appended to the composer draft.
-  // Composer manages its own internal text state; this is a stub until Wave 2's
-  // Composer exposes a controlled draft prop.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleAddToChat = (_content: string) => {
-    // TODO(wave-5): wire into Composer draft when Composer accepts a controlled value prop
+  // Contract 4 non-negotiable: add-to-chat content must be appended to the composer draft.
+  const handleAddToChat = (content: string) => {
+    setComposerDraft((d) => (d ? d + '\n\n' + content : content))
   }
 
   // Map the flat TranscriptMessage[] returned by switchSession back to the
@@ -199,6 +198,7 @@ function AppInner() {
         onSend={handleSubmit}
         onCancel={onStop}
         onModeChange={setMode}
+        draft={composerDraft}
       />
       <PermissionModal
         open={pendingPermission !== null}

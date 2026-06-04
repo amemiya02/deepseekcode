@@ -25,7 +25,7 @@ export interface ComposerPayload {
 const ORDER: AutonomyMode[] = ['ask', 'auto-edit', 'plan', 'yolo']
 
 export function Composer({
-  streaming, mode, commands, onSend, onCancel, onModeChange, disabled = false,
+  streaming, mode, commands, onSend, onCancel, onModeChange, disabled = false, draft,
 }: {
   streaming: boolean
   mode: AutonomyMode
@@ -34,9 +34,22 @@ export function Composer({
   onCancel: () => void
   onModeChange: (mode: AutonomyMode) => void
   disabled?: boolean
+  /** External content to append to the draft (e.g. from add-to-chat). */
+  draft?: string
 }) {
   const t = useT()
   const [text, setText] = useState('')
+
+  // When an external draft is injected (e.g. via add-to-chat), append it once.
+  const prevDraftRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (draft !== undefined && draft !== prevDraftRef.current) {
+      prevDraftRef.current = draft
+      setText((prev) => (prev ? prev + '\n\n' + draft : draft))
+      // Focus so the user can see the appended content immediately.
+      taRef.current?.focus()
+    }
+  }, [draft])
   const [pills, setPills] = useState<ContextPill[]>([])
   const [files, setFiles] = useState<File[]>([])
   const [active, setActive] = useState(0)

@@ -114,14 +114,23 @@ describe('App — Wave 4 wiring', () => {
 describe('App workspace zone (Wave 5)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    // Root file listing for the mounted WorkspacePanel.
+    // Route fetch calls: files listing → entries; add-to-chat → content pill.
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] }),
-      } as Response),
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('add-to-chat')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ content: 'main.go' }),
+          } as Response)
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] }),
+        } as Response)
+      }),
     )
     // EventSource is referenced by the App's stream client; stub a no-op.
     vi.stubGlobal(
@@ -134,5 +143,20 @@ describe('App workspace zone (Wave 5)', () => {
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
     await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
+  })
+
+  it('add-to-chat appends content to the composer draft (Contract 4)', async () => {
+    render(<App />)
+    // WorkspacePanel exposes an add-to-chat button per file; simulate it by
+    // finding the first such button after the panel mounts.
+    const zone = screen.getByTestId('zone-workspace')
+    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
+    // Locate the add-to-chat button rendered by FileTree for the mock file.
+    // FileTree renders data-testid={`add-${entry.name}`}.
+    const addBtn = await screen.findByTestId('add-main.go')
+    fireEvent.click(addBtn)
+    // The composer input should now contain the appended content.
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
+    await waitFor(() => expect(input.value).toContain('main.go'))
   })
 })

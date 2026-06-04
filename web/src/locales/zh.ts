@@ -94,4 +94,10 @@ export const zhCN: Record<string, string> = {
   'update.available': '有新版本可用：',
   'update.download': '下载',
   'update.dismiss': '关闭',
+  'onboarding.title': '欢迎',
+  'onboarding.connectKey': '连接您的 API 密钥',
+  'onboarding.next': '下一步',
+  'onboarding.chooseTheme': '选择主题',
+  'onboarding.permissionDefault': '默认自主级别',
+  'onboarding.finish': '完成',
 }

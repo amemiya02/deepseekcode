@@ -96,4 +96,10 @@ export const en: Record<string, string> = {
   'update.available': 'A new version is available:',
   'update.download': 'Download',
   'update.dismiss': 'Dismiss',
+  'onboarding.title': 'Welcome',
+  'onboarding.connectKey': 'Connect your API key',
+  'onboarding.next': 'Next',
+  'onboarding.chooseTheme': 'Choose a theme',
+  'onboarding.permissionDefault': 'Default autonomy',
+  'onboarding.finish': 'Finish',
 }

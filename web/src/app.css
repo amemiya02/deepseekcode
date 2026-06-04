@@ -82,3 +82,14 @@ button { font-family: inherit; }
 .fold { border: 1px dashed var(--border); border-radius: var(--r-sm); margin: var(--s-1) 0; }
 .fold__toggle { width: 100%; text-align: left; background: var(--surface); border: none; color: var(--text-2); padding: 4px var(--s-2); cursor: pointer; font: var(--type-label); }
 .fold__body { margin: 0; padding: var(--s-2); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 320px; overflow: auto; }
+
+/* Messages */
+.msg--user { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; }
+.msg--assistant { padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; }
+.msg__label { font: var(--type-label); color: var(--text-3); text-transform: uppercase; margin-bottom: 4px; }
+.msg__label--assistant { color: var(--accent); }
+.msg__pills { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.pill { background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 6px; font: var(--type-label); }
+.msg__text, .msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
+.cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
+@keyframes blink { 50% { opacity: 0; } }

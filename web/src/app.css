@@ -114,3 +114,10 @@ button { font-family: inherit; }
 .slashmenu__kind { color: var(--text-3); font: var(--type-label); }
 .filemenu__icon { color: var(--text-2); }
 .filemenu__icon--dir { color: var(--accent); }
+
+/* AutonomyToggle */
+.autonomy { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-2); font: var(--type-label); padding: 2px 8px; cursor: pointer; }
+.autonomy__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.autonomy--auto-edit .autonomy__dot { background: var(--info); }
+.autonomy--plan .autonomy__dot { background: var(--accent); }
+.autonomy--yolo .autonomy__dot { background: var(--danger); }

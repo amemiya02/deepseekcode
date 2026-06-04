@@ -403,6 +403,18 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 		base.Sandbox.AllowNetwork = ov.Sandbox.AllowNetwork
 	}
 
+	// UI string fields: copy when the overlay explicitly sets them so that a
+	// process restart (or second GET /v1/config) round-trips saved values.
+	if ov.UI.Language != "" {
+		base.UI.Language = ov.UI.Language
+	}
+	if ov.UI.Accent != "" {
+		base.UI.Accent = ov.UI.Accent
+	}
+	if ov.UI.Density != "" {
+		base.UI.Density = ov.UI.Density
+	}
+
 	// UI: TransparentBackground defaults to false, so only flip when the
 	// overlay explicitly defined it (mirrors sandbox/web bool handling).
 	if meta.IsDefined("ui", "transparent_background") {

@@ -29,7 +29,10 @@ func TestPermissionRoundTrip(t *testing.T) {
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		ts.URL+"/v1/events?session_id="+first.SessionID, nil)
-	stream, _ := http.DefaultClient.Do(req)
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open event stream: %v", err)
+	}
 	defer stream.Body.Close()
 
 	go func() {
@@ -94,7 +97,10 @@ func TestAskRoundTrip(t *testing.T) {
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		ts.URL+"/v1/events?session_id="+first.SessionID, nil)
-	stream, _ := http.DefaultClient.Do(req)
+	stream, err2 := http.DefaultClient.Do(req)
+	if err2 != nil {
+		t.Fatalf("open event stream: %v", err2)
+	}
 	defer stream.Body.Close()
 
 	go func() {

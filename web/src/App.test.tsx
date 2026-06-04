@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { App } from './App'
@@ -108,5 +108,31 @@ describe('App — Wave 4 wiring', () => {
     await startTurn(user)
     await user.click(await screen.findByTestId('send-stop'))
     expect(api.cancelTurn).toHaveBeenCalledWith('sess-1')
+  })
+})
+
+describe('App workspace zone (Wave 5)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    // Root file listing for the mounted WorkspacePanel.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] }),
+      } as Response),
+    )
+    // EventSource is referenced by the App's stream client; stub a no-op.
+    vi.stubGlobal(
+      'EventSource',
+      vi.fn().mockImplementation(() => ({ close: vi.fn(), addEventListener: vi.fn() })),
+    )
+  })
+
+  it('mounts WorkspacePanel into the workspace zone', async () => {
+    render(<App />)
+    const zone = screen.getByTestId('zone-workspace')
+    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
   })
 })

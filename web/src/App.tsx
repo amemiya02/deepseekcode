@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { WorkspacePanel } from './components/WorkspacePanel'
+import { RewindMenu } from './components/RewindMenu'
+import { rewind, fork, summarize, switchSession } from './lib/checkpoint'
 import { LocaleProvider, useLocale, useT } from './lib/i18n'
 import { ThemeProvider } from './components/shell/ThemeProvider'
 import { ErrorBoundary } from './components/shell/ErrorBoundary'
@@ -43,6 +46,9 @@ function AppInner() {
     [],
   )
 
+  // Wave-5 state
+  const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+
   // Wave-4 state
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
@@ -83,6 +89,8 @@ function AppInner() {
         // not accumulate across turns.
         clientRef.current.close()
         setStreaming(false)
+        // Bump the workspace refresh key so ChangedFiles re-fetches after a turn.
+        setWorkspaceRefreshKey((k) => k + 1)
       },
       // Wave-4 handlers
       onPermissionRequest: (req) => setPendingPermission(req),
@@ -115,6 +123,38 @@ function AppInner() {
       clientRef.current.close()
       setStreaming(false)
     }
+  }
+
+  // Wave-5: add-to-chat handler — content is appended to the composer draft.
+  // Composer manages its own internal text state; this is a stub until Wave 2's
+  // Composer exposes a controlled draft prop.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleAddToChat = (_content: string) => {
+    // TODO(wave-5): wire into Composer draft when Composer accepts a controlled value prop
+  }
+
+  // Wave-5: per-user-message rewind/fork/summarize callbacks that drive
+  // web/src/lib/checkpoint.ts then repaint via switchSession.
+  const onRewind = async (keepMessages: number, scope: 'code' | 'conversation' | 'both') => {
+    if (!sessionId) return
+    await rewind(sessionId, keepMessages, scope)
+    const res = await switchSession(sessionId)
+    // Repaint transcript from truncated history.
+    res.messages.forEach(() => {}) // switchSession result drives store in future; no-op here until sessionStore lands
+    setWorkspaceRefreshKey((k) => k + 1)
+  }
+
+  const onFork = async () => {
+    if (!sessionId) return
+    const child = await fork(sessionId)
+    await switchSession(child.session_id)
+    setSessionId(child.session_id)
+  }
+
+  const onSummarize = async (mode: 'from' | 'upto', index: number) => {
+    if (!sessionId) return
+    await summarize(sessionId, mode, index, '')
+    await switchSession(sessionId)
   }
 
   const commands = useMemo<Command[]>(
@@ -164,7 +204,11 @@ function AppInner() {
             <AppShell
               sessions={<div className={styles.zonePad} data-testid="zone-sessions">{t('zone.sessions')}</div>}
               conversation={conversation}
-              workspace={<div className={styles.zonePad} data-testid="zone-workspace">{t('zone.workspace')}</div>}
+              workspace={
+                <div data-testid="zone-workspace">
+                  <WorkspacePanel refreshKey={workspaceRefreshKey} onAddToChat={handleAddToChat} />
+                </div>
+              }
             />
           </div>
         </div>

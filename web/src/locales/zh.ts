@@ -1,0 +1,20 @@
+// zh-CN UI strings — must mirror en.ts's key set (runtime parity test in i18n.test.tsx).
+export const zhCN: Record<string, string> = {
+  'app.title': 'DeepSeekCode',
+  'app.newSession': '新建会话',
+  'app.openPalette': '打开命令面板',
+  'titlebar.branch': '分支',
+  'titlebar.theme': '主题',
+  'titlebar.toggleMode': '切换明暗',
+  'palette.placeholder': '搜索命令、文件、会话…',
+  'palette.results': '{n} 项结果',
+  'palette.empty': '无匹配项',
+  'shell.collapseSessions': '收起会话栏',
+  'shell.collapseWorkspace': '收起工作区',
+  'zone.sessions': '会话',
+  'zone.conversation': '对话',
+  'zone.workspace': '工作区',
+  'error.title': '出现错误',
+  'error.retry': '重试',
+  'toast.dismiss': '关闭',
+}

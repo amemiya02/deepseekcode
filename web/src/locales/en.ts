@@ -80,4 +80,11 @@ export const en: Record<string, string> = {
   'settings.proxyUrl': 'Proxy URL',
   'settings.proxyEnvNote': 'In env mode, DEEPSEEKCODE_PROXY / HTTPS_PROXY / NO_PROXY from the environment are used.',
   'settings.cjkNote': 'Non-UTF-8 files (GBK / GB18030) are detected and round-tripped so CJK content is preserved on read and write.',
+  'settings.mcp': 'MCP',
+  'settings.skills': 'Skills',
+  'settings.hooks': 'Hooks',
+  'settings.memory': 'Memory',
+  'settings.extensionsEmpty': 'Nothing configured yet.',
+  'settings.enabled': 'enabled',
+  'settings.disabled': 'disabled',
 }

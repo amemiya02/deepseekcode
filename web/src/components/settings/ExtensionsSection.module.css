@@ -1,0 +1,9 @@
+.h2 { font: var(--type-title); color: var(--text); margin: 0 0 var(--s-3, 12px); }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: var(--s-3, 12px); }
+.tab { background: none; border: none; color: var(--text-2); padding: var(--s-1, 4px) var(--s-3, 12px); cursor: pointer; font: var(--type-ui); }
+.tabActive { color: var(--text); border-bottom: 2px solid var(--accent); }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { display: flex; justify-content: space-between; align-items: center; padding: var(--s-2, 8px) 0; border-bottom: 1px solid var(--border); }
+.name { color: var(--text); font: var(--type-body); }
+.badge { color: var(--text-3); font: var(--type-label); }
+.on { color: var(--success); }

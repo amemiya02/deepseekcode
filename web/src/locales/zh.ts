@@ -78,4 +78,11 @@ export const zhCN: Record<string, string> = {
   'settings.proxyUrl': '代理 URL',
   'settings.proxyEnvNote': '在 env 模式下，使用环境中的 DEEPSEEKCODE_PROXY / HTTPS_PROXY / NO_PROXY。',
   'settings.cjkNote': '非 UTF-8 文件（GBK / GB18030）会被自动检测并进行往返转换，以保留读写时的中文内容。',
+  'settings.mcp': 'MCP',
+  'settings.skills': '技能',
+  'settings.hooks': '钩子',
+  'settings.memory': '记忆',
+  'settings.extensionsEmpty': '尚未配置任何内容。',
+  'settings.enabled': '已启用',
+  'settings.disabled': '已禁用',
 }

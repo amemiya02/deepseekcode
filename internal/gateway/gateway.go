@@ -70,6 +70,7 @@ type Handler struct {
 	pendingPerm map[string]pendingPermission
 	pendingAsk  map[string]pendingAsk
 	intSeq      atomic.Int64 // interaction id sequence
+	sessions    *sessionStore
 }
 
 // NewHandler builds the gateway handler over an existing SessionManager. The
@@ -84,6 +85,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
 		hub:         newHub(),
 		pendingPerm: make(map[string]pendingPermission),
 		pendingAsk:  make(map[string]pendingAsk),
+		sessions:    newSessionStore(),
 	}
 	h.mux.HandleFunc("/v1/prompt", h.handlePrompt)
 	h.mux.HandleFunc("/v1/cache", h.handleCache)
@@ -91,6 +93,8 @@ func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
 	h.mux.HandleFunc("/v1/cancel", h.handleCancel)
 	h.mux.HandleFunc("/v1/permission", h.handlePermission)
 	h.mux.HandleFunc("/v1/answer", h.handleAnswer)
+	h.mux.HandleFunc("/v1/sessions", h.handleSessions)
+	h.mux.HandleFunc("/v1/sessions/", h.handleSessionByID)
 	// Catch-all: anything not under /v1 is served by the embedded SPA. The
 	// "/" pattern is the lowest-priority match in a ServeMux, so the explicit
 	// /v1/* patterns above always win.

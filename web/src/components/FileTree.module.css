@@ -1,0 +1,63 @@
+.tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.filter {
+  margin: 4px;
+  padding: 4px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px;
+  overflow: auto;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 3px 4px;
+  cursor: pointer;
+  font: inherit;
+  border-radius: var(--r-sm);
+}
+.dir .name {
+  color: var(--accent);
+}
+.name:hover {
+  background: var(--accent-weak);
+}
+.add {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+}
+.add:hover {
+  color: var(--accent);
+}
+.empty {
+  color: var(--text-3);
+  padding: 8px;
+  font-size: 0.85rem;
+}

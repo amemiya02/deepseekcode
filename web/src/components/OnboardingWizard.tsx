@@ -3,11 +3,12 @@ import { useState } from 'react'
 import { t } from '../lib/i18n'
 import { connectKey, saveConfig } from '../lib/system'
 import { setThemeSettings } from '../lib/theme'
+import type { Theme } from '../lib/theme/tokens'
 import styles from './OnboardingWizard.module.css'
 
 type Step = 'key' | 'theme' | 'permission'
 
-const THEMES = ['graphite', 'lumen', 'halo']
+const THEMES = ['graphite', 'lumen', 'halo'] as const
 const PERMS = ['ask', 'auto-edit', 'plan', 'yolo']
 
 export interface OnboardingWizardProps {
@@ -20,7 +21,7 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('https://api.deepseek.com')
   const [model, setModel] = useState('deepseek-v4')
-  const [chosenTheme, setChosenTheme] = useState('graphite')
+  const [chosenTheme, setChosenTheme] = useState<Theme>('graphite')
   const [permissionDefault, setPermissionDefault] = useState('ask')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')

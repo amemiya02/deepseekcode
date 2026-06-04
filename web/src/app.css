@@ -102,3 +102,15 @@ button { font-family: inherit; }
 .context-pill { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 1px 4px 1px 8px; font: var(--type-label); }
 .context-pill__remove { background: none; border: none; color: var(--text-3); cursor: pointer; display: inline-flex; padding: 0; }
 .context-pill__remove:hover { color: var(--danger); }
+
+/* SlashMenu / FileMenu (shared .slashmenu container) */
+.slashmenu { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
+.slashmenu__item { display: flex; align-items: center; gap: 8px; padding: 4px var(--s-2); background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); }
+.slashmenu__item--active { background: var(--accent-weak); }
+.slashmenu__name { font: var(--type-mono); color: var(--accent); }
+.slashmenu__name--file { color: var(--text); }
+.slashmenu__hint { color: var(--text-2); font: var(--type-label); }
+.slashmenu__desc { color: var(--text-2); font: var(--type-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.slashmenu__kind { color: var(--text-3); font: var(--type-label); }
+.filemenu__icon { color: var(--text-2); }
+.filemenu__icon--dir { color: var(--accent); }

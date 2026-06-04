@@ -4,7 +4,7 @@
 // upgrade behind React.lazy/Suspense whose fallback IS the PlainCode rows — so
 // tests (which never resolve the Monaco chunk) and Linux WebKitGTK both use the
 // fallback path. The per-hunk controls + onHunk contract are identical either way.
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import { useT } from '../lib/i18n'
 import { parseHunks } from '../lib/diff'
@@ -22,10 +22,15 @@ export function DiffView({
   const hunks = parseHunks(patch)
   // null = undecided, true = accepted, false = rejected
   const [decisions, setDecisions] = useState<Array<boolean | null>>(() => hunks.map(() => null))
+  // Ref mirrors decisions for synchronous guard — prevents onHunk from firing
+  // twice on a rapid double-click before React re-renders and disables the button.
+  const committedRef = useRef<Array<boolean | null>>(hunks.map(() => null))
 
   const decide = (index: number, accepted: boolean) => {
+    // Synchronous guard: bail out if already decided (ref is always up-to-date).
+    if (committedRef.current[index] !== null) return
+    committedRef.current[index] = accepted
     setDecisions((prev) => {
-      if (prev[index] !== null) return prev
       const next = prev.slice()
       next[index] = accepted
       return next

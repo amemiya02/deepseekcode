@@ -120,35 +120,15 @@ export interface Balance {
   amount: number
 }
 
-// ---- Live (SSE) payloads — Contract 2 snake_case fields ----
+// ---- Live (SSE) payload aliases — point to the canonical Contract 2 types ----
+// These aliases exist so cockpit/store code can import descriptive names without
+// duplicating interface definitions that would diverge from StreamHandlers callbacks.
 
-export interface LiveCache {
-  turn_pct: number // 0..1 this-turn cache-hit rate
-  avg_pct: number // 0..1 session rolling avg
-  prefixes: number // count of distinct cached prefixes (1 == stable)
-  eviction: boolean // full-body eviction this turn
-}
-
-export interface LiveCost {
-  turn_cny: number
-  session_cny: number
-  output_tokens: number
-}
-
-export interface RoutingHop {
-  from: string
-  to: string
-  reason: string
-}
-
-export interface JobStatus {
-  running: number
-}
-
-export interface RetryStatus {
-  attempt: number
-  max: number
-}
+export type LiveCache = CacheUpdateEvent
+export type LiveCost = CostUpdateEvent
+export type RoutingHop = RoutingEvent
+export type JobStatus = JobUpdateEvent
+export type RetryStatus = RetryEvent
 
 export async function fetchCacheReport(): Promise<CacheReport> {
   const res = await fetch('/v1/cache')

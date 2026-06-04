@@ -345,11 +345,10 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Wave-5 stub handlers — replaced by real implementations in Tasks 3–7.
+// Wave-5 stub handlers — replaced by real implementations in Tasks 4–7.
 // /v1/files, /v1/file, /v1/changed are owned by Wave 1 (workspace.go).
 // handleRewind is implemented in checkpoint.go (Task 2).
-func (h *Handler) handleFork(w http.ResponseWriter, r *http.Request)      { http.Error(w, "not implemented", http.StatusNotImplemented) }
-func (h *Handler) handleBranch(w http.ResponseWriter, r *http.Request)    { http.Error(w, "not implemented", http.StatusNotImplemented) }
+// handleBranch and handleFork are implemented in checkpoint.go (Task 3).
 func (h *Handler) handleSwitch(w http.ResponseWriter, r *http.Request)    { http.Error(w, "not implemented", http.StatusNotImplemented) }
 func (h *Handler) handleSummarize(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
 func (h *Handler) handleAddToChat(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }

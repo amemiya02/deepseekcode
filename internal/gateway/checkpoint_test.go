@@ -106,6 +106,73 @@ func TestRewindConversationTruncates(t *testing.T) {
 	}
 }
 
+func TestBranchCreatesChild(t *testing.T) {
+	ts, store, sid, _ := newCheckpointServer(t)
+
+	body := `{"session_id":"` + sid + `","branch_point":2}`
+	resp, err := http.Post(ts.URL+"/v1/branch", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		SessionID   string `json:"session_id"`
+		ParentID    string `json:"parent_id"`
+		BranchPoint int    `json:"branch_point"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.ParentID != sid {
+		t.Errorf("parent_id = %q, want %q", out.ParentID, sid)
+	}
+	if out.BranchPoint != 2 {
+		t.Errorf("branch_point = %d, want 2", out.BranchPoint)
+	}
+	child, err := store.GetSession(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("get child: %v", err)
+	}
+	if child.ParentID != sid || child.BranchPoint != 2 {
+		t.Errorf("child = {parent:%q bp:%d}, want {%q 2}", child.ParentID, child.BranchPoint, sid)
+	}
+}
+
+func TestForkBranchesAtEnd(t *testing.T) {
+	ts, store, sid, _ := newCheckpointServer(t)
+
+	resp, err := http.Post(ts.URL+"/v1/fork", "application/json",
+		strings.NewReader(`{"session_id":"`+sid+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		SessionID   string `json:"session_id"`
+		BranchPoint int    `json:"branch_point"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.BranchPoint != 4 { // seed has 4 messages
+		t.Errorf("branch_point = %d, want 4", out.BranchPoint)
+	}
+	// The fork shares all 4 messages via Replay (no copy).
+	msgs, err := store.Replay(context.Background(), out.SessionID)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Errorf("replayed %d messages, want 4", len(msgs))
+	}
+}
+
 func TestRewindCodeRestoresSnapshot(t *testing.T) {
 	ts, _, sid, snapRoot := newCheckpointServer(t)
 

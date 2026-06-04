@@ -76,3 +76,92 @@ func (h *Handler) handleRewind(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+// branchRequest forks a session at an explicit branch_point (message index).
+// Messages are NOT copied: Store.Replay walks parents at read time, so the new
+// child shares history up to branch_point and diverges after it.
+type branchRequest struct {
+	SessionID   string `json:"session_id"`
+	BranchPoint int    `json:"branch_point"`
+}
+
+type branchResponse struct {
+	SessionID   string `json:"session_id"`
+	ParentID    string `json:"parent_id"`
+	BranchPoint int    `json:"branch_point"`
+}
+
+func (h *Handler) handleBranch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.store == nil {
+		http.Error(w, "branch unavailable: no session store", http.StatusNotImplemented)
+		return
+	}
+	var req branchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+	child, err := h.store.NewBranch(r.Context(), req.SessionID, req.BranchPoint)
+	if err != nil {
+		http.Error(w, "branch: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(branchResponse{
+		SessionID:   child.ID,
+		ParentID:    child.ParentID,
+		BranchPoint: child.BranchPoint,
+	})
+}
+
+// forkRequest forks at the END of the current history (branch_point = message
+// count) — the common "continue from here on a clean copy" gesture. It is
+// branch with an implicit branch_point, kept distinct so the SPA can label the
+// two intents differently.
+type forkRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *Handler) handleFork(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.store == nil {
+		http.Error(w, "fork unavailable: no session store", http.StatusNotImplemented)
+		return
+	}
+	var req forkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+	count, err := h.store.CountMessages(r.Context(), req.SessionID)
+	if err != nil {
+		http.Error(w, "fork: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	child, err := h.store.NewBranch(r.Context(), req.SessionID, count)
+	if err != nil {
+		http.Error(w, "fork: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(branchResponse{
+		SessionID:   child.ID,
+		ParentID:    child.ParentID,
+		BranchPoint: child.BranchPoint,
+	})
+}

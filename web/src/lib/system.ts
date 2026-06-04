@@ -20,12 +20,24 @@ export interface ConfigDTO {
   sandboxNetwork: boolean
   autoReasoning: boolean
   autoClarify: boolean
+  // Network / proxy
   proxyMode: 'auto' | 'env' | 'custom' | 'off'
   proxyScheme: 'http' | 'https' | 'socks5' | 'socks5h'
   proxyUrl: string
   noProxy: string
-  /** Client-side preference: default autonomy/permission level chosen during onboarding. */
+  // Keybindings
+  vimKeybindings: boolean
+  // Budget / tools
+  maxReadBytes: number
+  maxWriteBytes: number
+  // Permissions
   permissionDefault: string
+  // Sessions & storage
+  sessionTTLDays: number
+  sessionSnapshotKeep: number
+  sessionAutoResumeAge: number
+  // Editor / appearance
+  transparentBackground: boolean
 }
 
 export interface DoctorCheck {

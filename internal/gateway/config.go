@@ -32,6 +32,30 @@ type ConfigDTO struct {
 	SandboxNetwork      bool   `json:"sandboxNetwork"`
 	AutoReasoning       bool   `json:"autoReasoning"`
 	AutoClarify         bool   `json:"autoClarify"`
+
+	// Network / proxy
+	ProxyMode   string `json:"proxyMode"`
+	ProxyScheme string `json:"proxyScheme"`
+	ProxyURL    string `json:"proxyUrl"`
+	NoProxy     string `json:"noProxy"`
+
+	// Keybindings
+	VimKeybindings bool `json:"vimKeybindings"`
+
+	// Budget / tools
+	MaxReadBytes  int64 `json:"maxReadBytes"`
+	MaxWriteBytes int64 `json:"maxWriteBytes"`
+
+	// Permissions
+	PermissionDefault string `json:"permissionDefault"`
+
+	// Sessions & storage
+	SessionTTLDays       int `json:"sessionTTLDays"`
+	SessionSnapshotKeep  int `json:"sessionSnapshotKeep"`
+	SessionAutoResumeAge int `json:"sessionAutoResumeAge"`
+
+	// Editor / appearance
+	TransparentBackground bool `json:"transparentBackground"`
 }
 
 // Config seam: tests swap config load/save so they never touch the real
@@ -94,6 +118,30 @@ func configToDTO(c config.Config) ConfigDTO {
 		AutoReasoning:       c.Defaults.AutoReasoning,
 		AutoClarify:         c.Clarify.AutoClarify,
 		TranscriptVerbosity: "normal", // UI-only preference; persisted client-side, echoed for shape stability.
+
+		// Network / proxy
+		ProxyMode:   c.Network.ProxyMode,
+		ProxyScheme: c.Network.ProxyScheme,
+		ProxyURL:    c.Network.ProxyURL,
+		NoProxy:     c.Network.NoProxy,
+
+		// Keybindings
+		VimKeybindings: c.Defaults.VimKeybindings,
+
+		// Budget / tools
+		MaxReadBytes:  c.Tools.MaxReadBytes,
+		MaxWriteBytes: c.Tools.MaxWriteBytes,
+
+		// Permissions
+		PermissionDefault: c.Permissions.Default,
+
+		// Sessions & storage
+		SessionTTLDays:       c.Sessions.TTLDays,
+		SessionSnapshotKeep:  c.Sessions.SnapshotKeep,
+		SessionAutoResumeAge: c.Sessions.AutoResumeAge,
+
+		// Editor / appearance
+		TransparentBackground: c.UI.TransparentBackground,
 	}
 }
 
@@ -131,6 +179,49 @@ func applyDTO(c config.Config, d ConfigDTO) config.Config {
 	c.Sandbox.AllowNetwork = d.SandboxNetwork
 	c.Defaults.AutoReasoning = d.AutoReasoning
 	c.Clarify.AutoClarify = d.AutoClarify
+
+	// Network / proxy
+	if d.ProxyMode != "" {
+		c.Network.ProxyMode = d.ProxyMode
+	}
+	if d.ProxyScheme != "" {
+		c.Network.ProxyScheme = d.ProxyScheme
+	}
+	if d.ProxyURL != "" {
+		c.Network.ProxyURL = d.ProxyURL
+	}
+	c.Network.NoProxy = d.NoProxy
+
+	// Keybindings
+	c.Defaults.VimKeybindings = d.VimKeybindings
+
+	// Budget / tools
+	if d.MaxReadBytes > 0 {
+		c.Tools.MaxReadBytes = d.MaxReadBytes
+	}
+	if d.MaxWriteBytes > 0 {
+		c.Tools.MaxWriteBytes = d.MaxWriteBytes
+	}
+
+	// Permissions
+	if d.PermissionDefault != "" {
+		c.Permissions.Default = d.PermissionDefault
+	}
+
+	// Sessions & storage
+	if d.SessionTTLDays > 0 {
+		c.Sessions.TTLDays = d.SessionTTLDays
+	}
+	if d.SessionSnapshotKeep > 0 {
+		c.Sessions.SnapshotKeep = d.SessionSnapshotKeep
+	}
+	if d.SessionAutoResumeAge > 0 {
+		c.Sessions.AutoResumeAge = d.SessionAutoResumeAge
+	}
+
+	// Editor / appearance
+	c.UI.TransparentBackground = d.TransparentBackground
+
 	return c
 }
 
@@ -195,12 +286,14 @@ func saveConfigDefault(c config.Config) error {
 		"model":            c.Defaults.Model,
 		"reasoning_effort": c.Defaults.ReasoningEffort,
 		"auto_reasoning":   c.Defaults.AutoReasoning,
+		"vim_keybindings":  c.Defaults.VimKeybindings,
 	})
 	setSub(existing, "api", map[string]any{"base_url": c.API.BaseURL})
 	setSub(existing, "ui", map[string]any{
-		"language": c.UI.Language,
-		"accent":   c.UI.Accent,
-		"density":  c.UI.Density,
+		"language":               c.UI.Language,
+		"accent":                 c.UI.Accent,
+		"density":                c.UI.Density,
+		"transparent_background": c.UI.TransparentBackground,
 	})
 	setSub(existing, "routing", map[string]any{
 		"auto_route":       c.Routing.AutoRoute,
@@ -212,6 +305,24 @@ func saveConfigDefault(c config.Config) error {
 		"allow_network": c.Sandbox.AllowNetwork,
 	})
 	setSub(existing, "clarify", map[string]any{"auto_clarify": c.Clarify.AutoClarify})
+	setSub(existing, "network", map[string]any{
+		"proxy_mode":   c.Network.ProxyMode,
+		"proxy_scheme": c.Network.ProxyScheme,
+		"proxy_url":    c.Network.ProxyURL,
+		"no_proxy":     c.Network.NoProxy,
+	})
+	setSub(existing, "tools", map[string]any{
+		"max_read_bytes":  c.Tools.MaxReadBytes,
+		"max_write_bytes": c.Tools.MaxWriteBytes,
+	})
+	setSub(existing, "permissions", map[string]any{
+		"default": c.Permissions.Default,
+	})
+	setSub(existing, "sessions", map[string]any{
+		"ttl_days":             c.Sessions.TTLDays,
+		"snapshot_keep":        c.Sessions.SnapshotKeep,
+		"auto_resume_age_hours": c.Sessions.AutoResumeAge,
+	})
 
 	f, err := os.Create(path)
 	if err != nil {

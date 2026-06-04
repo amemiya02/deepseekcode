@@ -10,6 +10,14 @@ import { SandboxSection } from './SandboxSection'
 import { ExtensionsSection } from './ExtensionsSection'
 import { DoctorView } from './DoctorView'
 import { UpdatesSection } from './UpdatesSection'
+import { KeybindingsSection } from './KeybindingsSection'
+import { ModelsSection } from './ModelsSection'
+import { BudgetSection } from './BudgetSection'
+import { DuetSection } from './DuetSection'
+import { PermissionsSection } from './PermissionsSection'
+import { EditorSection } from './EditorSection'
+import { ContextSection } from './ContextSection'
+import { SessionsSection } from './SessionsSection'
 import styles from './SettingsWindow.module.css'
 
 export interface SettingsSection {
@@ -83,14 +91,30 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <GeneralSection />
     case 'appearance':
       return <AppearanceSection />
+    case 'keybindings':
+      return <KeybindingsSection />
     case 'providers':
       return <ProvidersSection />
-    case 'network':
-      return <NetworkSection />
+    case 'models':
+      return <ModelsSection />
+    case 'budget':
+      return <BudgetSection />
+    case 'duet':
+      return <DuetSection />
+    case 'permissions':
+      return <PermissionsSection />
     case 'sandbox':
       return <SandboxSection />
+    case 'editor':
+      return <EditorSection />
+    case 'context':
+      return <ContextSection />
     case 'extensions':
       return <ExtensionsSection />
+    case 'network':
+      return <NetworkSection />
+    case 'sessions':
+      return <SessionsSection />
     case 'doctor':
       return <DoctorView />
     case 'updates':

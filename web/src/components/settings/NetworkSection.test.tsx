@@ -14,6 +14,9 @@ const baseCfg: system.ConfigDTO = {
   autoReasoning: false, autoClarify: false,
   proxyMode: 'auto', proxyScheme: 'http', proxyUrl: '', noProxy: '',
   permissionDefault: 'ask',
+  vimKeybindings: true, maxReadBytes: 5242880, maxWriteBytes: 5242880,
+  sessionTTLDays: 90, sessionSnapshotKeep: 30, sessionAutoResumeAge: 24,
+  transparentBackground: false,
 }
 
 describe('NetworkSection', () => {

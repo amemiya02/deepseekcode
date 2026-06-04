@@ -29,6 +29,7 @@ type Config struct {
 	MCPServers  map[string]MCPServerConfig    `toml:"mcp_servers"`
 	Web         WebConfig                     `toml:"web"`
 	Sandbox     SandboxConfig                 `toml:"sandbox"`
+	Network     NetworkConfig                 `toml:"network"`
 	Active      ActiveConfig                  `toml:"active"`
 	Providers   map[string]ProviderConfigTOML `toml:"providers"`
 	UI          UIConfig                      `toml:"ui"`
@@ -147,6 +148,24 @@ type PermissionsConfig struct {
 	AllowBash          []string    `toml:"allow_bash"`
 	SecretPathPatterns []string    `toml:"secret_path_patterns"`
 	Rules              RulesConfig `toml:"rules"`
+	// Default is the autonomy/permission level selected during onboarding.
+	// Accepted values: "ask", "auto", "full". Empty means "ask" (safest).
+	Default string `toml:"default"`
+}
+
+// NetworkConfig controls outbound proxy settings for the gateway HTTP client.
+type NetworkConfig struct {
+	// ProxyMode selects the proxy strategy: "auto" (platform default),
+	// "env" (HTTPS_PROXY / NO_PROXY env vars), "custom" (explicit URL below),
+	// "off" (bypass all proxies). Empty → "auto".
+	ProxyMode string `toml:"proxy_mode"`
+	// ProxyScheme is the scheme for the custom proxy: "http", "https",
+	// "socks5", or "socks5h". Only used when ProxyMode == "custom".
+	ProxyScheme string `toml:"proxy_scheme"`
+	// ProxyURL is the host:port (no scheme) of the custom proxy.
+	ProxyURL string `toml:"proxy_url"`
+	// NoProxy is the comma-separated no-proxy list used when ProxyMode == "custom".
+	NoProxy string `toml:"no_proxy"`
 }
 
 type RulesConfig struct {
@@ -356,6 +375,25 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	}
 	if len(ov.Permissions.Rules.Ask) > 0 {
 		base.Permissions.Rules.Ask = ov.Permissions.Rules.Ask
+	}
+	if ov.Permissions.Default != "" {
+		base.Permissions.Default = ov.Permissions.Default
+	}
+
+	// Network / proxy: copy non-empty values so users can clear fields by
+	// setting an explicit empty in project config if needed. NoProxy may
+	// legitimately be empty, so we always overlay it when the key is defined.
+	if ov.Network.ProxyMode != "" {
+		base.Network.ProxyMode = ov.Network.ProxyMode
+	}
+	if ov.Network.ProxyScheme != "" {
+		base.Network.ProxyScheme = ov.Network.ProxyScheme
+	}
+	if ov.Network.ProxyURL != "" {
+		base.Network.ProxyURL = ov.Network.ProxyURL
+	}
+	if meta.IsDefined("network", "no_proxy") {
+		base.Network.NoProxy = ov.Network.NoProxy
 	}
 
 	if ov.Sessions.TTLDays != 0 {

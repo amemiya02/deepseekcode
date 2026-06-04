@@ -60,4 +60,7 @@ export const zhCN: Record<string, string> = {
   'settings.verbositySummary': '摘要',
   'settings.autoReasoning': '自动推理',
   'settings.autoClarify': '自动澄清',
+  'settings.theme': '主题',
+  'settings.accent': '强调色',
+  'settings.density': '密度',
 }

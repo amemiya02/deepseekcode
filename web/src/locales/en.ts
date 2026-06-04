@@ -62,4 +62,7 @@ export const en: Record<string, string> = {
   'settings.verbositySummary': 'Summary',
   'settings.autoReasoning': 'Auto reasoning',
   'settings.autoClarify': 'Auto clarify',
+  'settings.theme': 'Theme',
+  'settings.accent': 'Accent',
+  'settings.density': 'Density',
 }

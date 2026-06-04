@@ -25,3 +25,10 @@ button { font-family: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Markdown */
+.markdown-body { font: var(--type-body); color: var(--text); line-height: 1.6; }
+.markdown-body pre { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--s-2); overflow-x: auto; }
+.markdown-body code.md-code { font: var(--type-mono); }
+.markdown-body table { border-collapse: collapse; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 8px; }

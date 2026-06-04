@@ -217,3 +217,63 @@ func (h *Handler) handleSwitch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+// summarizeRequest collapses a message range into a single synthetic summary
+// row via Store.ReplaceWithCompaction (the same primitive auto-compaction uses).
+//   - mode "upto": collapse [0, index).
+//   - mode "from": collapse [index, end).
+// "summary" is the replacement text; when empty a neutral placeholder is used so
+// the row is never blank (the SPA shows it as a folded "summarized" marker).
+type summarizeRequest struct {
+	SessionID string `json:"session_id"`
+	Mode      string `json:"mode"`
+	Index     int    `json:"index"`
+	Summary   string `json:"summary"`
+}
+
+type summarizeResponse struct {
+	SummaryIdx int `json:"summary_idx"`
+}
+
+func (h *Handler) handleSummarize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.store == nil {
+		http.Error(w, "summarize unavailable: no session store", http.StatusNotImplemented)
+		return
+	}
+	var req summarizeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+	summary := req.Summary
+	if summary == "" {
+		summary = "(summarized)"
+	}
+	count, err := h.store.CountMessages(r.Context(), req.SessionID)
+	if err != nil {
+		http.Error(w, "summarize: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var fromIdx, toIdx int
+	switch req.Mode {
+	case "from":
+		fromIdx, toIdx = req.Index, count
+	default: // "upto" (and empty) collapse the prefix.
+		fromIdx, toIdx = 0, req.Index
+	}
+	idx, err := h.store.ReplaceWithCompaction(r.Context(), req.SessionID, fromIdx, toIdx, summary)
+	if err != nil {
+		http.Error(w, "summarize: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summarizeResponse{SummaryIdx: idx})
+}

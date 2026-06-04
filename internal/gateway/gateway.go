@@ -350,7 +350,6 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 // handleRewind is implemented in checkpoint.go (Task 2).
 // handleBranch and handleFork are implemented in checkpoint.go (Task 3).
 // handleSwitch is implemented in checkpoint.go (Task 4).
-func (h *Handler) handleSummarize(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
 func (h *Handler) handleAddToChat(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
 
 // Start builds a default gateway (real agent factory, default trace path) and

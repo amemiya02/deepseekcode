@@ -206,6 +206,38 @@ func TestSwitchReturnsTranscript(t *testing.T) {
 	}
 }
 
+func TestSummarizeUpToCollapsesRange(t *testing.T) {
+	ts, store, sid, _ := newCheckpointServer(t)
+
+	// Collapse messages [0,3) into one summary row: "up to" message index 3.
+	body := `{"session_id":"` + sid + `","mode":"upto","index":3,"summary":"earlier work"}`
+	resp, err := http.Post(ts.URL+"/v1/summarize", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		SummaryIdx int `json:"summary_idx"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.SummaryIdx != 0 {
+		t.Errorf("summary_idx = %d, want 0", out.SummaryIdx)
+	}
+	// 4 originals → [0,3) collapsed to 1 + the trailing message = 2 rows.
+	n, err := store.CountMessages(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("messages left = %d, want 2", n)
+	}
+}
+
 func TestRewindCodeRestoresSnapshot(t *testing.T) {
 	ts, _, sid, snapRoot := newCheckpointServer(t)
 

@@ -221,3 +221,54 @@ describe('REST control helpers', () => {
     expect(await fetchModels()).toEqual([{ id: 'a', label: 'A' }])
   })
 })
+
+describe('GatewayClient cockpit SSE events', () => {
+  it('parses cache_update JSON and calls onCacheUpdate', () => {
+    const updates: unknown[] = []
+    const fakeES = {
+      addEventListener: vi.fn((type: string, cb: (e: MessageEvent) => void) => {
+        if (type === 'cache_update') {
+          cb(new MessageEvent('cache_update', {
+            data: JSON.stringify({ turn_pct: 0.9, avg_pct: 0.8, prefixes: 1, eviction: false }),
+          }))
+        }
+      }),
+      close: vi.fn(),
+    }
+    // @ts-expect-error replacing global EventSource for the test
+    global.EventSource = vi.fn(() => fakeES)
+    new GatewayClient().openEventStream('s', { onCacheUpdate: (c) => updates.push(c) })
+    expect(updates).toEqual([{ turn_pct: 0.9, avg_pct: 0.8, prefixes: 1, eviction: false }])
+  })
+
+  it('parses cost_update, routing, job_update, retry and turn_done', () => {
+    const seen: Record<string, unknown> = {}
+    const fakeES = {
+      addEventListener: vi.fn((type: string, cb: (e: MessageEvent) => void) => {
+        const payloads: Record<string, string> = {
+          cost_update: JSON.stringify({ turn_cny: 0.01, session_cny: 0.2, output_tokens: 50 }),
+          routing: JSON.stringify({ from: 'flash', to: 'pro', reason: 'hard task' }),
+          job_update: JSON.stringify({ running: 2 }),
+          retry: JSON.stringify({ attempt: 1, max: 3 }),
+          turn_done: JSON.stringify({ stop_reason: 'end_turn' }),
+        }
+        if (type in payloads) cb(new MessageEvent(type, { data: payloads[type] }))
+      }),
+      close: vi.fn(),
+    }
+    // @ts-expect-error replacing global EventSource for the test
+    global.EventSource = vi.fn(() => fakeES)
+    new GatewayClient().openEventStream('s', {
+      onCostUpdate: (c) => { seen.cost = c },
+      onRouting: (r) => { seen.routing = r },
+      onJobUpdate: (j) => { seen.job = j },
+      onRetry: (r) => { seen.retry = r },
+      onTurnDone: () => { seen.turnDone = true },
+    })
+    expect(seen.cost).toEqual({ turn_cny: 0.01, session_cny: 0.2, output_tokens: 50 })
+    expect(seen.routing).toEqual({ from: 'flash', to: 'pro', reason: 'hard task' })
+    expect(seen.job).toEqual({ running: 2 })
+    expect(seen.retry).toEqual({ attempt: 1, max: 3 })
+    expect(seen.turnDone).toBe(true)
+  })
+})

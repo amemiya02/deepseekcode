@@ -85,9 +85,12 @@ install-web: web
 web-test:
 	cd web && npm install --legacy-peer-deps && npm test
 
-# ---------- Wails desktop ----------
+# ---------- Wails desktop (v3) ----------
+# Builds the embedded SPA first (web), then the v3 desktop binary. Requires the
+# wails3 CLI (https://v3.wails.io). If wails3 is unavailable, this target fails
+# loudly — the SPA + gateway paths (build-web, dsc serve) do not depend on it.
 desktop: web
-	cd desktop && wails build -tags withwebapp
+	cd desktop && wails3 build -tags withwebapp
 
 # ---------- CI gate ----------
 ci: web-test test

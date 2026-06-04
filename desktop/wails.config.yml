@@ -1,0 +1,48 @@
+# Wails v3 project configuration (replaces the v2 desktop/wails.json).
+#
+# This is the canonical, version-controlled v3 project config (the v3 schema
+# wails3 reads from build/config.yml). Because desktop/build/ is a gitignored
+# generated-assets tree, this tracked copy lives at desktop/wails.config.yml;
+# copy it into place before running wails3:
+#   cp desktop/wails.config.yml desktop/build/config.yml
+# When `info` or `fileAssociations` change, regenerate the platform build
+# assets with `wails3 task common:update:build-assets` (run from desktop/ once
+# the wails3 CLI is installed).
+version: '3'
+
+# Used to generate the platform build assets (Info.plist, manifests, etc.).
+info:
+  companyName: "amemiya02"
+  productName: "DeepSeekCode"
+  productIdentifier: "com.amemiya02.deepseekcode"
+  description: "DeepSeekCode desktop"
+  copyright: "(c) 2026, amemiya02"
+  comments: "DeepSeekCode — agentic coding, local-first."
+  version: "0.0.1"
+
+# Dev mode configuration (wails3 dev). The SPA lives in ../web and is built by
+# `make web` into ../webapp/dist, which the Go app embeds via webapp.DistFS().
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - ../web/node_modules
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 build DEV=true
+      type: blocking
+    - cmd: wails3 task run
+      type: primary
+
+# No file associations.
+fileAssociations: []

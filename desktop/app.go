@@ -7,11 +7,16 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/gateway"
 	"github.com/amemiya02/deepseekcode/internal/version"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// App is the Wails application context.
-// Its methods are exported to the frontend via Wails's JS bridge.
+// App is the Wails v3 application service.
+//
+// Its exported methods are bound to the frontend via Wails v3's generated
+// JS bindings (the SPA reaches them through web/src/lib/desktopBridge.ts).
+// App is registered as a v3 Service in main.go; the v3 runtime calls
+// ServiceStartup once the application context is available, which is where the
+// in-process gateway goroutine is launched.
 type App struct {
 	ctx  context.Context
 	port int
@@ -19,18 +24,26 @@ type App struct {
 
 func newApp(port int) *App { return &App{port: port} }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+// ServiceName satisfies the optional v3 application.ServiceName interface so the
+// generated bindings and logs use the stable name "App" (matching the v2
+// `Bind: []interface{}{app}` behaviour the SPA bridge expects).
+func (a *App) ServiceName() string { return "App" }
 
-	// Launch the in-process gateway so the SPA's /v1/* calls reach the agent.
-	// It binds 127.0.0.1:<port> (matching the Vite proxy and App.GetPort()) and
-	// shuts down when ctx is cancelled (Wails cancels it on window close), so
-	// the goroutine terminates cleanly with the app.
+// ServiceStartup is the v3 service lifecycle hook (replaces the v2 OnStartup
+// callback). It receives the application context, which the v3 runtime cancels
+// on shutdown — so the gateway goroutine terminates cleanly with the app, the
+// same ctx-cancel-on-close semantics as the v2 wrapper.
+//
+// Launch the in-process gateway so the SPA's /v1/* calls reach the agent. It
+// binds 127.0.0.1:<port> (matching the Vite proxy and App.GetPort()).
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	a.ctx = ctx
 	go func() {
 		if err := gateway.Start(a.ctx, a.port); err != nil {
 			log.Printf("desktop: gateway stopped: %v", err)
 		}
 	}()
+	return nil
 }
 
 // GetVersion returns the dsc binary version string for display in the UI.
@@ -45,17 +58,16 @@ func (a *App) GetPort() int {
 }
 
 // OpenFileDialog opens the native OS file picker and returns the selected path.
-// The frontend calls this via window.go.App.OpenFileDialog().
+// The frontend calls this through web/src/lib/desktopBridge.ts.
 //
 // OpenFileDialog cannot be unit-tested without a live Wails context; tested
-// manually via wails dev.
+// manually via wails3 dev.
 func (a *App) OpenFileDialog() (string, error) {
-	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Open file",
-		Filters: []runtime.FileFilter{
-			{DisplayName: "All Files", Pattern: "*.*"},
-		},
-	})
+	path, err := application.Get().Dialog.OpenFile().
+		SetTitle("Open file").
+		CanChooseFiles(true).
+		AddFilter("All Files", "*.*").
+		PromptForSingleSelection()
 	if err != nil {
 		return "", fmt.Errorf("file dialog: %w", err)
 	}

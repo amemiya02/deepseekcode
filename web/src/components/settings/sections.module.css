@@ -1,0 +1,26 @@
+.h2 { font: var(--type-title); color: var(--text); margin: 0 0 var(--s-4, 16px); }
+.field { display: flex; flex-direction: column; gap: var(--s-1, 4px); margin-bottom: var(--s-4, 16px); color: var(--text-2); font: var(--type-ui); }
+.toggle { display: flex; flex-direction: row; align-items: center; gap: var(--s-2, 8px); margin-bottom: var(--s-3, 12px); color: var(--text-2); font: var(--type-ui); }
+.select, .input {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 4px);
+  padding: var(--s-1, 4px);
+  font: var(--type-ui);
+}
+.input.mono { font: var(--type-mono); }
+.note { color: var(--text-3); font: var(--type-label); margin: var(--s-2, 8px) 0 0; }
+.button {
+  padding: var(--s-1, 4px) var(--s-3, 12px);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--r-sm, 4px);
+  cursor: pointer;
+  font: var(--type-ui);
+}
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
+.button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+.ok { color: var(--success); font: var(--type-body); }
+.err { color: var(--danger); font: var(--type-body); }

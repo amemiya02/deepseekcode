@@ -1,0 +1,53 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+.window {
+  position: relative;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  width: min(900px, 92vw);
+  height: min(640px, 88vh);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 12px);
+  overflow: hidden;
+}
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s-2, 8px);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.railBtn {
+  text-align: left;
+  padding: var(--s-1, 4px) var(--s-2, 8px);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm, 4px);
+  color: var(--text-2);
+  cursor: pointer;
+  font: var(--type-ui);
+}
+.railBtn.active { background: var(--accent-weak); color: var(--text); }
+.panel { padding: var(--s-5, 20px); overflow-y: auto; }
+.placeholder h2 { font: var(--type-title); color: var(--text); }
+.placeholder p { font: var(--type-body); color: var(--text-3); }
+.close {
+  position: absolute;
+  top: var(--s-2, 8px);
+  right: var(--s-2, 8px);
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+}

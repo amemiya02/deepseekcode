@@ -173,6 +173,39 @@ func TestForkBranchesAtEnd(t *testing.T) {
 	}
 }
 
+func TestSwitchReturnsTranscript(t *testing.T) {
+	ts, _, sid, _ := newCheckpointServer(t)
+
+	resp, err := http.Post(ts.URL+"/v1/switch", "application/json",
+		strings.NewReader(`{"session_id":"`+sid+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+		Messages  []struct {
+			Role string `json:"role"`
+			Text string `json:"text"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.SessionID != sid {
+		t.Errorf("session_id = %q, want %q", out.SessionID, sid)
+	}
+	if len(out.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4", len(out.Messages))
+	}
+	if out.Messages[0].Role != "user" {
+		t.Errorf("first role = %q, want user", out.Messages[0].Role)
+	}
+}
+
 func TestRewindCodeRestoresSnapshot(t *testing.T) {
 	ts, _, sid, snapRoot := newCheckpointServer(t)
 

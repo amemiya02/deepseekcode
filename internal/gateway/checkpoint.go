@@ -165,3 +165,55 @@ func (h *Handler) handleFork(w http.ResponseWriter, r *http.Request) {
 		BranchPoint: child.BranchPoint,
 	})
 }
+
+// switchRequest selects an existing session and returns its replayed transcript
+// so the SPA can repaint the conversation when the user clicks a sidebar item or
+// after a branch/fork. The "active session" is a client-side notion (the gateway
+// is stateless per-request); switch just touches last_used and replays.
+type switchRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+// transcriptMessage is the SPA-facing flattened message shape.
+type transcriptMessage struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+type switchResponse struct {
+	SessionID string              `json:"session_id"`
+	Messages  []transcriptMessage `json:"messages"`
+}
+
+func (h *Handler) handleSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.store == nil {
+		http.Error(w, "switch unavailable: no session store", http.StatusNotImplemented)
+		return
+	}
+	var req switchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+	msgs, err := h.store.Replay(r.Context(), req.SessionID)
+	if err != nil {
+		http.Error(w, "switch: "+err.Error(), http.StatusNotFound)
+		return
+	}
+	_ = h.store.TouchLastUsed(r.Context(), req.SessionID)
+
+	out := switchResponse{SessionID: req.SessionID}
+	for _, m := range msgs {
+		out.Messages = append(out.Messages, transcriptMessage{Role: m.Role, Text: m.Content})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}

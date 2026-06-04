@@ -2,8 +2,12 @@ package gateway_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
@@ -68,5 +72,84 @@ func TestNewHandlerWithOptionsServesCache(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestRewindConversationTruncates(t *testing.T) {
+	ts, store, sid, _ := newCheckpointServer(t)
+
+	body := `{"session_id":"` + sid + `","keep_messages":2,"scope":"conversation"}`
+	resp, err := http.Post(ts.URL+"/v1/rewind", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		RemovedMessages int `json:"removed_messages"`
+		RestoredFiles   int `json:"restored_files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.RemovedMessages != 2 {
+		t.Errorf("removed_messages = %d, want 2", out.RemovedMessages)
+	}
+	n, err := store.CountMessages(context.Background(), sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("messages left = %d, want 2", n)
+	}
+}
+
+func TestRewindCodeRestoresSnapshot(t *testing.T) {
+	ts, _, sid, snapRoot := newCheckpointServer(t)
+
+	// Build a Manager at the SAME root the server uses so Take here and the
+	// endpoint's Undo share on-disk state.
+	snaps := snapshots.New(snapRoot)
+
+	work := t.TempDir()
+	f := filepath.Join(work, "tracked.txt")
+	if err := os.WriteFile(f, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Snapshot the pre-edit state for this session (stepIdx=0), then mutate the file.
+	// Real API: Take(sessionID string, stepIdx int, paths []string) (int, error)
+	if _, err := snaps.Take(sid, 0, []string{f}); err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if err := os.WriteFile(f, []byte("edited"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"session_id":"` + sid + `","keep_messages":4,"scope":"code"}`
+	resp, err := http.Post(ts.URL+"/v1/rewind", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var out struct {
+		RestoredFiles int `json:"restored_files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.RestoredFiles < 1 {
+		t.Errorf("restored_files = %d, want >= 1", out.RestoredFiles)
+	}
+	got, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original" {
+		t.Errorf("file content = %q, want %q (snapshot not restored)", got, "original")
 	}
 }

@@ -143,9 +143,9 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 			h.hub.broadcast(sid, mapAgentEvent(ev))
 		}
 		if err := h.sm.Prompt(runCtx, sid, prompt, onEvent); err != nil {
-			// Ensure subscribers see a terminal "done" even on dispatch failure
+			// Ensure subscribers see a terminal "turn_done" even on dispatch failure
 			// (e.g. session vanished) so the SPA's onDone fires.
-			h.hub.broadcast(sid, sseEvent{name: "done", data: "error: " + err.Error()})
+			h.hub.broadcast(sid, sseEvent{name: "turn_done", data: "error: " + err.Error()})
 		}
 	}()
 
@@ -190,7 +190,7 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			// SSE framing: event: <name>\ndata: <payload>\n\n
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data)
 			flusher.Flush()
-			if ev.name == "done" {
+			if ev.name == "turn_done" {
 				return
 			}
 		}

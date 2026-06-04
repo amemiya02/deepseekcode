@@ -191,7 +191,7 @@ func TestPromptReturnsIDs(t *testing.T) {
 }
 
 // TestEventsStreamsDone drives a full stub run and asserts the SSE stream emits
-// the named events the SPA listens for, ending with "done".
+// the named events the SPA listens for, ending with "turn_done".
 func TestEventsStreamsDone(t *testing.T) {
 	ts := newTestServer(t, "")
 
@@ -238,7 +238,7 @@ func TestEventsStreamsDone(t *testing.T) {
 		}
 	}()
 
-	// 3. Read SSE frames until "done".
+	// 3. Read SSE frames until "turn_done".
 	scanner := bufio.NewScanner(streamResp.Body)
 	var sawDelta, sawStep, sawDone bool
 	var lastEvent string
@@ -247,22 +247,22 @@ func TestEventsStreamsDone(t *testing.T) {
 		if name, ok := strings.CutPrefix(line, "event: "); ok {
 			lastEvent = name
 			switch name {
-			case "delta":
+			case "message_delta":
 				sawDelta = true
 			case "step":
 				sawStep = true
-			case "done":
+			case "turn_done":
 				sawDone = true
 			}
 		}
-		if lastEvent == "done" && strings.HasPrefix(line, "data: ") {
+		if lastEvent == "turn_done" && strings.HasPrefix(line, "data: ") {
 			break
 		}
 	}
 	if !sawDone {
 		t.Error("expected a 'done' SSE event")
 	}
-	// delta and step are best-effort (stub emits them), but done is the
+	// message_delta and step are best-effort (stub emits them), but turn_done is the
 	// load-bearing terminal event the SPA requires.
 	_ = sawDelta
 	_ = sawStep

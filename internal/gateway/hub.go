@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
@@ -77,25 +78,44 @@ func (h *hub) broadcast(sessionID string, ev sseEvent) {
 	}
 }
 
-// mapAgentEvent translates an acp.AgentEvent into a named SSE frame for the
-// SPA. The SPA listens for "delta" (text token), "tool" (tool name), "step"
-// (step summary) and "done" (end). The acp layer collapses tool-call and
-// step-finish bus events into EventKindInfo before they reach this layer, so
-// Info maps to "step"; an explicit tool event would map to "tool" if the acp
-// AgentEvent vocabulary grows one.
+// mapAgentEvent translates an acp.AgentEvent into a named SSE frame using the
+// spec §8.1 event vocabulary. Structured kinds carry a JSON object as data so
+// the SPA can parse fields; the legacy text kinds carry the raw text. The
+// permission_request / ask_request frames are NOT produced here — the gateway
+// emits those itself after registering the interaction in its pending map (it
+// needs to inject the assigned id), so this function only covers the
+// fire-and-forget kinds.
 func mapAgentEvent(ev acp.AgentEvent) sseEvent {
 	switch ev.Kind {
 	case acp.EventKindTextDelta:
-		return sseEvent{name: "delta", data: ev.Text}
+		return sseEvent{name: "message_delta", data: ev.Text}
 	case acp.EventKindInfo:
 		return sseEvent{name: "step", data: ev.Text}
+	case acp.EventKindToolStart:
+		return sseEvent{name: "tool_start", data: mustJSON(map[string]any{
+			"id": ev.ToolCallID, "name": ev.ToolName, "args": ev.ToolArgs,
+		})}
+	case acp.EventKindToolEnd:
+		return sseEvent{name: "tool_end", data: mustJSON(map[string]any{
+			"id": ev.ToolCallID, "result": ev.ToolResult, "is_error": ev.ToolIsErr,
+		})}
 	case acp.EventKindDone:
 		data := ev.StopReason
 		if ev.Err != nil {
 			data = "error: " + ev.Err.Error()
 		}
-		return sseEvent{name: "done", data: data}
+		return sseEvent{name: "turn_done", data: data}
 	default:
 		return sseEvent{name: "step", data: ev.Text}
 	}
+}
+
+// mustJSON marshals v to a compact JSON string; on the (impossible for these
+// map[string]any payloads) marshal error it returns "{}".
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }

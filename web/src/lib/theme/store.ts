@@ -10,7 +10,9 @@ export interface ThemeSettings {
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   theme: 'graphite',
-  mode: 'dark',
+  // Light-first: the brand default is the light palette (spec §3.2); the dark
+  // terminal-island palette ships but is opt-in.
+  mode: 'light',
   density: 'comfortable',
   accent: 'indigo',
 }

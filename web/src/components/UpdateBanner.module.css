@@ -10,15 +10,15 @@
 }
 .text { flex: 1; }
 .action {
-  background: var(--accent-grad);
+  background: var(--accent);
   color: var(--text-on-accent);
   border: none;
-  border-radius: var(--r-sm, 4px);
+  border-radius: var(--r-sm, 9px);
   padding: 2px var(--s-2, 8px);
   cursor: pointer;
   font: var(--type-label);
   box-shadow: var(--glow-accent);
 }
-.action:hover { filter: brightness(1.08); }
+.action:hover { background: var(--accent-ink); box-shadow: var(--glow-accent-hover); }
 .dismiss { display: grid; place-items: center; background: none; border: none; color: var(--text-3); cursor: pointer; }
 .dismiss:hover { color: var(--text); }

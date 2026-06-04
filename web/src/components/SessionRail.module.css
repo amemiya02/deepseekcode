@@ -15,16 +15,16 @@
   width: 100%;
   padding: var(--s-2);
   cursor: pointer;
-  background: var(--accent-grad);
+  background: var(--accent);
   color: var(--text-on-accent);
   border: none;
   border-radius: var(--r-md);
   font: var(--type-ui);
   font-weight: 600;
-  box-shadow: var(--glow-accent), inset 0 1px 0 var(--glass-edge);
-  transition: filter var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
+  box-shadow: var(--glow-accent);
+  transition: background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
-.new:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.new:hover { background: var(--accent-ink); box-shadow: var(--glow-accent-hover); transform: translateY(-1px); }
 .search {
   display: flex;
   align-items: center;

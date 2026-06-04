@@ -7,6 +7,7 @@ import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCard } from './ToolCard'
 import { RoutingActivity } from './RoutingActivity'
+import { Logo } from './Logo'
 import { t } from '../lib/i18n'
 
 export interface TranscriptRewindHandlers {
@@ -20,7 +21,9 @@ export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[];
     <div className="transcript" data-testid="transcript">
       {items.length === 0 && (
         <div className="empty-convo" data-testid="empty-convo">
-          <div className="empty-convo__mark" aria-hidden="true">d</div>
+          <div className="empty-convo__mark">
+            <Logo size={32} />
+          </div>
           <h2 className="empty-convo__title">{t('empty.title', 'Ready when you are')}</h2>
           <p className="empty-convo__sub">
             {t(

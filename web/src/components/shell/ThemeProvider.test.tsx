@@ -16,24 +16,28 @@ describe('ThemeProvider', () => {
   it('writes semantic CSS variables onto :root on mount', () => {
     render(<ThemeProvider><div>child</div></ThemeProvider>)
     const root = document.documentElement
-    expect(root.style.getPropertyValue('--bg')).toContain('oklch')
-    expect(root.style.getPropertyValue('--accent')).toContain('oklch')
+    // Brand light is the default (spec §3.2): exact-hex surface + the one accent.
+    expect(root.style.getPropertyValue('--bg')).toBe('#f5f6f8')
+    expect(root.style.getPropertyValue('--accent')).toBe('#4d6bfe')
   })
 
   it('sets data-theme/-mode/-density attributes from the store', () => {
     render(<ThemeProvider><div>child</div></ThemeProvider>)
     const root = document.documentElement
     expect(root.getAttribute('data-theme')).toBe('graphite')
-    expect(root.getAttribute('data-mode')).toBe('dark')
+    expect(root.getAttribute('data-mode')).toBe('light')
     expect(root.getAttribute('data-density')).toBe('comfortable')
   })
 
   it('updates the applied tokens when settings change', () => {
     render(<ThemeProvider><div>child</div></ThemeProvider>)
-    const before = document.documentElement.style.getPropertyValue('--accent')
-    act(() => setThemeSettings({ accent: 'emerald' }))
-    const after = document.documentElement.style.getPropertyValue('--accent')
+    // The single brand accent no longer varies by picker, but mode swaps the
+    // whole palette (light default → dark terminal island), so --bg re-applies.
+    const before = document.documentElement.style.getPropertyValue('--bg')
+    act(() => setThemeSettings({ mode: 'dark' }))
+    const after = document.documentElement.style.getPropertyValue('--bg')
     expect(after).not.toBe(before)
+    expect(after).toBe('#0b0d13')
   })
 
   it('renders its children', () => {

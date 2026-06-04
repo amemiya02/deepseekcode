@@ -35,8 +35,9 @@ describe('TitleBar', () => {
   it('toggles light/dark mode via the mode button', async () => {
     const user = userEvent.setup()
     renderTitleBar()
-    expect(useThemeStore.getState().settings.mode).toBe('dark')
-    await user.click(screen.getByTestId('toggle-mode'))
+    // Light is the brand default (spec §3.2); the toggle flips to the dark island.
     expect(useThemeStore.getState().settings.mode).toBe('light')
+    await user.click(screen.getByTestId('toggle-mode'))
+    expect(useThemeStore.getState().settings.mode).toBe('dark')
   })
 })

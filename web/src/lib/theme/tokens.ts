@@ -49,114 +49,136 @@ export interface TokenInput {
   accent: Accent
 }
 
-/** Lightness ramp per mode. index 0 = bg .. 4 = overlay (surface ladder). */
-function surfaceLightness(mode: Mode): number[] {
-  switch (mode) {
-    case 'light':
-      return [0.985, 0.965, 0.94, 0.99, 0.92]
-    case 'dark':
-      // bg .. card climb for elevation; overlay is the dim scrim (darkest).
-      return [0.155, 0.19, 0.225, 0.205, 0.1]
-    case 'hc':
-      return [0.08, 0.12, 0.16, 0.14, 0.2]
-  }
-}
-
-/** Text lightness triple [primary, secondary, dim] per mode. */
-function textLightness(mode: Mode): number[] {
-  switch (mode) {
-    case 'light':
-      return [0.2, 0.42, 0.58]
-    case 'dark':
-      return [0.96, 0.74, 0.56]
-    case 'hc':
-      return [1.0, 0.86, 0.7]
-  }
-}
-
-function oklch(l: number, c: number, h: number): string {
-  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${h.toFixed(1)})`
-}
-
 function spacingScale(density: Density): number {
   return density === 'compact' ? 3 : 4
 }
 
+// ── Brand anchors (spec §3.2 light / §3.3 dark) ──────────────────────────────
+// These hex values are the brand contract; the surface + accent anchors are
+// pixel-exact, never OKLCH-derived. The OKLCH ramp still drives accent *scales*
+// and density elsewhere, but the chrome reads pure brand.
+const SANS =
+  "'IBM Plex Sans', 'IBM Plex Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif"
+const MONO = "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace"
+
+/** The single brand accent. One blue, everywhere. */
+const ACCENT = '#4d6bfe'
+const ACCENT_INK = '#2b46d4' // hover
+const ACCENT_DEEP = '#1f33a8' // pressed
+const ACCENT_WEAK = '#eef1ff' // wash / active fill (light)
+const ACCENT_MIST = '#f5f7ff' // faintest tint (light)
+
+/** Light palette (§3.2). */
+const LIGHT = {
+  bg: '#f5f6f8',
+  bg2: '#eef0f4', // recessed / hover fill
+  surface: '#ffffff',
+  ink: '#0d1016',
+  inkSoft: '#4d5560',
+  inkFaint: '#8a929e',
+  line: '#e4e7ec',
+  lineSoft: '#eef0f3',
+} as const
+
+/** Dark "terminal island" palette (§3.3). */
+const DARK = {
+  bg: '#0b0d13',
+  bg2: '#0f1320',
+  surface: '#11141d',
+  ink: '#d6dae4',
+  inkSoft: '#9aa3b4',
+  inkFaint: '#6b7385',
+  line: '#1d2230',
+  lineSoft: '#161b27',
+  accentText: '#7d97ff', // lighter accent for legibility on dark
+} as const
+
 export function buildTokens(input: TokenInput): Record<string, string> {
-  const theme = THEMES.find((t) => t.id === input.theme) ?? THEMES[0]
-  const accent = ACCENTS.find((a) => a.id === input.accent) ?? ACCENTS[0]
-  const sl = surfaceLightness(input.mode)
-  const tl = textLightness(input.mode)
-  const bh = theme.baseHue
-  const bc = theme.baseChroma
+  // The chrome reads a single brand accent (spec §3), so the chosen `accent`
+  // and `theme` no longer steer the palette — they remain on TokenInput for the
+  // settings UI + future per-surface scales. Mode (light default / dark island)
+  // selects the brand palette below.
   const isHC = input.mode === 'hc'
   const isLight = input.mode === 'light'
-
-  // Border contrast: HC pushes the border lightness away from bg for visibility.
-  const borderL = isHC ? (isLight ? 0.55 : 0.62) : isLight ? 0.86 : 0.34
-  const borderStrongL = isHC ? (isLight ? 0.4 : 0.78) : isLight ? 0.74 : 0.46
-
-  const accentL = isHC ? 0.68 : input.mode === 'dark' ? 0.62 : 0.55
 
   const step = spacingScale(input.density)
   const sp = (n: number) => `${step * n}px`
 
-  // Dark + high-contrast share a dark canvas; light is the exception.
+  // Dark + high-contrast share the dark terminal-island canvas; light is default.
   const isDarkish = input.mode !== 'light'
-  // Surfaces carry a faint blue undertone on dark canvases (deep-space, not dead gray).
-  const sc = isDarkish ? bc + 0.012 : bc
-  const accentCss = oklch(accentL, accent.c, accent.h)
+  const p = isLight ? LIGHT : DARK
+
+  // High-contrast strengthens borders/text against the dark canvas.
+  const border = isHC ? '#3a4254' : isLight ? LIGHT.line : DARK.line
+  const borderStrong = isHC ? '#5b6478' : isLight ? '#cfd4dc' : '#2a3142'
+  const lineSoft = isLight ? LIGHT.lineSoft : DARK.lineSoft
+
+  // Accent text: lighter blue on dark for legibility; brand-ink on light.
+  const accentText = isLight ? ACCENT_INK : DARK.accentText
+  const accentWeak = isLight ? ACCENT_WEAK : 'color-mix(in oklch, #4d6bfe 22%, #11141d)'
 
   return {
-    // Surface ladder (faint blue undertone on dark canvases for depth)
-    '--bg': oklch(sl[0], sc, bh),
-    '--surface': oklch(sl[1], sc, bh),
-    '--elevated': oklch(sl[2], sc, bh),
-    '--card': oklch(sl[3], sc, bh),
-    '--overlay': oklch(sl[4], sc, bh),
+    // Surface ladder (§3.2 / §3.3 brand anchors)
+    '--bg': p.bg,
+    '--surface': p.surface,
+    '--elevated': p.bg2,
+    '--card': p.surface,
+    '--overlay': isLight ? '#ffffff' : '#0f1320',
     // Lines
-    '--border': oklch(borderL, sc, bh),
-    '--border-strong': oklch(borderStrongL, sc, bh),
-    '--focus-ring': accentCss,
+    '--border': border,
+    '--border-strong': borderStrong,
+    '--line-soft': lineSoft,
+    '--focus-ring': ACCENT,
     // Glass edge — a 1px top highlight so panels read as lifted, not painted-on.
-    '--glass-edge': isDarkish ? 'oklch(1 0 0 / 0.055)' : 'oklch(1 0 0 / 0.9)',
-    // Elevation shadows
-    '--shadow-1': isDarkish ? '0 1px 2px oklch(0 0 0 / 0.4)' : '0 1px 2px oklch(0 0 0 / 0.08)',
-    '--shadow-2': isDarkish ? '0 10px 34px -8px oklch(0 0 0 / 0.55)' : '0 10px 30px -10px oklch(0 0 0 / 0.18)',
-    '--shadow-pop': isDarkish ? '0 24px 64px -16px oklch(0 0 0 / 0.7)' : '0 24px 64px -16px oklch(0 0 0 / 0.25)',
+    '--glass-edge': isDarkish ? 'oklch(1 0 0 / 0.05)' : 'oklch(1 0 0 / 0.9)',
+    // Elevation shadows (light §3.6; dark code islands deeper)
+    '--shadow-1': isDarkish
+      ? '0 1px 2px rgba(5,8,16,.5)'
+      : '0 1px 2px rgba(13,16,22,.05)',
+    '--shadow-2': isDarkish
+      ? '0 24px 60px -18px rgba(5,8,16,.6)'
+      : '0 4px 14px rgba(13,16,22,.06)',
+    '--shadow-pop': isDarkish
+      ? '0 40px 80px -28px rgba(15,22,55,.55)'
+      : '0 24px 60px -18px rgba(20,28,60,.30)',
     // Text
-    '--text': oklch(tl[0], bc, bh),
-    '--text-2': oklch(tl[1], bc, bh),
-    '--text-3': oklch(tl[2], bc, bh),
-    '--text-on-accent': accentL > 0.6 ? oklch(0.16, 0, 0) : oklch(0.99, 0, 0),
-    // Accent (+ a secondary for the signature indigo→cyan gradient + glow)
-    '--accent': accentCss,
-    '--accent-2': oklch(isDarkish ? 0.8 : 0.62, 0.12, 200),
-    '--accent-text': oklch(isLight ? 0.42 : 0.82, accent.c, accent.h),
-    '--accent-weak': oklch(isLight ? 0.94 : 0.26, accent.c * 0.55, accent.h),
-    '--accent-grad': `linear-gradient(135deg, ${accentCss}, ${oklch(isDarkish ? 0.8 : 0.62, 0.12, 200)})`,
-    '--glow-accent': isDarkish ? `0 0 24px -2px ${accentCss.replace(')', ' / 0.45)')}` : 'none',
-    // Telemetry — the cockpit signal colors (cache=cyan, cost=amber, route=violet)
-    '--cache': oklch(isDarkish ? 0.82 : 0.55, 0.13, 195),
-    '--cost': oklch(isDarkish ? 0.84 : 0.6, 0.12, 85),
-    '--route': oklch(isDarkish ? 0.78 : 0.58, 0.15, 300),
-    '--ring-track': oklch(isDarkish ? 0.27 : 0.9, sc, bh),
-    // Semantic
-    '--success': oklch(0.62, 0.15, 152),
-    '--danger': oklch(0.6, 0.18, 26),
-    '--warning': oklch(0.7, 0.15, 75),
-    '--info': oklch(0.62, 0.13, 230),
-    '--add-bg': oklch(isLight ? 0.94 : 0.26, 0.06, 152),
-    '--add-fg': oklch(isLight ? 0.4 : 0.8, 0.13, 152),
-    '--del-bg': oklch(isLight ? 0.95 : 0.26, 0.06, 26),
-    '--del-fg': oklch(isLight ? 0.45 : 0.8, 0.15, 26),
+    '--text': p.ink,
+    '--text-2': p.inkSoft,
+    '--text-3': p.inkFaint,
+    '--text-on-accent': '#ffffff',
+    // Accent — the ONE brand blue (glow, not gradient)
+    '--accent': ACCENT,
+    '--accent-ink': ACCENT_INK,
+    '--accent-deep': ACCENT_DEEP,
+    '--accent-text': accentText,
+    '--accent-weak': accentWeak,
+    '--accent-mist': isLight ? ACCENT_MIST : 'color-mix(in oklch, #4d6bfe 12%, #0b0d13)',
+    // The brand "gradient" is a glow, never a multi-hue ramp.
+    '--glow-accent': '0 6px 18px -6px rgba(77,107,254,.6)',
+    '--glow-accent-hover': '0 8px 22px -8px rgba(77,107,254,.7)',
+    // Telemetry — cockpit signal colors re-pointed to brand (no cyan/amber/violet)
+    '--cache': ACCENT, // cache → brand blue
+    '--cost': p.ink, // cost → ink
+    '--route': isLight ? ACCENT_INK : DARK.accentText, // route → brand tint
+    '--ring-track': isLight ? '#e4e7ec' : '#1d2230',
+    // Semantic signal colors (true status ONLY — never decoration)
+    '--success': '#3ecf8e',
+    '--danger': '#e5484d',
+    '--warning': '#e7b15b',
+    '--info': ACCENT,
+    '--add-bg': isLight ? '#eaf7f0' : 'color-mix(in oklch, #3ecf8e 18%, #0b0d13)',
+    '--add-fg': isLight ? '#1f7a52' : '#7fe3b4',
+    '--del-bg': isLight ? '#fdeceb' : 'color-mix(in oklch, #e5484d 18%, #0b0d13)',
+    '--del-fg': isLight ? '#b4322f' : '#f2a3a1',
     // Type roles: "weight size/line-height tracking" bundled per role.
-    '--type-display': '650 28px/34px -0.02em',
+    '--type-sans': SANS,
+    '--type-display': '600 28px/34px -0.02em',
     '--type-title': '600 18px/24px -0.01em',
     '--type-body': '400 14px/22px 0',
     '--type-ui': '500 13px/18px 0',
     '--type-label': '600 11px/14px 0.04em',
-    '--type-mono': "400 13px/20px 0 'JetBrains Mono', 'Geist Mono', 'Noto Sans Mono CJK SC', monospace",
+    '--type-mono': `400 13px/20px 0 ${MONO}`,
+    '--type-mono-family': MONO,
     // Spacing (4px grid, compact = 3px)
     '--s-1': sp(1),
     '--s-2': sp(2),
@@ -166,11 +188,11 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--s-6': sp(6),
     '--s-7': sp(7),
     '--s-8': sp(8),
-    // Radius
-    '--r-sm': '4px',
-    '--r-md': '8px',
-    '--r-lg': '12px',
-    '--r-xl': '16px',
+    // Radius (§3.6)
+    '--r-sm': '9px',
+    '--r-md': '14px',
+    '--r-lg': '22px',
+    '--r-xl': '28px',
     // Motion
     '--ease-standard': 'cubic-bezier(0.2, 0, 0, 1)',
     '--dur-fast': '120ms',

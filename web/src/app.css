@@ -250,3 +250,121 @@ button { font-family: inherit; }
 }
 
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 5 — Motion & Micro-interactions
+   All animations honour prefers-reduced-motion via the global
+   rule at the top of this file (0.01ms duration kills them).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Page-load staggered reveal ──────────────────────────────── */
+
+/* Keyframes */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Shell slots — each receives a short stagger so the eye reads
+   left-to-right: rail → conversation → panel. */
+.shell-rail {
+  animation: fade-in var(--dur-slow, 320ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+  animation-delay: 40ms;
+}
+.shell-main {
+  animation: fade-up var(--dur-slow, 320ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+  animation-delay: 80ms;
+}
+.shell-panel {
+  animation: fade-in var(--dur-slow, 320ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+  animation-delay: 120ms;
+}
+
+/* Title bar drops in from above */
+.titlebar {
+  animation: fade-in var(--dur-base, 200ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+  animation-delay: 0ms;
+}
+
+/* Status bar rises from below */
+.status-bar {
+  animation: fade-up var(--dur-base, 200ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+  animation-delay: 160ms;
+}
+
+/* Conversation messages stagger in with a small delay each */
+.msg--user,
+.msg--assistant {
+  animation: fade-up var(--dur-base, 200ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+}
+
+/* Session items in the rail */
+.session-item {
+  animation: fade-in var(--dur-base, 200ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)) both;
+}
+
+/* ── Micro-interactions ──────────────────────────────────────── */
+
+/* Session rail items: lift slightly on hover */
+.session-item {
+  transition: background var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              transform  var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+.session-item:hover {
+  transform: translateX(2px);
+}
+
+/* Suggestion chips: subtle upward nudge */
+.empty-convo__chip {
+  transition: color var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              border-color var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              transform var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              box-shadow var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+.empty-convo__chip:hover {
+  box-shadow: var(--shadow-1, 0 1px 3px rgba(13,16,22,.06));
+}
+
+/* Send button: scale press feedback */
+.composer__btn--send {
+  transition: background var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              box-shadow var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              transform  var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+.composer__btn--send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* ToolCard expand/collapse: smooth max-height transition */
+.tool__body {
+  transition: max-height var(--dur-base, 200ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+
+/* Hunk action buttons: gentle border-color shift on hover */
+.hunk__actions button {
+  transition: background var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              border-color var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1)),
+              color var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+.hunk__actions button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--accent, #4d6bfe) 40%, var(--border, #e4e7ec));
+  color: var(--accent, #4d6bfe);
+}
+
+/* Slash/model menu items: quick accent background on active */
+.slashmenu__item,
+.modelsw__item {
+  transition: background var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+
+/* Thinking block chevron already transitions; extend the fold toggle too */
+.fold__toggle {
+  transition: color var(--dur-fast, 120ms) var(--ease-standard, cubic-bezier(.4,0,.2,1));
+}
+.fold__toggle:hover {
+  color: var(--text, #0d1016);
+}

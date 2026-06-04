@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@monaco-editor/react": "^4.6.0",
     "cmdk": "^1.0.0",
     "highlight.js": "^11.10.0",

@@ -77,3 +77,8 @@ button { font-family: inherit; }
 .routing { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--accent-weak); color: var(--text-2); font: var(--type-label); margin: var(--s-1) 0; }
 .routing__to { color: var(--accent); font-weight: 600; }
 .routing__arrow, .routing__reason { color: var(--text-3); }
+
+/* PastedTextFold */
+.fold { border: 1px dashed var(--border); border-radius: var(--r-sm); margin: var(--s-1) 0; }
+.fold__toggle { width: 100%; text-align: left; background: var(--surface); border: none; color: var(--text-2); padding: 4px var(--s-2); cursor: pointer; font: var(--type-label); }
+.fold__body { margin: 0; padding: var(--s-2); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 320px; overflow: auto; }

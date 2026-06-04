@@ -72,4 +72,9 @@ export const en: Record<string, string> = {
   'settings.validating': 'Validating…',
   'settings.keyConnected': 'Connected — key is valid.',
   'settings.saved': 'Saved',
+  'settings.proxyMode': 'Proxy mode',
+  'settings.proxyScheme': 'Proxy scheme',
+  'settings.proxyUrl': 'Proxy URL',
+  'settings.proxyEnvNote': 'In env mode, DEEPSEEKCODE_PROXY / HTTPS_PROXY / NO_PROXY from the environment are used.',
+  'settings.cjkNote': 'Non-UTF-8 files (GBK / GB18030) are detected and round-tripped so CJK content is preserved on read and write.',
 }

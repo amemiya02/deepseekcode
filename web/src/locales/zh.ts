@@ -70,4 +70,9 @@ export const zhCN: Record<string, string> = {
   'settings.validating': '验证中…',
   'settings.keyConnected': '已连接 — 密钥有效。',
   'settings.saved': '已保存',
+  'settings.proxyMode': '代理模式',
+  'settings.proxyScheme': '代理协议',
+  'settings.proxyUrl': '代理 URL',
+  'settings.proxyEnvNote': '在 env 模式下，使用环境中的 DEEPSEEKCODE_PROXY / HTTPS_PROXY / NO_PROXY。',
+  'settings.cjkNote': '非 UTF-8 文件（GBK / GB18030）会被自动检测并进行往返转换，以保留读写时的中文内容。',
 }

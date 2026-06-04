@@ -145,7 +145,9 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 		if err := h.sm.Prompt(runCtx, sid, prompt, onEvent); err != nil {
 			// Ensure subscribers see a terminal "turn_done" even on dispatch failure
 			// (e.g. session vanished) so the SPA's onDone fires.
-			h.hub.broadcast(sid, sseEvent{name: "turn_done", data: "error: " + err.Error()})
+			h.hub.broadcast(sid, sseEvent{name: "turn_done", data: mustJSON(map[string]any{
+				"stop_reason": "error: " + err.Error(),
+			})})
 		}
 	}()
 

@@ -64,9 +64,10 @@ type AgentEvent struct {
 	Answer    func(answers [][]string)
 
 	// Tool (EventKindToolStart / EventKindToolEnd): structured tool-call info.
-	ToolCallID string
-	ToolResult string
-	ToolIsErr  bool
+	ToolCallID  string
+	ToolResult  string
+	ToolIsErr   bool
+	ToolReadOnly bool // set for EventKindToolStart; true if the tool declares IsReadOnly()
 }
 
 // AskQuestion is a UI-facing copy of one tools.Question, decoupled from the

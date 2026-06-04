@@ -14,6 +14,7 @@ import (
 type agentIface interface {
 	Bus() *agent.Bus
 	Run(ctx context.Context, userPrompt string) (agent.StopReason, error)
+	ToolIsReadOnly(name string) bool
 }
 
 // AgentAdapter adapts internal/agent.Agent to the AgentRunner interface.
@@ -69,10 +70,11 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 				onEvent(AgentEvent{Kind: EventKindInfo, Text: e.Text})
 			case agent.EventToolCallStart:
 				onEvent(AgentEvent{
-					Kind:       EventKindToolStart,
-					ToolCallID: e.Call.ID,
-					ToolName:   e.Call.Function.Name,
-					ToolArgs:   e.Call.Function.Arguments,
+					Kind:         EventKindToolStart,
+					ToolCallID:   e.Call.ID,
+					ToolName:     e.Call.Function.Name,
+					ToolArgs:     e.Call.Function.Arguments,
+					ToolReadOnly: ad.a.ToolIsReadOnly(e.Call.Function.Name),
 				})
 			case agent.EventToolCallResult:
 				onEvent(AgentEvent{

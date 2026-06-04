@@ -88,25 +88,38 @@ func (h *hub) broadcast(sessionID string, ev sseEvent) {
 func mapAgentEvent(ev acp.AgentEvent) sseEvent {
 	switch ev.Kind {
 	case acp.EventKindTextDelta:
-		return sseEvent{name: "message_delta", data: ev.Text}
-	case acp.EventKindInfo:
-		return sseEvent{name: "step", data: ev.Text}
+		return sseEvent{name: "message_delta", data: mustJSON(map[string]any{
+			"text": ev.Text,
+		})}
 	case acp.EventKindToolStart:
+		// args must be an embedded JSON object, not a string. Unmarshal the raw
+		// JSON string from ToolArgs so it is embedded as a nested object.
+		var argsObj any
+		if err := json.Unmarshal([]byte(ev.ToolArgs), &argsObj); err != nil || argsObj == nil {
+			argsObj = map[string]any{}
+		}
 		return sseEvent{name: "tool_start", data: mustJSON(map[string]any{
-			"id": ev.ToolCallID, "name": ev.ToolName, "args": ev.ToolArgs,
+			"id": ev.ToolCallID, "name": ev.ToolName, "args": argsObj, "read_only": ev.ToolReadOnly,
 		})}
 	case acp.EventKindToolEnd:
 		return sseEvent{name: "tool_end", data: mustJSON(map[string]any{
 			"id": ev.ToolCallID, "result": ev.ToolResult, "is_error": ev.ToolIsErr,
 		})}
 	case acp.EventKindDone:
-		data := ev.StopReason
+		stopReason := ev.StopReason
 		if ev.Err != nil {
-			data = "error: " + ev.Err.Error()
+			stopReason = "error: " + ev.Err.Error()
 		}
-		return sseEvent{name: "turn_done", data: data}
+		return sseEvent{name: "turn_done", data: mustJSON(map[string]any{
+			"stop_reason": stopReason,
+		})}
 	default:
-		return sseEvent{name: "step", data: ev.Text}
+		// EventKindInfo and any unknown kinds: emit as message_delta so the SPA
+		// can display them as prose. The legacy "step" event name is not part of
+		// Contract 2 and must not be emitted.
+		return sseEvent{name: "message_delta", data: mustJSON(map[string]any{
+			"text": ev.Text,
+		})}
 	}
 }
 

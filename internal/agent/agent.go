@@ -395,6 +395,17 @@ func (a *Agent) Events() <-chan Event { return a.eventsCompat }
 // (TUI/CLI) should continue using Events() for backward compatibility.
 func (a *Agent) Bus() *Bus { return a.bus }
 
+// ToolIsReadOnly reports whether the named tool declares itself read-only via
+// the tools.ReadOnlyHint interface. Returns false for unknown tools.
+func (a *Agent) ToolIsReadOnly(name string) bool {
+	if t, ok := a.Tools.Get(name); ok {
+		if ro, ok := t.(tools.ReadOnlyHint); ok {
+			return ro.IsReadOnly()
+		}
+	}
+	return false
+}
+
 // EmitInfo pushes an out-of-band notice onto the event stream. Used by
 // adjacent components (e.g. llm.Client.OnRetry) that don't otherwise
 // hold the event channel but want to surface user-visible status.

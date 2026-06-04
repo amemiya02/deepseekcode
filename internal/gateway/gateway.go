@@ -345,13 +345,6 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Wave-5 stub handlers — replaced by real implementations in Tasks 5–7.
-// /v1/files, /v1/file, /v1/changed are owned by Wave 1 (workspace.go).
-// handleRewind is implemented in checkpoint.go (Task 2).
-// handleBranch and handleFork are implemented in checkpoint.go (Task 3).
-// handleSwitch is implemented in checkpoint.go (Task 4).
-func (h *Handler) handleAddToChat(w http.ResponseWriter, r *http.Request) { http.Error(w, "not implemented", http.StatusNotImplemented) }
-
 // Start builds a default gateway (real agent factory, default trace path) and
 // runs it on 127.0.0.1:port until ctx is cancelled. It is what the desktop
 // wrapper calls in-process; it always binds loopback so the in-process gateway

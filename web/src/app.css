@@ -93,3 +93,6 @@ button { font-family: inherit; }
 .msg__text, .msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
 .cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* Transcript */
+.transcript { display: flex; flex-direction: column; padding: var(--s-3); overflow-y: auto; }

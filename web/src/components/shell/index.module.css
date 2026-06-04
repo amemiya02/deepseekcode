@@ -188,3 +188,21 @@
 .appRoot { display: flex; flex-direction: column; height: 100%; }
 .appBody { flex: 1; min-height: 0; }
 .zonePad { padding: var(--s-4); color: var(--text-3); font: var(--type-label); text-transform: uppercase; }
+
+/* Sessions zone wrapper — hosts SessionRail (which brings its own styles). */
+.sessionsZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* Workspace zone — tabbed surface (Cockpit ‖ Workspace). */
+.workspaceZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.workspaceTabs { display: flex; gap: var(--s-1); padding: var(--s-2); border-bottom: 1px solid var(--border-1); }
+.workspaceTab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font: var(--type-label);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.workspaceTab[aria-selected='true'] { color: var(--text-1); background: var(--bg-2); }

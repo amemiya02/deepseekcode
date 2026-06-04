@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WorkspacePanel } from './components/WorkspacePanel'
+import { SessionRail } from './components/SessionRail'
+import { HistoryDrawer } from './components/HistoryDrawer'
+import { StatusBarLive } from './components/StatusBarLive'
+import { Cockpit } from './components/cockpit/Cockpit'
+import { SettingsWindow } from './components/settings/SettingsWindow'
+import { OnboardingWizard } from './components/OnboardingWizard'
+import { UpdateBanner } from './components/UpdateBanner'
 import { rewind, fork, summarize, switchSession } from './lib/checkpoint'
 import type { TranscriptMessage } from './lib/checkpoint'
 import { LocaleProvider, useLocale, useT } from './lib/i18n'
@@ -11,6 +18,8 @@ import { CommandPalette, type Command } from './components/shell/CommandPalette'
 import { Toasts } from './components/shell/Toasts'
 import { isCmdK } from './lib/shortcuts'
 import { setThemeSettings, useThemeStore } from './lib/theme/store'
+import { useSessionStore } from './lib/sessionStore'
+import { fetchOnboarding, fetchUpdate, type UpdateInfo } from './lib/system'
 import { Transcript } from './components/Transcript'
 import { Composer, type ComposerPayload } from './components/Composer'
 import { PermissionModal } from './components/PermissionModal'
@@ -30,6 +39,8 @@ import type { AutonomyMode } from './components/AutonomyToggle'
 import styles from './components/shell/index.module.css'
 
 const EMPTY_PERMISSION: PermissionRequest = { id: '', tool: '', args: {}, options: [] }
+
+type WorkspaceTab = 'cockpit' | 'workspace'
 
 // AppInner lives under LocaleProvider so hooks (useT/useLocale) have their context.
 function AppInner() {
@@ -57,6 +68,21 @@ function AppInner() {
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
 
+  // Wave-3 state: sessions zone + workspace tabs
+  const sessions = useSessionStore((s) => s.sessions)
+  const activeId = useSessionStore((s) => s.activeId)
+  const loadSessions = useSessionStore((s) => s.load)
+  const createSession = useSessionStore((s) => s.create)
+  const removeSession = useSessionStore((s) => s.remove)
+  const setActiveSession = useSessionStore((s) => s.setActive)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('cockpit')
+
+  // Wave-6 state: settings / onboarding / update banner
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+
   const clientRef = useRef(new GatewayClient())
 
   // Window-level Cmd/Ctrl+K opens the palette.
@@ -71,9 +97,30 @@ function AppInner() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Load sessions once on mount so the SessionRail has data.
+  useEffect(() => {
+    void loadSessions()
+  }, [loadSessions])
+
+  // First-run onboarding + update check. Both fail closed/quiet: a failed fetch
+  // simply leaves the overlay/banner hidden.
+  useEffect(() => {
+    fetchOnboarding()
+      .then((s) => {
+        if (s.needsOnboarding) setOnboardingOpen(true)
+      })
+      .catch(() => {})
+    fetchUpdate()
+      .then((u) => {
+        if (u.updateAvailable) setUpdateInfo(u)
+      })
+      .catch(() => {})
+  }, [])
+
   async function handleSubmit(payload: ComposerPayload) {
     const sid = await submitPrompt(payload.text, sessionId ?? undefined)
     setSessionId(sid)
+    setActiveSession(sid)
     setStreaming(true)
     dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
     // Close any previous SSE connection before opening a new one to prevent
@@ -143,6 +190,39 @@ function AppInner() {
     })
   }
 
+  // Wave-3: selecting a session sets the active id and repaints the transcript
+  // from its persisted history (reusing the Wave-5 switchSession path).
+  const onSelectSession = useCallback(async (id: string) => {
+    setSessionId(id)
+    setActiveSession(id)
+    setHistoryOpen(false)
+    const res = await switchSession(id)
+    setItems(transcriptFromMessages(res.messages))
+    setWorkspaceRefreshKey((k) => k + 1)
+  }, [setActiveSession])
+
+  const onNewSession = useCallback(async () => {
+    await createSession('')
+    // create() sets activeId to the new session; mirror it into turn state and
+    // clear the transcript for a fresh conversation.
+    const newId = useSessionStore.getState().activeId
+    setSessionId(newId)
+    setItems([])
+    setPlanItems([])
+  }, [createSession])
+
+  const onDeleteSession = useCallback(
+    async (id: string) => {
+      await removeSession(id)
+      if (id === sessionId) {
+        setSessionId(null)
+        setItems([])
+        setPlanItems([])
+      }
+    },
+    [removeSession, sessionId],
+  )
+
   // Wave-5: per-user-message rewind/fork/summarize callbacks that drive
   // web/src/lib/checkpoint.ts then repaint via switchSession.
   const onRewind = async (keepMessages: number, scope: 'code' | 'conversation' | 'both') => {
@@ -159,6 +239,7 @@ function AppInner() {
     const child = await fork(sessionId)
     const res = await switchSession(child.session_id)
     setSessionId(child.session_id)
+    setActiveSession(child.session_id)
     setItems(transcriptFromMessages(res.messages))
   }
 
@@ -171,7 +252,12 @@ function AppInner() {
 
   const commands = useMemo<Command[]>(
     () => [
-      { id: 'new-session', title: t('app.newSession'), run: () => {} },
+      { id: 'new-session', title: t('app.newSession'), run: () => void onNewSession() },
+      {
+        id: 'open-settings',
+        title: t('settings.title', 'Settings'),
+        run: () => setSettingsOpen(true),
+      },
       {
         id: 'toggle-mode',
         title: t('titlebar.toggleMode'),
@@ -183,7 +269,27 @@ function AppInner() {
         run: () => setLocale(locale === 'en' ? 'zh-CN' : 'en'),
       },
     ],
-    [t, locale, setLocale],
+    [t, locale, setLocale, onNewSession],
+  )
+
+  const sessionsZone = (
+    <div className={styles.sessionsZone} data-testid="zone-sessions">
+      <SessionRail
+        sessions={sessions}
+        activeId={activeId}
+        onNew={() => void onNewSession()}
+        onSelect={(id) => void onSelectSession(id)}
+        onDelete={(id) => void onDeleteSession(id)}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
+      <HistoryDrawer
+        open={historyOpen}
+        sessions={sessions}
+        onResume={(id) => void onSelectSession(id)}
+        onDelete={(id) => void onDeleteSession(id)}
+        onClose={() => setHistoryOpen(false)}
+      />
+    </div>
   )
 
   const conversation = (
@@ -208,24 +314,54 @@ function AppInner() {
     </div>
   )
 
+  const workspaceZone = (
+    <div data-testid="zone-workspace" className={styles.workspaceZone}>
+      <div className={styles.workspaceTabs} role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspaceTab === 'cockpit'}
+          data-testid="ws-tab-cockpit"
+          className={styles.workspaceTab}
+          onClick={() => setWorkspaceTab('cockpit')}
+        >
+          {t('workspace.cockpitTab', 'Cockpit')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspaceTab === 'workspace'}
+          data-testid="ws-tab-workspace"
+          className={styles.workspaceTab}
+          onClick={() => setWorkspaceTab('workspace')}
+        >
+          {t('workspace.workspaceTab', 'Workspace')}
+        </button>
+      </div>
+      {workspaceTab === 'cockpit' ? (
+        <Cockpit sessionId={sessionId ?? undefined} />
+      ) : (
+        <WorkspacePanel refreshKey={workspaceRefreshKey} onAddToChat={handleAddToChat} />
+      )}
+    </div>
+  )
+
   return (
     <ThemeProvider>
       <ErrorBoundary>
         <div className={styles.appRoot}>
+          {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
           <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} />
           <div className={styles.appBody}>
-            <AppShell
-              sessions={<div className={styles.zonePad} data-testid="zone-sessions">{t('zone.sessions')}</div>}
-              conversation={conversation}
-              workspace={
-                <div data-testid="zone-workspace">
-                  <WorkspacePanel refreshKey={workspaceRefreshKey} onAddToChat={handleAddToChat} />
-                </div>
-              }
-            />
+            <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} />
+          </div>
+          <div data-testid="hero-statusbar">
+            <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
           </div>
         </div>
         <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+        <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
         <Toasts />
       </ErrorBoundary>
     </ThemeProvider>

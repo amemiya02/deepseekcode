@@ -1,8 +1,9 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { App } from './App'
 import { useThemeStore, DEFAULT_THEME_SETTINGS } from './lib/theme/store'
+import * as system from './lib/system'
 
 beforeEach(() => {
   localStorage.clear()
@@ -48,8 +49,16 @@ vi.mock('./lib/api', async (orig) => {
     respondPermission: vi.fn().mockResolvedValue(undefined),
     respondAnswer: vi.fn().mockResolvedValue(undefined),
     cancelTurn: vi.fn().mockResolvedValue(undefined),
+    // fetchBalance is invoked by the cockpit/hero status bar on connect; resolve
+    // it so those live subscriptions don't fire a real (relative-URL) fetch.
+    fetchBalance: vi.fn().mockResolvedValue({ provider: 'deepseek', currency: 'CNY', amount: 0 }),
     GatewayClient: class {
-      openEventStream(_sid: string, handlers: any) { captured = handlers }
+      openEventStream(_sid: string, handlers: any) {
+        // Both App's turn stream and the cockpit store's live stream share this
+        // mocked client. Only capture App's TURN handler set (it carries the
+        // permission/ask/plan callbacks) so cockpit's connect doesn't clobber it.
+        if (handlers && handlers.onPermissionRequest) captured = handlers
+      }
       close() {}
     },
   }
@@ -142,6 +151,9 @@ describe('App workspace zone (Wave 5)', () => {
   it('mounts WorkspacePanel into the workspace zone', async () => {
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
+    // The workspace zone is now tabbed (Cockpit ‖ Workspace); select the
+    // Workspace tab to mount the WorkspacePanel.
+    fireEvent.click(within(zone).getByTestId('ws-tab-workspace'))
     await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
   })
 
@@ -150,6 +162,7 @@ describe('App workspace zone (Wave 5)', () => {
     // WorkspacePanel exposes an add-to-chat button per file; simulate it by
     // finding the first such button after the panel mounts.
     const zone = screen.getByTestId('zone-workspace')
+    fireEvent.click(within(zone).getByTestId('ws-tab-workspace'))
     await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
     // Locate the add-to-chat button rendered by FileTree for the mock file.
     // FileTree renders data-testid={`add-${entry.name}`}.
@@ -158,5 +171,112 @@ describe('App workspace zone (Wave 5)', () => {
     // The composer input should now contain the appended content.
     const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
     await waitFor(() => expect(input.value).toContain('main.go'))
+  })
+})
+
+// Wave 0 final integration: SessionRail, hero StatusBar, Cockpit tab, Settings,
+// Onboarding, UpdateBanner are all composed into the shell. These tests mock the
+// system/update/onboarding reads and the sessions listing so rendering is
+// deterministic, then assert each surface mounts.
+describe('App — full shell integration (Wave 0)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    // Fail-closed by default: no onboarding, no update — keeps overlays hidden
+    // unless a test opts in.
+    vi.spyOn(system, 'fetchOnboarding').mockResolvedValue({
+      needsOnboarding: false,
+      baseUrl: '',
+      model: '',
+    })
+    vi.spyOn(system, 'fetchUpdate').mockResolvedValue({
+      current: '1.0.0',
+      latest: '1.0.0',
+      updateAvailable: false,
+      url: '',
+    })
+    // listSessions backs the SessionRail; route fetch deterministically.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/v1/sessions')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ sessions: [] }),
+          } as Response)
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ entries: [] }),
+        } as Response)
+      }),
+    )
+    vi.stubGlobal(
+      'EventSource',
+      vi.fn().mockImplementation(() => ({ close: vi.fn(), addEventListener: vi.fn() })),
+    )
+  })
+
+  it('mounts SessionRail (with the new-session control) into the sessions zone', async () => {
+    render(<App />)
+    // findBy* settles the mount-time async effects (loadSessions, onboarding,
+    // update) inside act so state updates don't warn.
+    const zone = screen.getByTestId('zone-sessions')
+    expect(await within(zone).findByTestId('session-new')).toBeInTheDocument()
+    expect(within(zone).getByTestId('session-history')).toBeInTheDocument()
+  })
+
+  it('mounts the hero status bar persistently', async () => {
+    render(<App />)
+    const hero = screen.getByTestId('hero-statusbar')
+    // The StatusBar exposes its busy dot and live cost chip.
+    expect(await within(hero).findByTestId('status-dot')).toBeInTheDocument()
+    expect(within(hero).getByTestId('turn-cost')).toBeInTheDocument()
+  })
+
+  it('exposes a Cockpit tab in the workspace zone (shown by default)', async () => {
+    render(<App />)
+    const zone = screen.getByTestId('zone-workspace')
+    expect(await within(zone).findByTestId('ws-tab-cockpit')).toBeInTheDocument()
+    expect(within(zone).getByTestId('ws-tab-workspace')).toBeInTheDocument()
+  })
+
+  it('switches the workspace zone to the Workspace (files) tab', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const zone = screen.getByTestId('zone-workspace')
+    await user.click(within(zone).getByTestId('ws-tab-workspace'))
+    await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
+  })
+
+  it('opens the SettingsWindow via the open-settings command', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    await user.click(screen.getByTestId('open-palette'))
+    await user.click(await screen.findByText('Settings'))
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  it('shows the OnboardingWizard when onboarding is needed', async () => {
+    vi.spyOn(system, 'fetchOnboarding').mockResolvedValue({
+      needsOnboarding: true,
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4',
+    })
+    render(<App />)
+    expect(await screen.findByRole('dialog', { name: 'Welcome' })).toBeInTheDocument()
+  })
+
+  it('renders the UpdateBanner when an update is available', async () => {
+    vi.spyOn(system, 'fetchUpdate').mockResolvedValue({
+      current: '1.0.0',
+      latest: '1.2.0',
+      updateAvailable: true,
+      url: 'https://example.com/download',
+    })
+    render(<App />)
+    expect(await screen.findByText('1.2.0')).toBeInTheDocument()
   })
 })

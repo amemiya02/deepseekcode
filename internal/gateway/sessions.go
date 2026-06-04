@@ -43,7 +43,28 @@ func (s *sessionStore) get(id string) (*sessionMeta, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m, ok := s.meta[id]
-	return m, ok
+	if !ok {
+		return nil, false
+	}
+	// Return a copy so callers cannot race-mutate the stored pointer.
+	cp := *m
+	return &cp, true
+}
+
+// update applies fn to a copy of the stored sessionMeta and writes the result
+// back under the lock, preventing data races on concurrent PATCH requests.
+// Returns (updated copy, true) when the id exists, (nil, false) otherwise.
+func (s *sessionStore) update(id string, fn func(*sessionMeta)) (*sessionMeta, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.meta[id]
+	if !ok {
+		return nil, false
+	}
+	cp := *m
+	fn(&cp)
+	s.meta[id] = &cp
+	return &cp, true
 }
 
 func (s *sessionStore) delete(id string) {
@@ -108,11 +129,6 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			"turn_count": m.TurnCount, "messages": []any{},
 		})
 	case http.MethodPatch:
-		m, ok := h.sessions.get(id)
-		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
 		var body struct {
 			Title string `json:"title"`
 		}
@@ -120,9 +136,14 @@ func (h *Handler) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		if body.Title != "" {
-			m.Title = body.Title
-			h.sessions.put(m)
+		m, ok := h.sessions.update(id, func(m *sessionMeta) {
+			if body.Title != "" {
+				m.Title = body.Title
+			}
+		})
+		if !ok {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
 		}
 		writeJSON(w, m)
 	case http.MethodDelete:

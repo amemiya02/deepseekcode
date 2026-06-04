@@ -206,6 +206,7 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 func Start(ctx context.Context, port int) error {
 	sm := acp.NewSessionManager(acp.RealAgentFactory)
 	handler := NewHandler(sm, defaultTracePath())
+	handler = withAuth(loadGatewayToken(), handler)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	server := &http.Server{Addr: addr, Handler: handler}

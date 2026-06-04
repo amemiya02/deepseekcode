@@ -81,6 +81,37 @@ export async function submitPrompt(prompt: string, sessionId?: string): Promise<
   return data.session_id as string
 }
 
+// ---- Wave 4: interactive permissions, ask, plan ----
+
+// PermissionDecision mirrors the gateway POST /v1/permission `decision` field
+// (spec §9): deny / allow-once / allow-for-session / always-save-to-config.
+export type PermissionDecision = 'deny' | 'once' | 'session' | 'always'
+
+// PermissionRequest is the canonical Wave-4 alias for PermissionRequestEvent (Contract 2).
+export type PermissionRequest = PermissionRequestEvent
+
+// AskOption is one selectable answer for an AskQuestion (Contract 2).
+// (PermissionOption and AskOption share the same {label,description} shape.)
+export type AskOption = PermissionOption
+
+// AskRequest is the canonical Wave-4 alias for AskRequestEvent (Contract 2).
+export type AskRequest = AskRequestEvent
+
+// AskAnswer is the POST /v1/answer body. Per question, exactly one of
+// choices/text/chat is meaningful: `choices` for option selections, `text` for
+// free text, `chat: true` for the "just chat" escape (answer nothing, keep talking).
+export interface AskAnswer {
+  id: string
+  questionIndex: number
+  choices?: string[]
+  text?: string
+  chat?: boolean
+}
+
+// PlanUpdate is the canonical Wave-4 alias for PlanUpdateEvent (Contract 2). It reuses the
+// shared PlanItem/PlanStatus types already defined in this module.
+export type PlanUpdate = PlanUpdateEvent
+
 // ---- Wave 3: session & cockpit types (Contract 1 shared types) ----
 
 // Contract-1 shared model type — defined ONCE. If an earlier wave already
@@ -147,6 +178,12 @@ async function postJSON(path: string, body: Record<string, unknown>): Promise<vo
 
 export async function cancelTurn(sessionId: string): Promise<void> {
   await postJSON('/v1/cancel', { session_id: sessionId })
+}
+export async function respondPermission(id: string, decision: PermissionDecision): Promise<void> {
+  await postJSON('/v1/permission', { id, decision })
+}
+export async function respondAnswer(answer: AskAnswer): Promise<void> {
+  await postJSON('/v1/answer', answer as unknown as Record<string, unknown>)
 }
 export async function setModel(sessionId: string, model: string): Promise<void> {
   await postJSON('/v1/model', { session_id: sessionId, model })

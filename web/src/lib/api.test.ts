@@ -191,6 +191,54 @@ describe('fetchBalance', () => {
   })
 })
 
+describe('GatewayClient — Wave 4 SSE events', () => {
+  function fakeStream(type: string, payload: unknown) {
+    const fakeES = {
+      addEventListener: vi.fn((t: string, cb: (e: MessageEvent) => void) => {
+        if (t === type) cb(new MessageEvent(t, { data: JSON.stringify(payload) }))
+      }),
+      close: vi.fn(),
+    }
+    // @ts-expect-error replacing global EventSource for the test
+    global.EventSource = vi.fn(() => fakeES)
+    return fakeES
+  }
+
+  it('decodes permission_request JSON and calls onPermissionRequest', () => {
+    const got: unknown[] = []
+    const payload = {
+      id: 'perm-1',
+      tool: 'bash',
+      args: { command: 'rm -rf build' },
+      options: [{ label: 'Allow', description: 'run it' }],
+    }
+    fakeStream('permission_request', payload)
+    new GatewayClient().openEventStream('s1', { onPermissionRequest: (p) => got.push(p) })
+    expect(got).toEqual([payload])
+  })
+
+  it('decodes ask_request JSON and calls onAskRequest', () => {
+    const got: unknown[] = []
+    const payload = {
+      id: 'ask-1',
+      questions: [
+        { question: 'Proceed?', header: 'go', multiple: false, options: [{ label: 'Yes', description: '' }] },
+      ],
+    }
+    fakeStream('ask_request', payload)
+    new GatewayClient().openEventStream('s2', { onAskRequest: (p) => got.push(p) })
+    expect(got).toEqual([payload])
+  })
+
+  it('decodes plan_update JSON and calls onPlanUpdate', () => {
+    const got: unknown[] = []
+    const payload = { items: [{ text: 'write test', status: 'in_progress' }] }
+    fakeStream('plan_update', payload)
+    new GatewayClient().openEventStream('s3', { onPlanUpdate: (p) => got.push(p) })
+    expect(got).toEqual([payload])
+  })
+})
+
 describe('REST control helpers', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch

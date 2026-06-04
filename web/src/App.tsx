@@ -67,6 +67,9 @@ function AppInner() {
     setSessionId(sid)
     setStreaming(true)
     dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+    // Close any previous SSE connection before opening a new one to prevent
+    // stale event handlers from a prior turn dispatching into current state.
+    clientRef.current.close()
     clientRef.current.openEventStream(sid, {
       onMessageDelta: (text) => dispatch({ kind: 'message_delta', text }),
       onThinkingDelta: (text) => dispatch({ kind: 'thinking_delta', text }),
@@ -76,6 +79,9 @@ function AppInner() {
       onRouting: (e) => dispatch({ kind: 'routing', from: e.from, to: e.to, reason: e.reason }),
       onTurnDone: (e) => {
         dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
+        // Close the SSE connection once the turn is complete so connections do
+        // not accumulate across turns.
+        clientRef.current.close()
         setStreaming(false)
       },
       // Wave-4 handlers
@@ -104,6 +110,9 @@ function AppInner() {
     try {
       if (sessionId) await cancelTurn(sessionId)
     } finally {
+      // Close the browser-side SSE connection so trailing server events after
+      // cancellation do not fire into stale component state.
+      clientRef.current.close()
       setStreaming(false)
     }
   }

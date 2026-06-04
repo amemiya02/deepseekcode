@@ -20,6 +20,10 @@ export interface ConfigDTO {
   sandboxNetwork: boolean
   autoReasoning: boolean
   autoClarify: boolean
+  proxyMode: 'auto' | 'env' | 'custom' | 'off'
+  proxyScheme: 'http' | 'https' | 'socks5' | 'socks5h'
+  proxyUrl: string
+  noProxy: string
 }
 
 export interface DoctorCheck {

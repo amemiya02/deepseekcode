@@ -12,6 +12,7 @@ const baseCfg: system.ConfigDTO = {
   transcriptVerbosity: 'normal', model: 'deepseek-v4', reasoningEffort: 'high',
   baseUrl: '', autoRoute: false, escalationModel: '', duetEnabled: false,
   sandboxEnabled: false, sandboxNetwork: false, autoReasoning: false, autoClarify: false,
+  proxyMode: 'auto', proxyScheme: 'http', proxyUrl: '', noProxy: '',
 }
 
 describe('AppearanceSection', () => {

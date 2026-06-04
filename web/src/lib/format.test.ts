@@ -40,27 +40,51 @@ function sess(id: string, updatedMs: number): Session {
   return { id, title: id, turns: 1, updated_at: updatedMs, created_at: updatedMs }
 }
 
+// Build timezone-safe anchors using local-time setHours so tests are correct
+// on any host timezone (UTC, UTC+8, UTC+9, etc.).
+function localNoon(year: number, month: number, day: number): number {
+  const d = new Date(year, month - 1, day, 12, 0, 0, 0)
+  return d.getTime()
+}
+function localHour(year: number, month: number, day: number, hour: number): number {
+  const d = new Date(year, month - 1, day, hour, 0, 0, 0)
+  return d.getTime()
+}
+
 describe('relativeDay', () => {
-  const now = new Date('2026-06-04T12:00:00Z').getTime()
+  // Use local-time anchors so tests pass on any timezone.
+  const now = localNoon(2026, 6, 4)
   it('labels same calendar day as today', () => {
-    expect(relativeDay(new Date('2026-06-04T01:00:00Z').getTime(), now)).toBe('today')
+    expect(relativeDay(localHour(2026, 6, 4, 1), now)).toBe('today')
   })
   it('labels the previous calendar day as yesterday', () => {
-    expect(relativeDay(new Date('2026-06-03T23:00:00Z').getTime(), now)).toBe('yesterday')
+    expect(relativeDay(localHour(2026, 6, 3, 23), now)).toBe('yesterday')
   })
   it('labels anything older as earlier', () => {
-    expect(relativeDay(new Date('2026-05-30T10:00:00Z').getTime(), now)).toBe('earlier')
+    expect(relativeDay(localHour(2026, 5, 30, 10), now)).toBe('earlier')
+  })
+
+  // Explicit timezone-boundary test: a session at local 01:00 on the same
+  // calendar day must be 'today' even when that hour is UTC-yesterday.
+  // This would fail if startOfDay() used UTC midnight instead of local midnight.
+  it('uses local midnight as the day boundary (timezone-safe)', () => {
+    const nowMs = localNoon(2026, 6, 4)
+    // Local 01:00 same day → today
+    expect(relativeDay(localHour(2026, 6, 4, 1), nowMs)).toBe('today')
+    // Local 23:00 previous day → yesterday
+    expect(relativeDay(localHour(2026, 6, 3, 23), nowMs)).toBe('yesterday')
   })
 })
 
 describe('groupSessionsByDay', () => {
-  const now = new Date('2026-06-04T12:00:00Z').getTime()
+  // Use local-time anchors so tests pass on any timezone.
+  const now = localNoon(2026, 6, 4)
   it('buckets sessions into today/yesterday/earlier, newest first within a bucket', () => {
     const sessions = [
-      sess('old', new Date('2026-05-01T10:00:00Z').getTime()),
-      sess('today-early', new Date('2026-06-04T02:00:00Z').getTime()),
-      sess('today-late', new Date('2026-06-04T10:00:00Z').getTime()),
-      sess('yday', new Date('2026-06-03T10:00:00Z').getTime()),
+      sess('old', localHour(2026, 5, 1, 10)),
+      sess('today-early', localHour(2026, 6, 4, 2)),
+      sess('today-late', localHour(2026, 6, 4, 10)),
+      sess('yday', localHour(2026, 6, 3, 10)),
     ]
     const groups = groupSessionsByDay(sessions, now)
     expect(groups.map((g) => g.key)).toEqual(['today', 'yesterday', 'earlier'])

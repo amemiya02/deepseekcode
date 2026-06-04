@@ -33,7 +33,8 @@ export interface SessionGroup {
 
 function startOfDay(ms: number): number {
   const d = new Date(ms)
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
 }
 
 /** Classify a timestamp relative to `now` into today / yesterday / earlier. */

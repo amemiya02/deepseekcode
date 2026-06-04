@@ -35,7 +35,6 @@ AGENTS.md
 CLAUDE.md
 CONTEXT.md
 
-.pxr/
 docs/superpowers/
 
 # Benchmark output
@@ -56,3 +55,5 @@ desktop/frontend/wailsjs/
 # files in docs/competitive/ remain visible to editors, CI diff viewers, and `git add`.
 docs/competitive/
 .superpowers/
+.playwright-mcp/
+/*.png

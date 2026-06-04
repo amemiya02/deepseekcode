@@ -387,6 +387,19 @@ func Start(ctx context.Context, port int) error {
 	if err != nil {
 		return err
 	}
+	return ServeHandler(ctx, port, handler)
+}
+
+// ServeHandler runs an already-built gateway handler on 127.0.0.1:port until ctx
+// is cancelled, applying the same loopback+token auth wrapper as Start. It always
+// binds loopback so the gateway is never exposed to the network.
+//
+// It exists so the desktop shell can serve the SAME handler instance it composes
+// into the Wails asset middleware (where /v1/* is handled same-origin from the
+// webview). Sharing one handler keeps session/checkpoint state consistent between
+// the in-window webview and the loopback browser fallback (open http://127.0.0.1:port),
+// instead of each path owning a separate SessionManager.
+func ServeHandler(ctx context.Context, port int, handler http.Handler) error {
 	handler = withAuth(loadGatewayToken(), handler)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

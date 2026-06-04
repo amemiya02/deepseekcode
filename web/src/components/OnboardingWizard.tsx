@@ -49,7 +49,7 @@ export function OnboardingWizard({ open, onComplete }: OnboardingWizardProps) {
     setBusy(true)
     setError('')
     try {
-      await saveConfig({ theme: chosenTheme })
+      await saveConfig({ theme: chosenTheme, permissionDefault })
       onComplete?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

@@ -24,6 +24,8 @@ export interface ConfigDTO {
   proxyScheme: 'http' | 'https' | 'socks5' | 'socks5h'
   proxyUrl: string
   noProxy: string
+  /** Client-side preference: default autonomy/permission level chosen during onboarding. */
+  permissionDefault: string
 }
 
 export interface DoctorCheck {

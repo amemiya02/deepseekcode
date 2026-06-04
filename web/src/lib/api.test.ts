@@ -80,7 +80,7 @@ describe('GatewayClient — Contract 2 SSE schema', () => {
       onCacheUpdate: (e) => log.push(`cache:${Math.round(e.turn_pct * 100)}/${e.prefixes}`),
       onCostUpdate: (e) => log.push(`cost:${e.turn_cny}/${e.output_tokens}`),
       onRetry: (e) => log.push(`retry:${e.attempt}/${e.max}`),
-      onTurnDone: (e) => log.push(`done:${e.stop_reason}`),
+      onTurnDone: (e) => log.push(`done:${e?.stop_reason}`),
     })
     expect(log).toEqual([
       'flash->pro:hard', 'plan:in_progress', 'cache:90/1', 'cost:0.1/50', 'retry:1/3', 'done:end_turn',

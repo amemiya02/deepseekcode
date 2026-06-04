@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"sync"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -66,6 +67,53 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 				onEvent(AgentEvent{Kind: EventKindTextDelta, Text: e.Text})
 			case agent.EventInfo:
 				onEvent(AgentEvent{Kind: EventKindInfo, Text: e.Text})
+			case agent.EventToolCallStart:
+				onEvent(AgentEvent{
+					Kind:       EventKindToolStart,
+					ToolCallID: e.Call.ID,
+					ToolName:   e.Call.Function.Name,
+					ToolArgs:   e.Call.Function.Arguments,
+				})
+			case agent.EventToolCallResult:
+				onEvent(AgentEvent{
+					Kind:       EventKindToolEnd,
+					ToolCallID: e.CallID,
+					ToolResult: e.Result.Content,
+					ToolIsErr:  e.Result.IsError,
+				})
+			case agent.EventPermissionAsk:
+				reply := e.Reply
+				var once sync.Once
+				toolName := ""
+				if e.Check.Tool != nil {
+					toolName = e.Check.Tool.Name()
+				}
+				onEvent(AgentEvent{
+					Kind:     EventKindPermission,
+					ToolName: toolName,
+					ToolArgs: string(e.Check.Args),
+					Respond: func(d PermissionDecision) {
+						once.Do(func() { reply <- agent.PermissionResponse{Allow: d.Allowed()} })
+					},
+				})
+			case agent.EventQuestionAsk:
+				reply := e.Reply
+				qs := make([]AskQuestion, len(e.Questions))
+				for i, q := range e.Questions {
+					opts := make([]AskOption, len(q.Options))
+					for j, o := range q.Options {
+						opts[j] = AskOption{Label: o.Label, Description: o.Description}
+					}
+					qs[i] = AskQuestion{Question: q.Question, Header: q.Header, Multiple: q.Multiple, Options: opts}
+				}
+				var once sync.Once
+				onEvent(AgentEvent{
+					Kind:      EventKindAsk,
+					Questions: qs,
+					Answer: func(answers [][]string) {
+						once.Do(func() { reply <- tools.QuestionResponse{Answers: answers} })
+					},
+				})
 			case agent.EventDone:
 				onEvent(AgentEvent{
 					Kind:       EventKindDone,
@@ -76,12 +124,6 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 				// returned yet when we receive it here. Blocking on done is safe:
 				// Run will write to done momentarily after the defer completes.
 				return <-done
-			case agent.EventPermissionAsk:
-				// The adapter has no UI layer; deny the permission to unblock the agent.
-				e.Reply <- agent.PermissionResponse{Allow: false}
-			case agent.EventQuestionAsk:
-				// The adapter has no UI layer; send an empty response to unblock the agent.
-				e.Reply <- tools.QuestionResponse{}
 			}
 		case <-ctx.Done():
 			return ctx.Err()

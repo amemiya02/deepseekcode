@@ -6,11 +6,14 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/permissions"
+	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
 // stubAgent implements agentIface. It publishes a pre-baked sequence of events
@@ -113,15 +116,20 @@ func (s *permAskAgent) Run(ctx context.Context, _ string) (agent.StopReason, err
 }
 
 // TestBusPermissionAskNoDeadlock drives AgentAdapter.Run with an agent that
-// asks for permission. The adapter (which has no UI) must auto-reply Allow=false
-// to unblock the agent, and Run must complete without deadlocking.
+// asks for permission. The onEvent handler must call Respond to unblock the
+// agent; the adapter forwards the event rather than hard-denying it.
 func TestBusPermissionAskNoDeadlock(t *testing.T) {
 	stub := newPermAskAgent()
 	ad := &AgentAdapter{a: stub}
 
 	done := make(chan error, 1)
 	go func() {
-		done <- ad.Run(context.Background(), "prompt", func(AgentEvent) {})
+		done <- ad.Run(context.Background(), "prompt", func(ev AgentEvent) {
+			if ev.Kind == EventKindPermission && ev.Respond != nil {
+				// Deny: the consumer is responsible for answering.
+				ev.Respond(PermissionDeny)
+			}
+		})
 	}()
 
 	select {
@@ -182,3 +190,62 @@ func TestBusCloseBeforeDone(t *testing.T) {
 		t.Fatal("AgentAdapter.Run hung after bus closed before EventDone")
 	}
 }
+
+// busAgent is a stub agentIface whose Run publishes a scripted sequence of
+// bus events, then EventDone. It lets us drive AgentAdapter without a real LLM.
+type busAgent struct {
+	bus    *agent.Bus
+	script func(b *agent.Bus)
+}
+
+func (a *busAgent) Bus() *agent.Bus { return a.bus }
+func (a *busAgent) Run(ctx context.Context, userPrompt string) (agent.StopReason, error) {
+	a.script(a.bus)
+	a.bus.Publish(agent.EventDone{Reason: agent.StopModelDone})
+	return agent.StopModelDone, nil
+}
+
+func TestAdapterForwardsPermission(t *testing.T) {
+	bus := agent.NewBus()
+	stub := &busAgent{bus: bus, script: func(b *agent.Bus) {
+		reply := make(chan agent.PermissionResponse, 1)
+		b.Publish(agent.EventPermissionAsk{
+			Check: permissions.Check{Tool: fakeTool{name: "write_file"}, Args: json.RawMessage(`{"path":"a.go"}`)},
+			Reply: reply,
+		})
+		// Block the scripted run until the consumer answers, mirroring the agent.
+		resp := <-reply
+		if !resp.Allow {
+			t.Errorf("expected Allow=true from Respond, got false")
+		}
+	}}
+	ad := &AgentAdapter{a: stub}
+
+	var sawPerm bool
+	err := ad.Run(context.Background(), "go", func(ev AgentEvent) {
+		if ev.Kind == EventKindPermission {
+			sawPerm = true
+			if ev.ToolName != "write_file" {
+				t.Errorf("ToolName = %q, want write_file", ev.ToolName)
+			}
+			ev.Respond(PermissionAllowOnce)
+		}
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !sawPerm {
+		t.Fatal("adapter did not forward EventKindPermission")
+	}
+}
+
+// fakeTool implements the tools.Tool surface permissions.Check needs (Name()).
+type fakeTool struct{ name string }
+
+func (f fakeTool) Name() string                                                    { return f.name }
+func (f fakeTool) Description() string                                             { return "" }
+func (f fakeTool) Parameters() json.RawMessage                                     { return nil }
+func (f fakeTool) Execute(context.Context, json.RawMessage) (tools.Result, error)  { return tools.Result{}, nil }
+func (f fakeTool) IsReadOnly() bool                                                { return false }
+
+var _ = time.Second

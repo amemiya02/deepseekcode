@@ -53,6 +53,14 @@ type UIConfig struct {
 	// Language overrides the UI message language for API errors. "" or "auto"
 	// inspects LC_ALL/LC_MESSAGES/LANG; "en" forces English; "zh" forces Chinese.
 	Language string `toml:"language"`
+	// Accent is the colour accent token (e.g. "indigo", "terracotta") used by
+	// the desktop SPA's ThemeProvider. Persisted so the Appearance section
+	// round-trips correctly. Empty means "use the theme default".
+	Accent string `toml:"accent"`
+	// Density is the layout density token ("comfortable" | "compact") used by
+	// the desktop SPA. Persisted so the Appearance section round-trips.
+	// Empty means "use the theme default".
+	Density string `toml:"density"`
 }
 
 // WebConfig configures web fetch and search tools.

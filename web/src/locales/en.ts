@@ -54,4 +54,12 @@ export const en: Record<string, string> = {
   'settings.doctor': 'Doctor',
   'settings.updates': 'Updates',
   'settings.about': 'About',
+  'settings.loading': 'Loading…',
+  'settings.languageAuto': 'Auto (system)',
+  'settings.transcriptVerbosity': 'Transcript verbosity',
+  'settings.verbosityNormal': 'Normal',
+  'settings.verbosityVerbose': 'Verbose',
+  'settings.verbositySummary': 'Summary',
+  'settings.autoReasoning': 'Auto reasoning',
+  'settings.autoClarify': 'Auto clarify',
 }

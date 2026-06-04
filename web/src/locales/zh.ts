@@ -52,4 +52,12 @@ export const zhCN: Record<string, string> = {
   'settings.doctor': '诊断',
   'settings.updates': '更新',
   'settings.about': '关于',
+  'settings.loading': '加载中…',
+  'settings.languageAuto': '自动（系统）',
+  'settings.transcriptVerbosity': '对话详细程度',
+  'settings.verbosityNormal': '普通',
+  'settings.verbosityVerbose': '详细',
+  'settings.verbositySummary': '摘要',
+  'settings.autoReasoning': '自动推理',
+  'settings.autoClarify': '自动澄清',
 }

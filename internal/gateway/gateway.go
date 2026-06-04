@@ -95,6 +95,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string) http.Handler {
 	h.mux.HandleFunc("/v1/answer", h.handleAnswer)
 	h.mux.HandleFunc("/v1/sessions", h.handleSessions)
 	h.mux.HandleFunc("/v1/sessions/", h.handleSessionByID)
+	h.mux.HandleFunc("/v1/cache/ledger", h.handleCacheLedger)
 	// Catch-all: anything not under /v1 is served by the embedded SPA. The
 	// "/" pattern is the lowest-priority match in a ServeMux, so the explicit
 	// /v1/* patterns above always win.

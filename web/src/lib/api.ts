@@ -81,6 +81,75 @@ export async function submitPrompt(prompt: string, sessionId?: string): Promise<
   return data.session_id as string
 }
 
+// ---- Wave 3: session & cockpit types (Contract 1 shared types) ----
+
+// Contract-1 shared model type — defined ONCE. If an earlier wave already
+// exports ModelInfo from this file, do NOT add this duplicate.
+// (ModelInfo is already exported above as a cross-wave type.)
+
+export interface Session {
+  id: string
+  title: string
+  turns: number
+  updated_at: number // epoch ms
+  created_at: number // epoch ms
+}
+
+export interface SessionTurn {
+  role: 'user' | 'assistant' | 'tool'
+  text: string
+}
+
+export interface SessionDetail extends Session {
+  messages: SessionTurn[]
+}
+
+// Timeline entries reuse the existing Epoch shape.
+export type TimelineEntry = Epoch
+
+export interface CacheLedgerRow {
+  turn: number
+  hit_tokens: number
+  miss_tokens: number
+  evicted: boolean
+}
+
+export interface Balance {
+  provider: string
+  currency: string
+  amount: number
+}
+
+// ---- Live (SSE) payloads — Contract 2 snake_case fields ----
+
+export interface LiveCache {
+  turn_pct: number // 0..1 this-turn cache-hit rate
+  avg_pct: number // 0..1 session rolling avg
+  prefixes: number // count of distinct cached prefixes (1 == stable)
+  eviction: boolean // full-body eviction this turn
+}
+
+export interface LiveCost {
+  turn_cny: number
+  session_cny: number
+  output_tokens: number
+}
+
+export interface RoutingHop {
+  from: string
+  to: string
+  reason: string
+}
+
+export interface JobStatus {
+  running: number
+}
+
+export interface RetryStatus {
+  attempt: number
+  max: number
+}
+
 export async function fetchCacheReport(): Promise<CacheReport> {
   const res = await fetch('/v1/cache')
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
@@ -149,4 +218,67 @@ export class GatewayClient {
     this.es?.close()
     this.es = null
   }
+}
+
+// ---- Wave 3: session CRUD + timeline ----
+
+export async function listSessions(): Promise<Session[]> {
+  const res = await fetch('/v1/sessions')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.sessions ?? []) as Session[]
+}
+
+export async function createSession(workingDir: string): Promise<Session> {
+  const res = await fetch('/v1/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ working_dir: workingDir }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<Session>
+}
+
+export async function getSession(id: string): Promise<SessionDetail> {
+  const res = await fetch(`/v1/sessions/${id}`)
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<SessionDetail>
+}
+
+export async function renameSession(id: string, title: string): Promise<void> {
+  const res = await fetch(`/v1/sessions/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`/v1/sessions/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+}
+
+export async function getTimeline(id: string): Promise<TimelineEntry[]> {
+  const res = await fetch(`/v1/sessions/${id}/timeline`)
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.entries ?? []) as TimelineEntry[]
+}
+
+// ---- Wave 3: cockpit reads ----
+
+export async function fetchCacheLedger(session: string, turn?: number): Promise<CacheLedgerRow[]> {
+  const q = new URLSearchParams({ session })
+  if (turn != null) q.set('turn', String(turn))
+  const res = await fetch(`/v1/cache/ledger?${q.toString()}`)
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.rows ?? []) as CacheLedgerRow[]
+}
+
+export async function fetchBalance(): Promise<Balance> {
+  const res = await fetch('/v1/balance')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<Balance>
 }

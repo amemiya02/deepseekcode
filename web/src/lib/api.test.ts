@@ -88,6 +88,109 @@ describe('GatewayClient — Contract 2 SSE schema', () => {
   })
 })
 
+import {
+  listSessions, createSession, getSession, renameSession, deleteSession,
+  getTimeline, fetchCacheLedger, fetchBalance,
+} from './api'
+
+describe('listSessions', () => {
+  it('GETs /v1/sessions and returns the sessions array', async () => {
+    const sessions = [{ id: 's1', title: 'Fix bug', turns: 3, updated_at: 10, created_at: 1 }]
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await listSessions()
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions')
+    expect(got).toEqual(sessions)
+  })
+})
+
+describe('createSession', () => {
+  it('POSTs /v1/sessions and returns the new session', async () => {
+    const created = { id: 'new', title: 'Untitled', turns: 0, updated_at: 5, created_at: 5 }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => created })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await createSession('/repo')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ working_dir: '/repo' }),
+    })
+    expect(got.id).toBe('new')
+  })
+})
+
+describe('getSession', () => {
+  it('GETs /v1/sessions/{id} and returns its detail', async () => {
+    const detail = { id: 's1', title: 'X', turns: 2, updated_at: 9, created_at: 1, messages: [] }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => detail })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await getSession('s1')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions/s1')
+    expect(got.id).toBe('s1')
+  })
+})
+
+describe('renameSession', () => {
+  it('PATCHes /v1/sessions/{id} with the new title', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await renameSession('s1', 'New name')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions/s1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New name' }),
+    })
+  })
+})
+
+describe('deleteSession', () => {
+  it('DELETEs /v1/sessions/{id}', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await deleteSession('s1')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions/s1', { method: 'DELETE' })
+  })
+})
+
+describe('getTimeline', () => {
+  it('GETs /v1/sessions/{id}/timeline and returns entries', async () => {
+    const entries = [{ id: 'e1', turns: 4, compacted: false }]
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ entries }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await getTimeline('s1')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/sessions/s1/timeline')
+    expect(got).toEqual(entries)
+  })
+})
+
+describe('fetchCacheLedger', () => {
+  it('GETs /v1/cache/ledger with a session query and returns rows', async () => {
+    const rows = [{ turn: 1, hit_tokens: 100, miss_tokens: 5, evicted: false }]
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ rows }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await fetchCacheLedger('s1')
+    expect(fetchMock).toHaveBeenCalledWith('/v1/cache/ledger?session=s1')
+    expect(got).toEqual(rows)
+  })
+  it('includes the turn query when given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ rows: [] }) })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await fetchCacheLedger('s1', 2)
+    expect(fetchMock).toHaveBeenCalledWith('/v1/cache/ledger?session=s1&turn=2')
+  })
+})
+
+describe('fetchBalance', () => {
+  it('GETs /v1/balance and returns the balance', async () => {
+    const balance = { provider: 'deepseek', currency: 'CNY', amount: 12.5 }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => balance })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const got = await fetchBalance()
+    expect(fetchMock).toHaveBeenCalledWith('/v1/balance')
+    expect(got.amount).toBe(12.5)
+  })
+})
+
 describe('REST control helpers', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch

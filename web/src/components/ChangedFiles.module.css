@@ -1,0 +1,48 @@
+.changed {
+  overflow: auto;
+  height: 100%;
+  padding: 4px;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+.status {
+  width: 1.5em;
+  text-align: center;
+  color: var(--warning);
+  font-family: var(--type-mono);
+}
+.path {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.path:hover {
+  color: var(--accent);
+}
+.deleted {
+  color: var(--danger);
+  font-size: 0.72rem;
+}
+.empty,
+.error {
+  color: var(--text-3);
+  padding: 8px;
+  font-size: 0.85rem;
+}
+.error {
+  color: var(--danger);
+}

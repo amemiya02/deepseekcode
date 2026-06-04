@@ -40,7 +40,7 @@ describe('cockpitStore', () => {
     captured.onRetry!({ attempt: 1, max: 3 })
     expect(useCockpitStore.getState().jobs).toBe(2)
     expect(useCockpitStore.getState().retry).toEqual({ attempt: 1, max: 3 })
-    captured.onTurnDone!()
+    captured.onTurnDone!({ stop_reason: 'end_turn' })
     expect(useCockpitStore.getState().jobs).toBe(0)
     expect(useCockpitStore.getState().retry).toEqual({ attempt: 0, max: 0 })
   })

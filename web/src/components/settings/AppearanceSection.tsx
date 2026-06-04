@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { setThemeSettings } from '../../lib/theme/store'
+import { type Accent, type Theme, type Density } from '../../lib/theme/tokens'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
-const THEMES = ['graphite', 'lumen', 'halo']
-const ACCENTS = ['indigo', 'terracotta', 'mono', 'emerald', 'amber', 'rose', 'cyan', 'violet']
-const DENSITIES = ['comfortable', 'compact']
+const THEMES: Theme[] = ['graphite', 'lumen', 'halo']
+const ACCENTS: Accent[] = ['indigo', 'terracotta', 'emerald', 'amber', 'rose', 'cyan', 'violet', 'slate']
+const DENSITIES: Density[] = ['comfortable', 'compact']
 
 export function AppearanceSection() {
   const [cfg, setCfg] = useState<ConfigDTO | null>(null)
@@ -29,7 +30,7 @@ export function AppearanceSection() {
   async function patch(p: Partial<ConfigDTO>) {
     setCfg((prev) => (prev ? { ...prev, ...p } : prev))
     // Live-apply visual settings before the round-trip so the change is instant.
-    setThemeSettings({ theme: p.theme as any, accent: p.accent as any, density: p.density as any })
+    setThemeSettings({ theme: p.theme as Theme, accent: p.accent as Accent, density: p.density as Density })
     try {
       setCfg(await saveConfig(p))
     } catch (e) {

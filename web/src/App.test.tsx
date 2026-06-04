@@ -25,12 +25,9 @@ describe('App shell composition', () => {
     expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f5f6f8')
   })
 
-  it('opens the command palette when the titlebar trigger is clicked', async () => {
-    const user = userEvent.setup()
+  it('no longer renders the titlebar command-palette pill', () => {
     render(<App />)
-    expect(screen.queryByPlaceholderText(/Search commands/)).toBeNull()
-    await user.click(screen.getByTestId('open-palette'))
-    expect(screen.getByPlaceholderText(/Search commands/)).toBeInTheDocument()
+    expect(screen.queryByTestId('open-palette')).toBeNull()
   })
 
   it('opens the command palette on Cmd+K', () => {
@@ -252,11 +249,19 @@ describe('App — full shell integration (Wave 0)', () => {
     await waitFor(() => expect(zone.querySelector('[data-testid="tab-files"]')).not.toBeNull())
   })
 
-  it('opens the SettingsWindow via the open-settings command', async () => {
+  it('opens the SettingsWindow via the titlebar gear button', async () => {
     const user = userEvent.setup()
     render(<App />)
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    await user.click(screen.getByTestId('open-palette'))
+    await user.click(screen.getByTestId('open-settings'))
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  it('opens the SettingsWindow via the command palette (Cmd+K) Settings command', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
     await user.click(await screen.findByText('Settings'))
     expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
   })

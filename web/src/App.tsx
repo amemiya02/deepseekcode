@@ -17,6 +17,7 @@ import { TitleBar } from './components/shell/TitleBar'
 import { CommandPalette, type Command } from './components/shell/CommandPalette'
 import { Toasts } from './components/shell/Toasts'
 import { isCmdK } from './lib/shortcuts'
+import { pushToast } from './lib/toasts'
 import { setThemeSettings, useThemeStore } from './lib/theme/store'
 import { useSessionStore } from './lib/sessionStore'
 import { fetchOnboarding, fetchUpdate, type UpdateInfo } from './lib/system'
@@ -119,11 +120,26 @@ function AppInner() {
   }, [])
 
   async function handleSubmit(payload: ComposerPayload) {
-    const sid = await submitPrompt(payload.text, sessionId ?? undefined)
+    // Dispatch the optimistic user bubble FIRST so the message persists on screen
+    // even if the gateway send fails — otherwise a thrown submitPrompt() would
+    // swallow the input and the composer would look dead ("Enter does nothing").
+    dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+    setStreaming(true)
+    let sid: string
+    try {
+      sid = await submitPrompt(payload.text, sessionId ?? undefined)
+    } catch (e) {
+      // Surface the failure instead of silently dropping it. The user bubble
+      // remains so the typed text is not lost; they can retry.
+      setStreaming(false)
+      pushToast({ kind: 'danger', message: t('composer.sendFailed', 'Could not send message: ') + (e instanceof Error ? e.message : String(e)) })
+      return
+    }
     setSessionId(sid)
     setActiveSession(sid)
-    setStreaming(true)
-    dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+    // First-send auto-creates a session server-side; reflect it in the rail +
+    // history drawer immediately so "All history" is never perpetually empty.
+    void loadSessions()
     // Close any previous SSE connection before opening a new one to prevent
     // stale event handlers from a prior turn dispatching into current state.
     clientRef.current.close()
@@ -142,6 +158,9 @@ function AppInner() {
         setStreaming(false)
         // Bump the workspace refresh key so ChangedFiles re-fetches after a turn.
         setWorkspaceRefreshKey((k) => k + 1)
+        // Refresh the session list so the turn count / updated_at reflects the
+        // completed turn in the rail + history drawer.
+        void loadSessions()
       },
       // Wave-4 handlers
       onPermissionRequest: (req) => setPendingPermission(req),
@@ -365,7 +384,7 @@ function AppInner() {
       <ErrorBoundary>
         <div className={styles.appRoot}>
           {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
-          <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} />
+          <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
           <div className={styles.appBody}>
             <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} />
           </div>

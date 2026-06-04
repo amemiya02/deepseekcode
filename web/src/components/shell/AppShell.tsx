@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { IconPanelLeft, IconPanelRight } from '../../lib/icons'
 import { useT } from '../../lib/i18n'
 import styles from './index.module.css'
@@ -73,6 +73,15 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       window.addEventListener('mouseup', onUp)
     },
     [splits.left, splits.right, onMove, onUp],
+  )
+
+  // Teardown guard: remove window listeners if component unmounts mid-drag.
+  useEffect(
+    () => () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    },
+    [onMove, onUp],
   )
 
   const gridStyle: CSSProperties = {

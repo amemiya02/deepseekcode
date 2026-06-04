@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -251,5 +252,25 @@ func (f fakeTool) Description() string                                          
 func (f fakeTool) Parameters() json.RawMessage                                     { return nil }
 func (f fakeTool) Execute(context.Context, json.RawMessage) (tools.Result, error)  { return tools.Result{}, nil }
 func (f fakeTool) IsReadOnly() bool                                                { return false }
+
+func TestAdapterForwardsLiveSignals(t *testing.T) {
+	bus := agent.NewBus()
+	stub := &busAgent{bus: bus, script: func(b *agent.Bus) {
+		b.Publish(agent.EventReasoningDelta{Text: "think"})
+		b.Publish(agent.EventStepFinish{Usage: llm.Usage{PromptCacheHitTokens: 9, PromptCacheMissTokens: 1, CompletionTokens: 5}, Model: "deepseek-v4-flash"})
+		b.Publish(agent.EventEscalated{FromModel: "deepseek-v4-flash", ToModel: "deepseek-v4-pro", Reason: "marker"})
+		b.Publish(agent.EventBackgroundJobStart{ID: "j1"})
+		b.Publish(agent.EventRetry{Attempt: 1, Max: 1})
+		b.Publish(agent.EventPlanUpdate{Items: []agent.PlanItem{{Text: "do", Status: "in_progress"}}})
+	}}
+	ad := &AgentAdapter{a: stub}
+	seen := map[EventKind]bool{}
+	_ = ad.Run(context.Background(), "go", func(ev AgentEvent) { seen[ev.Kind] = true })
+	for _, k := range []EventKind{EventKindThinking, EventKindCache, EventKindCost, EventKindRouting, EventKindJob, EventKindRetry, EventKindPlan} {
+		if !seen[k] {
+			t.Errorf("adapter did not forward kind %d", k)
+		}
+	}
+}
 
 var _ = time.Second

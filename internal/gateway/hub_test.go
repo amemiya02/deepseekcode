@@ -53,6 +53,60 @@ func TestMapTurnDonePayload(t *testing.T) {
 	}
 }
 
+func TestMapLiveSignalNames(t *testing.T) {
+	cases := []struct {
+		in   acp.AgentEvent
+		name string
+	}{
+		{acp.AgentEvent{Kind: acp.EventKindCache, TurnPct: 0.94, AvgPct: 0.9, Prefixes: 1}, "cache_update"},
+		{acp.AgentEvent{Kind: acp.EventKindCost, TurnCNY: 0.1, SessionCNY: 0.3, OutputTokens: 50}, "cost_update"},
+		{acp.AgentEvent{Kind: acp.EventKindRouting, From: "deepseek-v4-flash", To: "deepseek-v4-pro", Reason: "marker"}, "routing"},
+		{acp.AgentEvent{Kind: acp.EventKindJob, Running: 2}, "job_update"},
+		{acp.AgentEvent{Kind: acp.EventKindRetry, Attempt: 1, Max: 1}, "retry"},
+		{acp.AgentEvent{Kind: acp.EventKindThinking, Text: "hmm"}, "thinking_delta"},
+		{acp.AgentEvent{Kind: acp.EventKindToolDelta, ToolCallID: "c1", ToolDelta: "out"}, "tool_delta"},
+		{acp.AgentEvent{Kind: acp.EventKindPlan, Plan: []acp.PlanItem{{Text: "do", Status: "in_progress"}}}, "plan_update"},
+	}
+	for _, c := range cases {
+		if got := mapAgentEvent(c.in); got.name != c.name {
+			t.Errorf("kind %d -> %q, want %q", c.in.Kind, got.name, c.name)
+		}
+	}
+}
+
+func TestCacheUpdatePayloadIsRatio(t *testing.T) {
+	ev := mapAgentEvent(acp.AgentEvent{Kind: acp.EventKindCache, TurnPct: 0.94, AvgPct: 0.9, Prefixes: 2, Eviction: true})
+	var p struct {
+		TurnPct  float64 `json:"turn_pct"`
+		AvgPct   float64 `json:"avg_pct"`
+		Prefixes int     `json:"prefixes"`
+		Eviction bool    `json:"eviction"`
+	}
+	if err := json.Unmarshal([]byte(ev.data), &p); err != nil {
+		t.Fatalf("cache_update not JSON: %v (%q)", err, ev.data)
+	}
+	// C-2: ratios, not percents. 0.94 must survive verbatim (NOT 94).
+	if p.TurnPct != 0.94 || p.AvgPct != 0.9 || p.Prefixes != 2 || !p.Eviction {
+		t.Errorf("cache_update payload = %+v", p)
+	}
+}
+
+func TestPlanUpdateMapsCompletedToDone(t *testing.T) {
+	ev := mapAgentEvent(acp.AgentEvent{Kind: acp.EventKindPlan, Plan: []acp.PlanItem{{Text: "x", Status: "done"}}})
+	var p struct {
+		Items []struct {
+			Text   string `json:"text"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(ev.data), &p); err != nil {
+		t.Fatalf("plan_update not JSON: %v", err)
+	}
+	if len(p.Items) != 1 || p.Items[0].Status != "done" {
+		t.Errorf("plan_update payload = %+v", p)
+	}
+}
+
 func TestMapToolStartPayloadIsJSON(t *testing.T) {
 	ev := mapAgentEvent(acp.AgentEvent{
 		Kind: acp.EventKindToolStart, ToolCallID: "c1",

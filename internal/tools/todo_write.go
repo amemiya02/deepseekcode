@@ -8,6 +8,11 @@ import (
 	"sync"
 )
 
+// PlanEntry is one plan entry passed to PlanPublisher. Subject and Status are
+// the raw TodoItem fields; the caller (agent) maps them to the Contract status
+// vocabulary (completed→done) before publishing on the bus.
+type PlanEntry struct{ Subject, Status string }
+
 // TodoWrite manages the session's structured plan. The TUI renders the
 // active list inline; the agent reads it back to keep itself on track.
 //
@@ -15,8 +20,13 @@ import (
 // resume in v0.1 — the model can regenerate the plan from the
 // conversation if it needs to.
 type TodoWrite struct {
-	mu    sync.Mutex
-	items []TodoItem
+	mu            sync.Mutex
+	items         []TodoItem
+	// PlanPublisher, when set, is called with a copy of the new plan whenever the
+	// list is replaced. The agent sets this to publish EventPlanUpdate on its bus.
+	// Items are (subject, status) pairs in the raw TodoItem vocabulary; the agent
+	// performs the completed→done mapping before publishing.
+	PlanPublisher func([]PlanEntry)
 }
 
 // TodoItem mirrors the schema we expose to the model.
@@ -95,7 +105,16 @@ func (t *TodoWrite) Execute(ctx context.Context, args json.RawMessage) (Result, 
 
 	t.mu.Lock()
 	t.items = p.Todos
+	pub := t.PlanPublisher
 	t.mu.Unlock()
+
+	if pub != nil {
+		entries := make([]PlanEntry, len(p.Todos))
+		for i, it := range p.Todos {
+			entries[i] = PlanEntry{Subject: it.Subject, Status: it.Status}
+		}
+		pub(entries)
+	}
 
 	return Result{Content: renderTodos(p.Todos)}, nil
 }

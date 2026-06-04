@@ -1389,6 +1389,7 @@ func (a *Agent) streamWithReissue(ctx context.Context, req llm.Request) (streamR
 		}
 		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
 			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
+			a.bus.Publish(EventRetry{Attempt: attempt + 1, Max: maxStreamReissues})
 			continue
 		}
 		// Give up. Persist the partial assistant turn (reasoning + visible text

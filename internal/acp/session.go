@@ -24,6 +24,14 @@ const (
 	EventKindAsk        // the agent asks the user question(s) (carries Answer)
 	EventKindToolStart  // a tool call started executing
 	EventKindToolEnd    // a tool call finished executing
+	EventKindCache      // live cache_update {turn_pct, avg_pct, prefixes, eviction}
+	EventKindCost       // live cost_update {turn_cny, session_cny, output_tokens}
+	EventKindRouting    // live routing {from, to, reason}
+	EventKindJob        // live job_update {running}
+	EventKindRetry      // live retry {attempt, max}
+	EventKindThinking   // live thinking_delta {text}
+	EventKindToolDelta  // live tool_delta {id, delta}
+	EventKindPlan       // live plan_update {items}
 )
 
 // PermissionDecision is the user's answer to a permission request, mirroring
@@ -64,10 +72,42 @@ type AgentEvent struct {
 	Answer    func(answers [][]string)
 
 	// Tool (EventKindToolStart / EventKindToolEnd): structured tool-call info.
-	ToolCallID  string
-	ToolResult  string
-	ToolIsErr   bool
+	ToolCallID   string
+	ToolResult   string
+	ToolIsErr    bool
 	ToolReadOnly bool // set for EventKindToolStart; true if the tool declares IsReadOnly()
+
+	// Cache (EventKindCache): 0–1 ratios per Contract 2 (NOT percents).
+	TurnPct  float64
+	AvgPct   float64
+	Prefixes int
+	Eviction bool
+
+	// Cost (EventKindCost).
+	TurnCNY      float64
+	SessionCNY   float64
+	OutputTokens int
+
+	// Routing (EventKindRouting).
+	From, To, Reason string
+
+	// Job (EventKindJob).
+	Running int
+
+	// Retry (EventKindRetry).
+	Attempt, Max int
+
+	// ToolDelta (EventKindToolDelta): ToolCallID reused; ToolDelta is the chunk.
+	ToolDelta string
+
+	// Plan (EventKindPlan).
+	Plan []PlanItem
+}
+
+// PlanItem is one plan entry for plan_update. Status ∈ {pending,in_progress,done}.
+type PlanItem struct {
+	Text   string `json:"text"`
+	Status string `json:"status"`
 }
 
 // AskQuestion is a UI-facing copy of one tools.Question, decoupled from the

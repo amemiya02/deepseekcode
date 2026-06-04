@@ -316,3 +316,31 @@ type EventSemanticCompaction struct {
 
 func (EventCompactionWarning) isAgentEvent()  {}
 func (EventSemanticCompaction) isAgentEvent() {}
+
+// PlanItem is one entry of the agent's structured plan, decoupled from
+// tools.TodoItem so consumers (gateway/SPA) need not import tools. Status is
+// the Contract value set: pending | in_progress | done.
+type PlanItem struct {
+	Text   string
+	Status string
+}
+
+// EventPlanUpdate reports the agent's plan (todo list) was replaced. Published
+// by TodoWrite via its PlanPublisher hook (wired in Agent construction).
+type EventPlanUpdate struct{ Items []PlanItem }
+
+// EventRetry reports a transient mid-stream re-issue attempt (T1.4). Attempt is
+// 1-based for the first re-issue; Max is the configured ceiling.
+type EventRetry struct{ Attempt, Max int }
+
+// EventToolCallDelta carries incremental tool stdout for a running call. Only
+// published by tool runners that genuinely stream (e.g. bash stdout); tools
+// that return whole results never emit it.
+type EventToolCallDelta struct {
+	CallID string
+	Delta  string
+}
+
+func (EventPlanUpdate) isAgentEvent()    {}
+func (EventRetry) isAgentEvent()         {}
+func (EventToolCallDelta) isAgentEvent() {}

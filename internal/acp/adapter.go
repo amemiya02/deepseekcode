@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -126,6 +127,38 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 				// returned yet when we receive it here. Blocking on done is safe:
 				// Run will write to done momentarily after the defer completes.
 				return <-done
+			case agent.EventReasoningDelta:
+				onEvent(AgentEvent{Kind: EventKindThinking, Text: e.Text})
+			case agent.EventStepFinish:
+				onEvent(AgentEvent{
+					Kind:     EventKindCache,
+					TurnPct:  llm.CacheHitRate(e.Usage),
+					Prefixes: 1, // gateway overwrites with its session epoch count
+					Eviction: false,
+				})
+				onEvent(AgentEvent{
+					Kind:         EventKindCost,
+					TurnCNY:      llm.Cost(e.Model, e.Usage),
+					OutputTokens: e.Usage.CompletionTokens,
+				})
+			case agent.EventEscalated:
+				onEvent(AgentEvent{Kind: EventKindRouting, From: e.FromModel, To: e.ToModel, Reason: e.Reason})
+			case agent.EventBackgroundJobStart:
+				onEvent(AgentEvent{Kind: EventKindJob, Running: +1}) // delta; gateway accumulates
+			case agent.EventBackgroundJobFinish:
+				onEvent(AgentEvent{Kind: EventKindJob, Running: -1})
+			case agent.EventRetry:
+				onEvent(AgentEvent{Kind: EventKindRetry, Attempt: e.Attempt, Max: e.Max})
+			case agent.EventToolCallDelta:
+				onEvent(AgentEvent{Kind: EventKindToolDelta, ToolCallID: e.CallID, ToolDelta: e.Delta})
+			case agent.EventCompaction, agent.EventSemanticCompaction:
+				onEvent(AgentEvent{Kind: EventKindCache, Eviction: true})
+			case agent.EventPlanUpdate:
+				items := make([]PlanItem, len(e.Items))
+				for i, it := range e.Items {
+					items[i] = PlanItem{Text: it.Text, Status: it.Status}
+				}
+				onEvent(AgentEvent{Kind: EventKindPlan, Plan: items})
 			}
 		case <-ctx.Done():
 			return ctx.Err()

@@ -113,6 +113,29 @@ func mapAgentEvent(ev acp.AgentEvent) sseEvent {
 		return sseEvent{name: "turn_done", data: mustJSON(map[string]any{
 			"stop_reason": stopReason,
 		})}
+	case acp.EventKindCache:
+		return sseEvent{name: "cache_update", data: mustJSON(map[string]any{
+			"turn_pct": ev.TurnPct, "avg_pct": ev.AvgPct,
+			"prefixes": ev.Prefixes, "eviction": ev.Eviction,
+		})}
+	case acp.EventKindCost:
+		return sseEvent{name: "cost_update", data: mustJSON(map[string]any{
+			"turn_cny": ev.TurnCNY, "session_cny": ev.SessionCNY, "output_tokens": ev.OutputTokens,
+		})}
+	case acp.EventKindRouting:
+		return sseEvent{name: "routing", data: mustJSON(map[string]any{
+			"from": ev.From, "to": ev.To, "reason": ev.Reason,
+		})}
+	case acp.EventKindJob:
+		return sseEvent{name: "job_update", data: mustJSON(map[string]any{"running": ev.Running})}
+	case acp.EventKindRetry:
+		return sseEvent{name: "retry", data: mustJSON(map[string]any{"attempt": ev.Attempt, "max": ev.Max})}
+	case acp.EventKindThinking:
+		return sseEvent{name: "thinking_delta", data: mustJSON(map[string]any{"text": ev.Text})}
+	case acp.EventKindToolDelta:
+		return sseEvent{name: "tool_delta", data: mustJSON(map[string]any{"id": ev.ToolCallID, "delta": ev.ToolDelta})}
+	case acp.EventKindPlan:
+		return sseEvent{name: "plan_update", data: mustJSON(map[string]any{"items": ev.Plan})}
 	default:
 		// EventKindInfo and any unknown kinds: emit as message_delta so the SPA
 		// can display them as prose. The legacy "step" event name is not part of

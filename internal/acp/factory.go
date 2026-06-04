@@ -70,5 +70,23 @@ func realAgentFactoryFrom(cfg config.Config, workingDir string) (AgentRunner, er
 
 	a := agent.New(client, reg, pol, model)
 
+	// Wire TodoWrite.PlanPublisher to publish EventPlanUpdate on the agent bus.
+	// Map completed→done to match the Contract-2 status vocabulary.
+	if t, ok := reg.Get("todo_write"); ok {
+		if tw, ok := t.(*tools.TodoWrite); ok {
+			tw.PlanPublisher = func(entries []tools.PlanEntry) {
+				items := make([]agent.PlanItem, len(entries))
+				for i, e := range entries {
+					status := e.Status
+					if status == "completed" {
+						status = "done"
+					}
+					items[i] = agent.PlanItem{Text: e.Subject, Status: status}
+				}
+				a.Bus().Publish(agent.EventPlanUpdate{Items: items})
+			}
+		}
+	}
+
 	return NewAgentAdapter(a), nil
 }

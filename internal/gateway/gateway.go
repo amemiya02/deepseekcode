@@ -189,6 +189,13 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	sid := sessionID
 
 	go func() {
+		// Per-run live-signal accumulators (one prompt = one goroutine).
+		var (
+			cacheSum, cacheN float64 // rolling avg of turn_pct
+			sessionCNY       float64
+			runningJobs      int
+			prefixCount      int
+		)
 		onEvent := func(ev acp.AgentEvent) {
 			switch ev.Kind {
 			case acp.EventKindPermission:
@@ -197,17 +204,17 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 				h.pendingPerm[id] = pendingPermission{respond: ev.Respond}
 				h.mu.Unlock()
 				// ev.ToolArgs is a raw JSON string; unmarshal into RawMessage so
-			// the SSE payload carries args as a JSON object (Record<string,unknown>),
-			// not a double-encoded JSON string — Contract 2.
-			var argsRaw json.RawMessage
-			if err := json.Unmarshal([]byte(ev.ToolArgs), &argsRaw); err != nil {
-				// Fallback: wrap as a single-field object so the wire type stays object.
-				argsRaw = json.RawMessage(`{"_raw":` + mustJSON(ev.ToolArgs) + `}`)
-			}
-			h.hub.broadcast(sid, sseEvent{name: "permission_request", data: mustJSON(map[string]any{
-				"id": id, "tool": ev.ToolName, "args": argsRaw,
-				"options": permissionOptions(),
-			})})
+				// the SSE payload carries args as a JSON object (Record<string,unknown>),
+				// not a double-encoded JSON string — Contract 2.
+				var argsRaw json.RawMessage
+				if err := json.Unmarshal([]byte(ev.ToolArgs), &argsRaw); err != nil {
+					// Fallback: wrap as a single-field object so the wire type stays object.
+					argsRaw = json.RawMessage(`{"_raw":` + mustJSON(ev.ToolArgs) + `}`)
+				}
+				h.hub.broadcast(sid, sseEvent{name: "permission_request", data: mustJSON(map[string]any{
+					"id": id, "tool": ev.ToolName, "args": argsRaw,
+					"options": permissionOptions(),
+				})})
 			case acp.EventKindAsk:
 				id := fmt.Sprintf("ask-%d", h.intSeq.Add(1))
 				h.mu.Lock()
@@ -216,6 +223,31 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 				h.hub.broadcast(sid, sseEvent{name: "ask_request", data: mustJSON(map[string]any{
 					"id": id, "questions": ev.Questions,
 				})})
+			case acp.EventKindCache:
+				if ev.TurnPct > 0 || !ev.Eviction { // eviction-only frames don't move the avg
+					cacheSum += ev.TurnPct
+					cacheN++
+				}
+				if !ev.Eviction {
+					prefixCount++ // one freshly-priced turn ≈ one active prefix epoch (approx)
+				}
+				ev.AvgPct = 0
+				if cacheN > 0 {
+					ev.AvgPct = cacheSum / cacheN
+				}
+				ev.Prefixes = prefixCount
+				h.hub.broadcast(sid, mapAgentEvent(ev))
+			case acp.EventKindCost:
+				sessionCNY += ev.TurnCNY
+				ev.SessionCNY = sessionCNY
+				h.hub.broadcast(sid, mapAgentEvent(ev))
+			case acp.EventKindJob:
+				runningJobs += ev.Running // ev.Running is a +1/−1 delta from the adapter
+				if runningJobs < 0 {
+					runningJobs = 0
+				}
+				ev.Running = runningJobs
+				h.hub.broadcast(sid, mapAgentEvent(ev))
 			default:
 				h.hub.broadcast(sid, mapAgentEvent(ev))
 			}

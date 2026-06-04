@@ -56,6 +56,8 @@
 }
 .titlebarLeft, .titlebarRight { display: flex; align-items: center; gap: var(--s-2); }
 .titlebarRight { justify-content: flex-end; }
+.titlebarLogo { flex-shrink: 0; }
+.appName { font: var(--type-ui); font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
 .branch { display: flex; align-items: center; gap: var(--s-1); font: var(--type-ui); color: var(--text-2); }
 .paletteTrigger {
   display: flex;

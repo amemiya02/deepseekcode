@@ -150,7 +150,8 @@ button { font-family: inherit; }
 .attach__btn { background: none; border: none; color: var(--text-2); cursor: pointer; display: inline-flex; padding: 2px; }
 .attach__btn:hover { color: var(--text); }
 
-/* Composer */
+/* Composer — elevated white card pinned to bottom of conversation zone (Phase 2).
+   Solid white surface (not gradient), brand glow on focus-within. */
 .composer-wrap {
   position: relative;
   display: flex;
@@ -160,13 +161,13 @@ button { font-family: inherit; }
   padding: var(--s-2) var(--s-2) var(--s-1);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: linear-gradient(var(--elevated), var(--surface));
-  box-shadow: var(--shadow-2), inset 0 1px 0 var(--glass-edge);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
   transition: border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
 }
 .composer-wrap:focus-within {
   border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
-  box-shadow: var(--shadow-2), var(--glow-accent), inset 0 1px 0 var(--glass-edge);
+  box-shadow: var(--shadow-2), var(--glow-accent);
 }
 .composer { display: flex; align-items: flex-end; gap: var(--s-2); }
 .composer__input { flex: 1; resize: none; min-height: 44px; max-height: 240px; background: transparent; border: none; color: var(--text); font: var(--type-body); padding: 8px 6px; }

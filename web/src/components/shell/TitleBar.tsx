@@ -2,6 +2,7 @@ import { IconGitBranch, IconCommand, IconSun, IconMoon, IconPalette } from '../.
 import { useT } from '../../lib/i18n'
 import { useThemeStore, setThemeSettings } from '../../lib/theme/store'
 import { THEMES } from '../../lib/theme/tokens'
+import { Logo } from '../Logo'
 import styles from './index.module.css'
 
 export interface TitleBarProps {
@@ -24,6 +25,8 @@ export function TitleBar({ branch = 'main', onOpenPalette }: TitleBarProps) {
   return (
     <header className={styles.titlebar}>
       <div className={styles.titlebarLeft}>
+        <Logo size={20} className={styles.titlebarLogo} />
+        <span className={styles.appName}>DeepSeekCode</span>
         <span className={styles.branch} title={t('titlebar.branch')}>
           <IconGitBranch size={14} />
           {branch}
@@ -37,7 +40,7 @@ export function TitleBar({ branch = 'main', onOpenPalette }: TitleBarProps) {
       </button>
 
       <div className={styles.titlebarRight}>
-        <button className={styles.iconBtn} aria-label={t('titlebar.theme')} onClick={cycleTheme}>
+        <button className={styles.iconBtn} aria-label={t('titlebar.theme')} onClick={cycleTheme} data-testid="cycle-theme">
           <IconPalette size={16} />
         </button>
         <button className={styles.iconBtn} data-testid="toggle-mode" aria-label={t('titlebar.toggleMode')} onClick={toggleMode}>

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -345,13 +346,34 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DefaultHandler builds the production gateway handler: a real-agent
+// SessionManager plus a session.Store (~/.deepseek/sessions.db), a
+// snapshots.Manager (./.deepseek/snapshots), and the process working dir as the
+// workspace root. It is what Start serves and what desktop/ drives in-process.
+func DefaultHandler() (http.Handler, error) {
+	sm := acp.NewSessionManager(acp.RealAgentFactory)
+	store, err := session.Open("")
+	if err != nil {
+		return nil, fmt.Errorf("open session store: %w", err)
+	}
+	snaps := snapshots.New("")
+	wd, _ := os.Getwd()
+	return NewHandler(sm, defaultTracePath(),
+		WithStore(store),
+		WithSnapshots(snaps),
+		WithWorkspaceRoot(wd),
+	), nil
+}
+
 // Start builds a default gateway (real agent factory, default trace path) and
 // runs it on 127.0.0.1:port until ctx is cancelled. It is what the desktop
 // wrapper calls in-process; it always binds loopback so the in-process gateway
 // is never exposed to the network.
 func Start(ctx context.Context, port int) error {
-	sm := acp.NewSessionManager(acp.RealAgentFactory)
-	handler := NewHandler(sm, defaultTracePath())
+	handler, err := DefaultHandler()
+	if err != nil {
+		return err
+	}
 	handler = withAuth(loadGatewayToken(), handler)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

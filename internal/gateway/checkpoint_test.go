@@ -238,6 +238,27 @@ func TestSummarizeUpToCollapsesRange(t *testing.T) {
 	}
 }
 
+func TestDefaultHandlerWiresStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate ~/.deepseek/sessions.db
+	h, err := gateway.DefaultHandler()
+	if err != nil {
+		t.Fatalf("default handler: %v", err)
+	}
+	ts := httptest.NewServer(h)
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Post(ts.URL+"/v1/switch", "application/json",
+		strings.NewReader(`{"session_id":"nope"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	// Store present → unknown session is 404 (Replay fails), NOT 501 (no store).
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 (store wired), got %d", resp.StatusCode)
+	}
+}
+
 func TestRewindCodeRestoresSnapshot(t *testing.T) {
 	ts, _, sid, snapRoot := newCheckpointServer(t)
 

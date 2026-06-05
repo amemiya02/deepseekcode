@@ -114,4 +114,8 @@ export const en: Record<string, string> = {
   'approval.deny': 'Reject',
   'approval.hint': '⏎ accept · ⌫ reject',
   'composer.steerHint': '⏎ to steer · Esc to stop',
+  'model.context': 'context window',
+  'model.cap.reasoning': 'reasoning',
+  'model.cap.tools': 'tools',
+  'model.cap.vision': 'vision',
 }

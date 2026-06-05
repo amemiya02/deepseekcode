@@ -181,7 +181,7 @@ export function Composer({
           </button>
           <input ref={fileRef} data-testid="attach-input" type="file" multiple hidden onChange={onPickFiles} />
           {models.length > 0 && onModelChange && (
-            <ModelSwitcher label={activeModel || t('composer.model', 'Model')} activeId={activeModel} onPick={onModelChange} />
+            <ModelSwitcher label={activeModel || t('composer.model', 'Model')} activeId={activeModel} models={models} onPick={onModelChange} />
           )}
           {onEffortChange && (
             <EffortSwitcher levels={effortLevels} current={effort} disabled={streaming} onPick={onEffortChange} />

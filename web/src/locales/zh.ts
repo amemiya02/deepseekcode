@@ -112,4 +112,8 @@ export const zhCN: Record<string, string> = {
   'approval.deny': '拒绝',
   'approval.hint': '⏎ 接受 · ⌫ 拒绝',
   'composer.steerHint': '⏎ 发送以引导 · Esc 停止',
+  'model.context': '上下文窗口',
+  'model.cap.reasoning': '推理',
+  'model.cap.tools': '工具',
+  'model.cap.vision': '视觉',
 }

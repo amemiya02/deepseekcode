@@ -78,6 +78,14 @@ type Agent struct {
 	// goroutine, read from the agent goroutine, hence atomic.
 	stopRequested atomic.Bool
 
+	// steerQueue holds mid-turn user instructions injected via Steer while a
+	// Run is in flight. Drained at step boundaries (drainSteer) and appended to
+	// Messages as user messages, redirecting the turn without aborting it.
+	// Mirrors the stopRequested cross-goroutine pattern: written from the UI
+	// goroutine, read/drained from the agent goroutine, guarded by steerMu.
+	steerMu    sync.Mutex
+	steerQueue []string
+
 	// checkpoints is the named-checkpoint index for this session.
 	// Reset at the start of each Run so branch/resume works on the live step list.
 	checkpoints *CheckpointIndex
@@ -439,6 +447,41 @@ func (a *Agent) RequestStop() {
 	a.stopRequested.Store(true)
 }
 
+// Steer queues a user instruction to be injected at the next step boundary of
+// the in-flight Run, redirecting the turn without aborting it. Safe to call
+// from a goroutine other than the one driving Run. Empty text is ignored.
+func (a *Agent) Steer(text string) {
+	if text == "" {
+		return
+	}
+	a.steerMu.Lock()
+	a.steerQueue = append(a.steerQueue, text)
+	a.steerMu.Unlock()
+}
+
+// drainSteer pops every queued steer instruction and appends each as a user
+// message (mirroring injectLoopBreakNudge's append+persist), returning whether
+// anything was drained. Called only from the agent goroutine at a step
+// boundary, where appending a user message keeps tool_call/tool_result pairing
+// valid.
+func (a *Agent) drainSteer() bool {
+	a.steerMu.Lock()
+	pending := a.steerQueue
+	a.steerQueue = nil
+	a.steerMu.Unlock()
+	if len(pending) == 0 {
+		return false
+	}
+	for _, text := range pending {
+		blocks := []llm.ContentBlock{llm.TextBlock{Text: text}}
+		a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: blocks})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendUserMessage(context.Background(), blocks)
+		}
+	}
+	return true
+}
+
 // RecordCheckpoint implements tools.CheckpointRecorder. It associates name
 // with the current step count so /branch and --resume-at can find it.
 func (a *Agent) RecordCheckpoint(name string) int {
@@ -462,6 +505,9 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	// Clear any stop request from a previous run so a stale ctrl+c can't
 	// mislabel this run's termination.
 	a.stopRequested.Store(false)
+	a.steerMu.Lock()
+	a.steerQueue = nil
+	a.steerMu.Unlock()
 	// Each Run gets its own single loop-break nudge and a fresh detection floor.
 	a.loopNudged = false
 	a.loopFloor = 0
@@ -546,6 +592,10 @@ agentLoop:
 		default:
 		}
 
+		// Drain any mid-turn steering queued since the last iteration so the
+		// upcoming step sees the user's new instruction.
+		a.drainSteer()
+
 		// Per-step deadline covers BOTH the model turn and tool execution.
 		// stepCancel is always non-nil so we can defer it unconditionally.
 		stepCtx, stepCancel := stepContext(ctx, a.StepTimeout)
@@ -624,6 +674,15 @@ agentLoop:
 		}
 
 		if !hasTools {
+			// Mid-turn steering: if the user injected a new instruction while
+			// this (final) step ran, append it and keep the turn alive instead
+			// of ending. Without this, a steer landing during the last step
+			// would be stranded in the queue when the loop returns.
+			if a.drainSteer() {
+				stepCancel()
+				a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
+				continue agentLoop
+			}
 			// Promote StopModelDone to StopVerifiedDone when a verify hook is
 			// configured and the final check passes. On failure, inject the
 			// feedback into a.Messages before returning so the caller (or a

@@ -82,6 +82,75 @@ func TestLoopFinishReasonOverrideContinuesAndPairsResult(t *testing.T) {
 	assertToolResultPaired(t, srv.Requests()[1], "call_1")
 }
 
+// steerTool, when executed, injects a mid-turn steer into its agent. This
+// proves the steer queued from inside a step (i.e. while the turn is live) is
+// drained and appended before the NEXT step's request is built.
+type steerTool struct {
+	a    *Agent
+	text string
+}
+
+func (steerTool) Name() string        { return "go" }
+func (steerTool) Description() string  { return "noop tool that triggers a mid-turn steer" }
+func (steerTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (s steerTool) Execute(_ context.Context, _ json.RawMessage) (tools.Result, error) {
+	s.a.Steer(s.text)
+	return tools.Result{Content: "ok"}, nil
+}
+
+// TestLoopMidTurnSteerInjectsBeforeNextStep drives the REAL loop: step 1 emits
+// a tool call whose handler calls a.Steer("now do X"); step 2 is a plain final
+// answer. The steer queued during step 1 must be drained at the next loop
+// iteration and appear as a user message in the second request's body — proving
+// the instruction was injected mid-turn, before step 2, without aborting.
+func TestLoopMidTurnSteerInjectsBeforeNextStep(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{
+			ToolCalls: []llmtest.ToolCall{{ID: "call_1", Name: "go", Args: `{}`}},
+			Finish:    "stop",
+		},
+		llmtest.Turn{Text: "done"},
+	)
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.Tools.Register(steerTool{a: a, text: "now do X"})
+
+	reason, err := a.Run(context.Background(), "start")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+	if srv.Count() < 2 {
+		t.Fatalf("served %d requests, want >= 2 (the steer must drive a second step)", srv.Count())
+	}
+
+	// The steer was queued during step 1; the second request (step 2) must
+	// carry it as a user message.
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(srv.Requests()[1], &req); err != nil {
+		t.Fatalf("decode second request: %v", err)
+	}
+	var sawSteer bool
+	for _, m := range req.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, "now do X") {
+			sawSteer = true
+		}
+	}
+	if !sawSteer {
+		t.Fatalf("steer text %q absent from the second request as a user message; body=%s", "now do X", srv.Requests()[1])
+	}
+}
+
 // TestLoopThinkingSerializesAsStruct is the end-to-end counterpart to the
 // llm-package thinking_shape_test: it pins that the live loop sends
 // `thinking` as a struct (not the bool DeepSeek V4 rejects) when enabled,

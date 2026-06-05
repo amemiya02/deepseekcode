@@ -14,7 +14,7 @@ export function AssistantMessage({ text, streaming }: { text: string; streaming:
       </div>
       <div className="msg__main">
         <div className="msg__head">
-          <span className="msg__name msg__name--assistant">{t('msg.dsc', 'dsc')}</span>
+          <span className="msg__name msg__name--assistant">{t('msg.dsc', 'DeepSeek')}</span>
         </div>
         <div className="msg__body">
           {streaming ? (

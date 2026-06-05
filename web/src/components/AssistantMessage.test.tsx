@@ -20,6 +20,6 @@ describe('AssistantMessage', () => {
   it('renders an assistant avatar and name', () => {
     wrap(<AssistantMessage text="hi" streaming={false} />)
     expect(screen.getByTestId('msg-avatar')).toBeInTheDocument()
-    expect(screen.getByText('dsc')).toBeInTheDocument()
+    expect(screen.getByText('DeepSeek')).toBeInTheDocument()
   })
 })

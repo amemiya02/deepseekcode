@@ -101,12 +101,22 @@ button { font-family: inherit; }
 .msg__rewind-trigger:hover { color: var(--accent); }
 
 /* (c) Assistant prose & user contained bubble */
-.msg--assistant .msg__body { color: var(--text); font: var(--type-body); }
+.msg--assistant .msg__body { color: var(--text); font: var(--type-body); line-height: 1.65; }
 .msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
 .msg__bubble { align-self: flex-start; max-width: 100%; background: var(--accent-weak); border: 1px solid var(--border-hair); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); box-shadow: var(--shadow-1); }
 .msg__text { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
 .msg__pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .pill { background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 6px; font: var(--type-label); }
+
+/* User turn → right-aligned contained bubble (spec §5): drop the avatar column
+   and anchor the name + bubble to the right edge, the Claude/Codex convention
+   that the flush-left pill in the report looked "cheap" against. */
+.msg--user { grid-template-columns: 1fr; }
+.msg--user .msg__avatar { display: none; }
+.msg--user .msg__main { align-items: flex-end; }
+.msg--user .msg__head { flex-direction: row-reverse; }
+.msg--user .msg__bubble { align-self: flex-end; max-width: min(100%, 36rem); }
+.msg--user .msg__pills { justify-content: flex-end; }
 .cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }
 

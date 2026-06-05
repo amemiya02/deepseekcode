@@ -43,7 +43,7 @@ export function ApprovalGate({
           <button className="approval__btn approval__btn--accept" data-testid="approve-once" type="button" onClick={() => decide('once')}>
             <Check size={13} aria-hidden="true" /> {t('approval.once', 'Accept')}
           </button>
-          <button className="approval__caret" data-testid="approve-more" type="button" aria-label={t('approval.more', 'More approval options')} aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
+          <button className="approval__caret" data-testid="approve-more" type="button" aria-label={t('approval.more', 'More approval options')} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
             <ChevronDown size={13} aria-hidden="true" />
           </button>
           {menuOpen && (

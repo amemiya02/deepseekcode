@@ -35,10 +35,12 @@ export function buildApprovalPatch(req: PermissionRequest): { path: string; patc
     const body = lines(String(a.content ?? '')).map((l) => `+${l}`).join('\n')
     return { path, patch: `@@ ${path || 'write'} @@\n${body}` }
   }
-  // apply_patch: codex-style envelope in `patchText`. Extract the first file path if
-  // present; prepend a hunk header so the +/- body renders as a diff.
+  // apply_patch: codex-style envelope in `patchText`. Extract the first file path,
+  // drop the `*** Begin/Update/End` envelope markers (they would render as noisy
+  // context), and wrap the +/- body under a synthetic hunk header.
   const text = String(a.patchText ?? '')
   const m = /\*\*\* (?:Update|Add|Delete) File: (.+)/.exec(text)
   const path = m ? m[1].trim() : 'patch'
-  return { path, patch: `@@ ${path} @@\n${text}` }
+  const body = text.split('\n').filter((l) => !l.startsWith('*** ')).join('\n')
+  return { path, patch: `@@ ${path} @@\n${body}` }
 }

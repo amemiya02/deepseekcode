@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { LocaleProvider, setLocale } from '../../lib/i18n'
 import { GeneralSection } from './GeneralSection'
 import * as system from '../../lib/system'
+
+beforeEach(() => {
+  // Reset locale to English before each test so tests are independent
+  setLocale('en')
+})
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -19,10 +25,22 @@ const baseCfg: system.ConfigDTO = {
   transparentBackground: false,
 }
 
+describe('GeneralSection language', () => {
+  it('changing language to 中文 flips the document locale to zh-CN', async () => {
+    vi.spyOn(system, 'fetchConfig').mockResolvedValue({ ...baseCfg, language: 'en' })
+    vi.spyOn(system, 'saveConfig').mockResolvedValue({ ...baseCfg, language: 'zh' })
+    render(<LocaleProvider><GeneralSection /></LocaleProvider>)
+    const select = await screen.findByDisplayValue('English')
+    fireEvent.change(select, { target: { value: 'zh' } })
+    // After locale flips to zh-CN the reactive label re-renders in Chinese.
+    await waitFor(() => expect(screen.getByText('语言')).toBeInTheDocument())
+  })
+})
+
 describe('GeneralSection', () => {
   it('loads config and shows the language + verbosity controls', async () => {
     vi.spyOn(system, 'fetchConfig').mockResolvedValue({ ...baseCfg })
-    render(<GeneralSection />)
+    render(<LocaleProvider><GeneralSection /></LocaleProvider>)
     await waitFor(() => expect(screen.getByLabelText(/language/i)).toBeInTheDocument())
     const verbosity = screen.getByLabelText(/verbosity/i) as HTMLSelectElement
     expect(['normal', 'verbose', 'summary']).toContain(verbosity.value)
@@ -31,7 +49,7 @@ describe('GeneralSection', () => {
   it('saves the verbosity change via saveConfig', async () => {
     vi.spyOn(system, 'fetchConfig').mockResolvedValue({ ...baseCfg })
     const save = vi.spyOn(system, 'saveConfig').mockResolvedValue({ ...baseCfg, transcriptVerbosity: 'verbose' })
-    render(<GeneralSection />)
+    render(<LocaleProvider><GeneralSection /></LocaleProvider>)
     const verbosity = (await screen.findByLabelText(/verbosity/i)) as HTMLSelectElement
     await userEvent.selectOptions(verbosity, 'verbose')
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ transcriptVerbosity: 'verbose' })))

@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
-import { t } from '../../lib/i18n'
+import { useLocale, useT, type Locale } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
+// Map the persisted config language to the i18n Locale. 'auto' follows the OS.
+function configLangToLocale(lang: string): Locale {
+  if (lang === 'zh') return 'zh-CN'
+  if (lang === 'auto') return navigator.language.startsWith('zh') ? 'zh-CN' : 'en'
+  return 'en'
+}
+
 export function GeneralSection() {
+  const t = useT()
+  const { setLocale } = useLocale()
   const [cfg, setCfg] = useState<ConfigDTO | null>(null)
   const [error, setError] = useState('')
 
@@ -23,6 +32,7 @@ export function GeneralSection() {
 
   async function patch(p: Partial<ConfigDTO>) {
     setCfg((prev) => (prev ? { ...prev, ...p } : prev))
+    if (p.language !== undefined) setLocale(configLangToLocale(p.language)) // flip the live UI immediately
     try {
       setCfg(await saveConfig(p))
     } catch (e) {

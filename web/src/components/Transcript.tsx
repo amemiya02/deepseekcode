@@ -7,6 +7,7 @@ import { AssistantMessage } from './AssistantMessage'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCard } from './ToolCard'
 import { RoutingActivity } from './RoutingActivity'
+import { DuetBadge } from './DuetBadge'
 import { Logo } from './Logo'
 import { t } from '../lib/i18n'
 
@@ -61,6 +62,8 @@ export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[];
               return <ToolCard key={item.id} item={item} />
             case 'routing':
               return <RoutingActivity key={i} from={item.from} to={item.to} reason={item.reason} />
+            case 'duet':
+              return <DuetBadge key={i} decision={item.decision} reason={item.reason} />
           }
         })}
       </div>

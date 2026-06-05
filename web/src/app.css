@@ -69,6 +69,14 @@ button { font-family: inherit; }
 .routing__to { color: var(--accent); font-weight: 600; }
 .routing__arrow, .routing__reason { color: var(--text-3); }
 
+/* Duet pro-validation badge (§5.1) — mirrors .routing; success/warning tinted. */
+.duet { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border: 1px solid color-mix(in oklch, var(--success) 35%, var(--border)); border-radius: var(--r-md); background: color-mix(in oklch, var(--success) 10%, transparent); color: var(--text-2); font: var(--type-label); margin: var(--s-1) 0; }
+.duet svg { color: var(--success); flex: none; }
+.duet__label { color: var(--success); font-weight: 600; }
+.duet__reason { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.duet--warn { border-color: color-mix(in oklch, var(--warning) 40%, var(--border)); background: color-mix(in oklch, var(--warning) 10%, transparent); }
+.duet--warn svg, .duet--warn .duet__label { color: var(--warning); }
+
 /* PastedTextFold */
 .fold { border: 1px dashed var(--border); border-radius: var(--r-sm); margin: var(--s-1) 0; }
 .fold__toggle { width: 100%; text-align: left; background: var(--surface); border: none; color: var(--text-2); padding: 4px var(--s-2); cursor: pointer; font: var(--type-label); }

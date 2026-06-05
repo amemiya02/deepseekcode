@@ -38,7 +38,7 @@ import {
   setEffort as apiSetEffort,
   EFFORT_LEVELS,
 } from './lib/api'
-import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, TurnDoneEvent, PlanUpdateEvent, ModelInfo } from './lib/api'
+import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, DuetEvent, TurnDoneEvent, PlanUpdateEvent, ModelInfo } from './lib/api'
 import { isEditApproval } from './lib/approval'
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
@@ -180,6 +180,8 @@ function AppInner() {
         dispatch({ kind: 'tool_end', id: e.id, result: e.result, is_error: e.is_error }),
       onRouting: (e: RoutingEvent) =>
         dispatch({ kind: 'routing', from: e.from, to: e.to, reason: e.reason }),
+      onDuet: (e: DuetEvent) =>
+        dispatch({ kind: 'duet', decision: e.decision, reason: e.reason }),
       onTurnDone: (e: TurnDoneEvent) => {
         dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
         clientRef.current.close()

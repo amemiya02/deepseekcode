@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChangedFiles } from './ChangedFiles'
 import { DiffView } from './DiffView'
 import { CodeViewer } from './CodeViewer'
@@ -18,15 +18,21 @@ interface Preview {
 export function ReviewPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   const [sel, setSel] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
+  // Monotonic request token: a slow earlier fetch must not overwrite a newer
+  // selection's preview (rapid row switches → last-click-wins, not last-resolve).
+  const reqRef = useRef(0)
 
   async function open(path: string) {
+    const my = ++reqRef.current
     setSel(path)
     const d = await fetchDiff(path).catch(() => ({ path, patch: '' }))
+    if (reqRef.current !== my) return
     if (d.patch.trim()) {
       setPreview({ path, patch: d.patch, content: '', binary: false, truncated: false, mode: 'diff' })
       return
     }
     const f = await fetchFile(path).catch(() => null)
+    if (reqRef.current !== my) return
     setPreview({
       path,
       patch: '',

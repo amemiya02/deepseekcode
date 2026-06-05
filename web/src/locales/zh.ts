@@ -100,6 +100,6 @@ export const zhCN: Record<string, string> = {
   'onboarding.chooseTheme': '选择主题',
   'onboarding.permissionDefault': '默认自主级别',
   'onboarding.finish': '完成',
-  'workspace.cockpitTab': '驾驶舱',
-  'workspace.workspaceTab': '工作区',
+  'review.pick': '选择一个变更文件以查看其差异。',
+  'telemetry.cache': '缓存',
 }

@@ -102,6 +102,6 @@ export const en: Record<string, string> = {
   'onboarding.chooseTheme': 'Choose a theme',
   'onboarding.permissionDefault': 'Default autonomy',
   'onboarding.finish': 'Finish',
-  'workspace.cockpitTab': 'Cockpit',
-  'workspace.workspaceTab': 'Workspace',
+  'review.pick': 'Select a changed file to review its diff.',
+  'telemetry.cache': 'cache',
 }

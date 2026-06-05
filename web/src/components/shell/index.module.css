@@ -226,21 +226,5 @@
 /* Sessions zone wrapper — hosts SessionRail (which brings its own styles). */
 .sessionsZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
-/* Workspace zone — tabbed surface (Cockpit ‖ Workspace). */
+/* Workspace zone — Review hero (ReviewPanel) above a compact TelemetryStrip. */
 .workspaceZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.workspaceTabs { display: flex; gap: var(--s-1); padding: var(--s-2); border-bottom: 1px solid var(--border); }
-.workspaceTab {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--text-3);
-  font: var(--type-label);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: var(--s-1) var(--s-2);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
-}
-.workspaceTab:hover { color: var(--text); }
-.workspaceTab[aria-selected='true'] { color: var(--text); background: var(--elevated); }

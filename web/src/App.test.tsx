@@ -60,6 +60,7 @@ vi.mock('./lib/api', async (orig) => {
   return {
     ...actual,
     submitPrompt: vi.fn().mockResolvedValue('sess-1'),
+    steerTurn: vi.fn().mockResolvedValue(undefined),
     respondPermission: vi.fn().mockResolvedValue(undefined),
     respondAnswer: vi.fn().mockResolvedValue(undefined),
     cancelTurn: vi.fn().mockResolvedValue(undefined),
@@ -131,6 +132,23 @@ describe('App — Wave 4 wiring', () => {
     await startTurn(user)
     await user.click(await screen.findByTestId('send-stop'))
     expect(api.cancelTurn).toHaveBeenCalledWith('sess-1')
+  })
+
+  it('mid-turn steer: submitting while streaming calls steerTurn (not submitPrompt) and echoes the user bubble', async () => {
+    const apiMod = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    // First turn — sets streaming=true, sessionId='sess-1'
+    await startTurn(user)
+    // Reset call counts so we can assert cleanly on the second submit
+    vi.clearAllMocks()
+    // Type a second message while streaming is active and submit
+    const input = screen.getByTestId('composer-input')
+    await user.type(input, 'redirect now{Enter}')
+    expect(apiMod.steerTurn).toHaveBeenCalledWith('sess-1', 'redirect now')
+    expect(apiMod.submitPrompt).not.toHaveBeenCalled()
+    // The user bubble must be echoed in the transcript
+    expect(await screen.findAllByText('redirect now')).not.toHaveLength(0)
   })
 })
 

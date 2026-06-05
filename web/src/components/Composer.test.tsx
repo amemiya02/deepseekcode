@@ -87,4 +87,28 @@ describe('Composer', () => {
     )
     expect(screen.getByTestId('effort-trigger')).toBeInTheDocument()
   })
+
+  it('steer hint absent when streaming=false even with text', async () => {
+    wrap(
+      <Composer streaming={false} mode="ask" commands={[]} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />
+    )
+    await userEvent.type(screen.getByTestId('composer-input'), 'hello')
+    expect(screen.queryByTestId('composer-steer-hint')).not.toBeInTheDocument()
+  })
+
+  it('steer hint visible when streaming=true and value non-empty', async () => {
+    wrap(
+      <Composer streaming={true} mode="ask" commands={[]} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />
+    )
+    await userEvent.type(screen.getByTestId('composer-input'), 'steer me')
+    expect(screen.getByTestId('composer-steer-hint')).toBeInTheDocument()
+  })
+
+  it('steer hint absent when streaming=true but value is empty', async () => {
+    wrap(
+      <Composer streaming={true} mode="ask" commands={[]} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />
+    )
+    // textarea starts empty — hint must not appear
+    expect(screen.queryByTestId('composer-steer-hint')).not.toBeInTheDocument()
+  })
 })

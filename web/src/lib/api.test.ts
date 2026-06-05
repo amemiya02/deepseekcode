@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { GatewayClient, submitPrompt, setModel, setEffort, setOutputStyle, cancelTurn, fetchModels } from './api'
+import { GatewayClient, submitPrompt, setModel, setEffort, setOutputStyle, cancelTurn, steerTurn, fetchModels } from './api'
 
 describe('submitPrompt', () => {
   it('posts to /v1/prompt and returns session_id', async () => {
@@ -267,6 +267,7 @@ describe('GatewayClient — Wave 4 SSE events', () => {
   })
 })
 
+
 describe('REST control helpers', () => {
   beforeEach(() => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
@@ -278,6 +279,14 @@ describe('REST control helpers', () => {
   it('cancelTurn posts session_id to /v1/cancel', async () => {
     await cancelTurn('s9')
     expect((global.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('/v1/cancel', expect.objectContaining({ method: 'POST' }))
+  })
+  it('steerTurn POSTs to /v1/steer with session_id and prompt', async () => {
+    await steerTurn('sess-1', 'redirect')
+    expect((global.fetch as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('/v1/steer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-1', prompt: 'redirect' }),
+    })
   })
   it('setModel posts model to /v1/model', async () => {
     await setModel('s', 'deepseek-pro')

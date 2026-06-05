@@ -370,3 +370,112 @@ describe('App — full shell integration (Wave 0)', () => {
     renameSpy.mockRestore()
   })
 })
+
+// ── Task 3 (P3.4): capability-driven effort levels ───────────────────────────
+// These tests verify that App derives effortLevels from the active model's
+// effort descriptor and passes them down to the Composer (which forwards them
+// to EffortSwitcher — which returns null when levels.length === 0).
+describe('App — P3.4 capability-driven effort (Task 3)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal(
+      'EventSource',
+      vi.fn().mockImplementation(() => ({ close: vi.fn(), addEventListener: vi.fn() })),
+    )
+  })
+
+  it('Composer shows effort trigger when active model has effort.kind==="levels" with max', async () => {
+    vi.spyOn(api, 'fetchModelState').mockResolvedValue({
+      active: 'deepseek-v4-flash',
+      effort: 'max',
+      models: [
+        {
+          id: 'deepseek-v4-flash',
+          label: 'DeepSeek V4 Flash',
+          provider: 'deepseek',
+          caps: { vision: false, tools: true, reasoning: true },
+          effort: { kind: 'levels', levels: ['low', 'medium', 'high', 'max'], default: 'max' },
+          context: 1_000_000,
+        },
+      ],
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response),
+    )
+    render(<App />)
+    // Wait for fetchModelState to resolve and re-render
+    expect(await screen.findByTestId('effort-trigger')).toBeInTheDocument()
+  })
+
+  it('Composer hides effort trigger when active model has effort.kind==="none"', async () => {
+    vi.spyOn(api, 'fetchModelState').mockResolvedValue({
+      active: 'no-effort-model',
+      effort: 'medium',
+      models: [
+        {
+          id: 'no-effort-model',
+          label: 'No Effort Model',
+          provider: 'deepseek',
+          caps: { vision: false, tools: true, reasoning: false },
+          effort: { kind: 'none' },
+          context: 128_000,
+        },
+      ],
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response),
+    )
+    render(<App />)
+    // Give async effects time to settle
+    await waitFor(() => {
+      expect(screen.queryByTestId('effort-trigger')).toBeNull()
+    })
+  })
+
+  it('effort resets to model default on switch when current effort not in new model levels', async () => {
+    const flashModel = {
+      id: 'deepseek-v4-flash',
+      label: 'DeepSeek V4 Flash',
+      provider: 'deepseek',
+      caps: { vision: false, tools: true, reasoning: true },
+      effort: { kind: 'levels' as const, levels: ['low', 'medium', 'high', 'max'], default: 'max' },
+      context: 1_000_000,
+    }
+    // limitedModel has only low/medium — 'max' is not in its levels, so
+    // switching to it must reset effort to its default ('low').
+    const limitedModel = {
+      id: 'limited-model',
+      label: 'Limited Model',
+      provider: 'deepseek',
+      caps: { vision: false, tools: true, reasoning: false },
+      effort: { kind: 'levels' as const, levels: ['low', 'medium'], default: 'low' },
+      context: 64_000,
+    }
+    vi.spyOn(api, 'fetchModelState').mockResolvedValue({
+      active: 'deepseek-v4-flash',
+      effort: 'max',
+      models: [flashModel, limitedModel],
+    })
+    // ModelSwitcher self-fetches on open — return both models so the row is clickable.
+    vi.spyOn(api, 'fetchModels').mockResolvedValue([flashModel, limitedModel])
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response),
+    )
+    render(<App />)
+    // Wait for initial state: flash active, effort='max'
+    expect(await screen.findByTestId('effort-trigger')).toHaveTextContent('max')
+    // Open the model picker and click the limited-model row.
+    // This fires onModelChange('limited-model') in App, which must detect that
+    // 'max' ∉ limitedModel.effort.levels and call setEffort('low').
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('model-trigger'))
+    await user.click(await screen.findByText('Limited Model'))
+    // After the switch the effort trigger must show the new model's default.
+    await waitFor(() => {
+      expect(screen.getByTestId('effort-trigger')).toHaveTextContent('low')
+    })
+  })
+})

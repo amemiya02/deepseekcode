@@ -146,19 +146,20 @@ function accentScale(accent: Accent, mode: Mode) {
   // Non-brand accent: OKLCH-derived. Guaranteed present (the !some() guard above
   // routes any unknown id to the indigo branch), so `find` cannot miss.
   const a = ACCENTS.find((x) => x.id === accent)!
-  const base = `oklch(0.62 ${a.c} ${a.h})`
+  const c = parseFloat(a.c.toFixed(3))
+  const base = `oklch(0.62 ${c} ${a.h})`
   return {
     accent: base,
-    ink: `oklch(0.52 ${a.c} ${a.h})`,
-    deep: `oklch(0.42 ${a.c} ${a.h})`,
-    text: isLight ? `oklch(0.48 ${a.c} ${a.h})` : `oklch(0.74 ${(a.c * 0.9).toFixed(3)} ${a.h})`,
+    ink: `oklch(0.52 ${c} ${a.h})`,
+    deep: `oklch(0.42 ${c} ${a.h})`,
+    text: isLight ? `oklch(0.48 ${c} ${a.h})` : `oklch(0.74 ${(a.c * 0.9).toFixed(3)} ${a.h})`,
     weak: isLight ? `oklch(0.96 ${(a.c * 0.18).toFixed(3)} ${a.h})` : `color-mix(in oklch, ${base} 22%, #11141d)`,
     mist: isLight ? `oklch(0.985 ${(a.c * 0.1).toFixed(3)} ${a.h})` : `color-mix(in oklch, ${base} 12%, #0b0d13)`,
     // HC: brighter ring (L 0.78) to clear 3:1 against the near-black HC canvas;
     // light/dark use the base (L 0.62) accent as the ring.
-    focusRing: isHC ? `oklch(0.78 ${a.c} ${a.h})` : base,
-    glow: `0 6px 18px -6px oklch(0.62 ${a.c} ${a.h} / 0.6)`,
-    glowHover: `0 8px 22px -8px oklch(0.62 ${a.c} ${a.h} / 0.7)`,
+    focusRing: isHC ? `oklch(0.78 ${c} ${a.h})` : base,
+    glow: `0 6px 18px -6px oklch(0.62 ${c} ${a.h} / 0.6)`,
+    glowHover: `0 8px 22px -8px oklch(0.62 ${c} ${a.h} / 0.7)`,
   }
 }
 

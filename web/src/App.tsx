@@ -30,6 +30,7 @@ import { PlanTodoPanel } from './components/PlanTodoPanel'
 import {
   GatewayClient,
   submitPrompt,
+  steerTurn,
   respondPermission,
   respondAnswer,
   cancelTurn,
@@ -177,6 +178,12 @@ function AppInner() {
   }, [])
 
   async function handleSubmit(payload: ComposerPayload) {
+    if (streaming && sessionId) {
+      // Mid-turn steering: redirect the live turn instead of starting a new one.
+      void steerTurn(sessionId, payload.text)
+      dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+      return
+    }
     dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
     setStreaming(true)
 

@@ -181,6 +181,10 @@ async function postJSON(path: string, body: Record<string, unknown>): Promise<vo
 export async function cancelTurn(sessionId: string): Promise<void> {
   await postJSON('/v1/cancel', { session_id: sessionId })
 }
+/** POST /v1/steer — inject a mid-turn instruction into the running turn. */
+export async function steerTurn(sessionId: string, prompt: string): Promise<void> {
+  await postJSON('/v1/steer', { session_id: sessionId, prompt })
+}
 export async function respondPermission(id: string, decision: PermissionDecision): Promise<void> {
   await postJSON('/v1/permission', { id, decision })
 }

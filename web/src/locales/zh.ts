@@ -111,4 +111,5 @@ export const zhCN: Record<string, string> = {
   'approval.always': '始终允许',
   'approval.deny': '拒绝',
   'approval.hint': '⏎ 接受 · ⌫ 拒绝',
+  'composer.steerHint': '⏎ 发送以引导 · Esc 停止',
 }

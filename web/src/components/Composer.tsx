@@ -163,6 +163,11 @@ export function Composer({
           disabled={disabled}
         />
       </AttachmentDrop>
+      {streaming && text.trim().length > 0 && (
+        <div className="composer__steer-hint" data-testid="composer-steer-hint">
+          {t('composer.steerHint', '⏎ to steer · Esc to stop')}
+        </div>
+      )}
       <div className="composer-bar">
         <div className="composer-bar__left">
           <button

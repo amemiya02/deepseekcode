@@ -332,6 +332,8 @@ button { font-family: inherit; }
 .composer__input { width: 100%; resize: none; min-height: 44px; max-height: 240px; background: transparent; border: none; color: var(--text); font: var(--type-body); padding: 8px 6px; }
 .composer__input:focus { outline: none; }
 .composer__input::placeholder { color: var(--text-3); }
+/* Mid-turn steer hint — shown below textarea when streaming and text is present */
+.composer__steer-hint { font: var(--type-label); color: var(--text-3); padding: 0 6px 2px; pointer-events: none; }
 /* Composer action bar (SP3) — one row: tools left, send right */
 .composer-bar { display: flex; align-items: center; gap: var(--s-2); }
 .composer-bar__left { display: flex; align-items: center; gap: var(--s-1); flex: 1; min-width: 0; }

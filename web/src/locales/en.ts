@@ -113,4 +113,5 @@ export const en: Record<string, string> = {
   'approval.always': 'Always allow',
   'approval.deny': 'Reject',
   'approval.hint': '⏎ accept · ⌫ reject',
+  'composer.steerHint': '⏎ to steer · Esc to stop',
 }

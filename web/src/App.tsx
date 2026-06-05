@@ -275,9 +275,18 @@ function AppInner() {
     setModel(id)
     if (sessionId) apiSetModel(sessionId, id).catch(() => {})
     const desc = models.find((m) => m.id === id)?.effort
-    if (desc && desc.kind === 'levels' && desc.default && !(desc.levels ?? []).includes(effort)) {
-      setEffort(desc.default)
-      if (sessionId) apiSetEffort(sessionId, desc.default).catch(() => {})
+    if (desc) {
+      if (desc.kind === 'none') {
+        // Model has no effort control — reset to a neutral default so a stale
+        // effort value (e.g. 'max') is never held and accidentally POSTed if
+        // the user later switches to a third model that does have levels.
+        const reset = EFFORT_LEVELS[0]
+        setEffort(reset)
+        if (sessionId) apiSetEffort(sessionId, reset).catch(() => {})
+      } else if (desc.kind === 'levels' && desc.default && !(desc.levels ?? []).includes(effort)) {
+        setEffort(desc.default)
+        if (sessionId) apiSetEffort(sessionId, desc.default).catch(() => {})
+      }
     }
   }
   const onEffortChange = (level: string) => {

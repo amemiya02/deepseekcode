@@ -75,14 +75,15 @@ func buildDescriptors(cfg config.Config) []modelDescriptor {
 	if providerName == "" {
 		providerName = "deepseek"
 	}
-	// capsProvider is constructed solely to read Capabilities(), which is a pure
-	// value return needing no APIKey/BaseURL/timeouts. It must NOT be used for a
-	// live Stream/Validate call — the empty ProviderConfig has no credentials.
-	capsProvider, err := llm.NewProvider(providerName, llm.ProviderConfig{})
+	// Use the static ProviderCapabilities helper — it returns capability values
+	// without constructing a live provider instance (no credentials, no HTTP
+	// client). This ensures that if a future provider's constructor or
+	// Capabilities() ever touches the config the build-time descriptor path
+	// remains safe and the failure is explicit rather than silent.
+	caps, err := llm.ProviderCapabilities(providerName)
 	if err != nil {
 		return nil
 	}
-	caps := capsProvider.Capabilities()
 	// The descriptor's effort default is the model's *capability* default — a
 	// stable property of the model, not the user's currently-selected effort
 	// (that lives in the response's top-level "effort"). It is read exclusively
@@ -236,22 +237,25 @@ func (h *Handler) handleEffort(w http.ResponseWriter, r *http.Request) {
 
 // fallbackEffortLevels is the DeepSeek V4 baseline effort set used when the
 // active model has no capability descriptor (e.g. a config-less boot). It mirrors
-// llm.DeepSeekProvider.Capabilities().ReasoningEfforts.
-var fallbackEffortLevels = []string{"low", "medium", "high", "max"}
+// llm.DeepSeekProvider.Capabilities().ReasoningEfforts. Declared as an array so
+// validEffortLevels() always returns a fresh slice — callers that append cannot
+// mutate this package-level value.
+var fallbackEffortLevels = [4]string{"low", "medium", "high", "max"}
 
 // validEffortLevels returns the effort levels POST /v1/effort accepts, derived
 // from the active model's capability descriptor (descriptor.Effort.Levels) so the
 // validator stays in sync automatically when a provider or model changes the
 // valid set. Falls back to the DeepSeek V4 baseline when no descriptor matches
 // the active model (descriptor-less boot or a kind=="none" effort control).
+// Always returns a fresh copy so callers may not mutate the source.
 // Caller must hold ms.mu.
 func (ms *modelState) validEffortLevels() []string {
 	for _, d := range ms.descriptors {
 		if d.ID == ms.active && d.Effort.Kind == "levels" && len(d.Effort.Levels) > 0 {
-			return d.Effort.Levels
+			return append([]string(nil), d.Effort.Levels...)
 		}
 	}
-	return fallbackEffortLevels
+	return fallbackEffortLevels[:]
 }
 
 // handleBalance implements GET /v1/balance. Wallet balance comes from the

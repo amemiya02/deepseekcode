@@ -55,6 +55,18 @@ function AppInner() {
   const [streaming, setStreaming] = useState(false)
   const [mode, setMode] = useState<AutonomyMode>('ask')
   const [items, setItems] = useState<TranscriptItem[]>([])
+
+  // DEV-only fixture seed: ?fixture=<name> loads a canned transcript for visual QA.
+  // Dynamic import keeps the module tree-shaken out of the production bundle.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const name = new URLSearchParams(window.location.search).get('fixture')
+    if (!name) return
+    import('./lib/devFixtures').then(({ fixtures }) => {
+      if (fixtures[name]) setItems(fixtures[name])
+    })
+  }, [])
+
   // dispatch wraps applyEvent so existing call sites need no changes.
   const dispatch = useCallback(
     (event: Parameters<typeof applyEvent>[1]) => setItems((s) => applyEvent(s, event)),

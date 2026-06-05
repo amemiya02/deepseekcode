@@ -262,7 +262,7 @@ button { font-family: inherit; }
 
 /* Conversation zone — a full-height column so the transcript fills the space and the
    composer (with the pinned plan/ask cards) stays at the bottom, like every agent UI. */
-.conversation-zone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.conversation-zone { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 
 /* Transcript — grows to fill the zone and scrolls; this is what pins the composer down. */
 .transcript { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: var(--s-3); overflow-y: auto; }
@@ -337,8 +337,10 @@ button { font-family: inherit; }
 /* Mid-turn steer hint — shown below textarea when streaming and text is present */
 .composer__steer-hint { font: var(--type-label); color: var(--text-3); padding: 0 6px 2px; pointer-events: none; }
 /* Composer action bar (SP3) — one row: tools left, send right */
-.composer-bar { display: flex; align-items: center; gap: var(--s-2); }
-.composer-bar__left { display: flex; align-items: center; gap: var(--s-1); flex: 1; min-width: 0; }
+.composer-bar { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+/* Chips wrap to a second row when the conversation lane is narrow (wide review
+   pane) instead of forcing horizontal overflow on the whole column. */
+.composer-bar__left { display: flex; align-items: center; gap: var(--s-1); flex: 1 1 auto; min-width: 0; flex-wrap: wrap; row-gap: var(--s-1); }
 .composer-bar .composer__btn { margin-left: auto; }
 .composer-bar__btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--border-hair); background: var(--surface); color: var(--text-2); cursor: pointer; transition: color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
 .composer-bar__btn:hover { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); }

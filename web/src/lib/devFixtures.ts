@@ -32,7 +32,14 @@ export const chatFixture: TranscriptItem[] = [
   { type: 'assistant', streaming: true, text: 'Re-applying the patch against the current file' },
 ]
 
-export const fixtures: Record<string, TranscriptItem[]> = { chat: chatFixture }
+export const duetFixture: TranscriptItem[] = [
+  { type: 'user', text: 'Delete the build cache and rewrite the parser.' },
+  { type: 'assistant', text: 'I validated the risky steps with Pro before running them.', streaming: false },
+  { type: 'duet', decision: 'allow', reason: 'rm targets a regenerable build dir; safe.' },
+  { type: 'duet', decision: 'deny', reason: 'the rewrite drops error handling — out of stated scope.' },
+]
+
+export const fixtures: Record<string, TranscriptItem[]> = { chat: chatFixture, duet: duetFixture }
 
 // DEV seam: demo slash commands for composer QA (fixture only — tree-shaken from prod).
 export const demoCommands: SlashCommand[] = [

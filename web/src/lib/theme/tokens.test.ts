@@ -77,4 +77,11 @@ describe('buildTokens', () => {
     const hc = buildTokens({ theme: 'graphite', mode: 'hc', density: 'comfortable', accent: 'indigo' })
     expect(hc['--border']).not.toBe(dark['--border'])
   })
+
+  it('exposes a hairline divider token and a panel padding token', () => {
+    const t = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo' })
+    expect(t['--border-hair']).toBeTruthy()
+    expect(t['--panel-pad']).toBeTruthy()
+    expect(t['--border-hair']).not.toBe(t['--border-strong'])
+  })
 })

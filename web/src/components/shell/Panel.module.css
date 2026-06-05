@@ -1,0 +1,4 @@
+.panel { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--surface); }
+.head { display: flex; align-items: center; justify-content: space-between; padding: var(--s-2) var(--panel-pad); border-bottom: 1px solid var(--border-hair); }
+.title { font: var(--type-label); text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
+.actions { display: flex; gap: var(--s-1); }

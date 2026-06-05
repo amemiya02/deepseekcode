@@ -127,8 +127,11 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     // Lines
     '--border': border,
     '--border-strong': borderStrong,
+    '--border-hair': lineSoft,
     '--line-soft': lineSoft,
     '--focus-ring': ACCENT,
+    // Panel
+    '--panel-pad': sp(4),
     // Glass edge — a 1px top highlight so panels read as lifted, not painted-on.
     '--glass-edge': isDarkish ? 'oklch(1 0 0 / 0.05)' : 'oklch(1 0 0 / 0.9)',
     // Elevation shadows (light §3.6; dark code islands deeper)

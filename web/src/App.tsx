@@ -322,14 +322,6 @@ function AppInner() {
         onRename={(id, title) => void onRenameSession(id, title)}
         onOpenHistory={() => setHistoryOpen(true)}
       />
-      <HistoryDrawer
-        open={historyOpen}
-        sessions={sessions}
-        onResume={(id) => void onSelectSession(id)}
-        onDelete={(id) => void onDeleteSession(id)}
-        onRename={(id, title) => void onRenameSession(id, title)}
-        onClose={() => setHistoryOpen(false)}
-      />
     </div>
   )
 
@@ -402,6 +394,14 @@ function AppInner() {
         </div>
         <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
         <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <HistoryDrawer
+          open={historyOpen}
+          sessions={sessions}
+          onResume={(id) => void onSelectSession(id)}
+          onDelete={(id) => void onDeleteSession(id)}
+          onRename={(id, title) => void onRenameSession(id, title)}
+          onClose={() => setHistoryOpen(false)}
+        />
         <OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
         <Toasts />
       </ErrorBoundary>

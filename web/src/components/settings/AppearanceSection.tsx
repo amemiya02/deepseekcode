@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { t } from '../../lib/i18n'
+import { useT } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { setThemeSettings, type ThemeSettings } from '../../lib/theme/store'
 import { type Accent, type Density } from '../../lib/theme/tokens'
@@ -10,6 +10,7 @@ const ACCENTS: Accent[] = ['indigo', 'terracotta', 'emerald', 'amber', 'rose', '
 const DENSITIES: Density[] = ['comfortable', 'compact']
 
 export function AppearanceSection() {
+  const t = useT()
   const [cfg, setCfg] = useState<ConfigDTO | null>(null)
   const [error, setError] = useState('')
 

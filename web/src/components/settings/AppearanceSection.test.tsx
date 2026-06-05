@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { LocaleProvider } from '../../lib/i18n'
 import { AppearanceSection } from './AppearanceSection'
 import * as system from '../../lib/system'
 import * as store from '../../lib/theme/store'
@@ -24,7 +25,7 @@ describe('AppearanceSection', () => {
     vi.spyOn(system, 'fetchConfig').mockResolvedValue({ ...baseCfg })
     const save = vi.spyOn(system, 'saveConfig').mockResolvedValue({ ...baseCfg, accent: 'rose' })
     const apply = vi.spyOn(store, 'setThemeSettings').mockImplementation(() => {})
-    render(<AppearanceSection />)
+    render(<LocaleProvider><AppearanceSection /></LocaleProvider>)
     const sel = (await screen.findByLabelText(/accent/i)) as HTMLSelectElement
     await userEvent.selectOptions(sel, 'rose')
     await waitFor(() => {
@@ -41,7 +42,7 @@ describe('AppearanceSection', () => {
 
     it('changing accent does not wipe theme or density', async () => {
       const apply = vi.spyOn(store, 'setThemeSettings').mockImplementation(() => {})
-      render(<AppearanceSection />)
+      render(<LocaleProvider><AppearanceSection /></LocaleProvider>)
       const accent = await screen.findByDisplayValue('indigo')
       fireEvent.change(accent, { target: { value: 'rose' } })
       await waitFor(() => {

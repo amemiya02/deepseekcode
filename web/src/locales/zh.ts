@@ -138,4 +138,5 @@ export const zhCN: Record<string, string> = {
   'model.cap.reasoning': '推理',
   'model.cap.tools': '工具',
   'model.cap.vision': '视觉',
+  'status.lines': '本轮改动行数',
 }

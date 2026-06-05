@@ -32,6 +32,8 @@ export function StatusBarLive({
     return () => disconnect()
   }, [sessionId, connect, disconnect, refreshBalance])
 
+  // ±lines are best-effort: wired to 0 until a per-turn diff-count source is available.
+  // When the ReviewPanel diff source exposes per-turn add/del counts, wire them here.
   return (
     <StatusBar
       status={status}
@@ -48,6 +50,8 @@ export function StatusBarLive({
       jobs={jobs}
       retryAttempt={retry.attempt}
       retryMax={retry.max}
+      linesAdded={0}
+      linesRemoved={0}
     />
   )
 }

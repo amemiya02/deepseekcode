@@ -140,4 +140,5 @@ export const en: Record<string, string> = {
   'model.cap.reasoning': 'reasoning',
   'model.cap.tools': 'tools',
   'model.cap.vision': 'vision',
+  'status.lines': 'Lines changed this turn',
 }

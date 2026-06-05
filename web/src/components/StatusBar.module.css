@@ -35,3 +35,7 @@
 .warn { color: var(--danger); }
 .retry { color: var(--warning); }
 .spacer { flex: 1; }
+.ctxWarn { color: var(--warning); }
+.ctxDanger { color: var(--danger); }
+.add { color: var(--add-fg); }
+.del { color: var(--del-fg); }

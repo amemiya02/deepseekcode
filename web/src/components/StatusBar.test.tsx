@@ -60,4 +60,44 @@ describe('StatusBar', () => {
     rerender(<StatusBar {...base} jobs={3} />)
     expect(screen.getByTestId('jobs')).toHaveTextContent('3')
   })
+
+  describe('ctx-pressure color', () => {
+    it('applies no pressure class when ctxPct is low (0.1)', () => {
+      render(<StatusBar {...base} ctxPct={0.1} />)
+      const el = screen.getByTestId('ctx-pct')
+      expect(el.className).not.toMatch(/ctxWarn|ctxDanger/)
+    })
+
+    it('applies warn pressure class when ctxPct is mid (0.6)', () => {
+      render(<StatusBar {...base} ctxPct={0.6} />)
+      const el = screen.getByTestId('ctx-pct')
+      expect(el.className).toMatch(/ctxWarn/)
+    })
+
+    it('applies danger pressure class when ctxPct is high (0.85)', () => {
+      render(<StatusBar {...base} ctxPct={0.85} />)
+      const el = screen.getByTestId('ctx-pct')
+      expect(el.className).toMatch(/ctxDanger/)
+    })
+  })
+
+  describe('±lines segment', () => {
+    it('hides diff-lines segment when both linesAdded and linesRemoved are 0', () => {
+      render(<StatusBar {...base} linesAdded={0} linesRemoved={0} />)
+      expect(screen.queryByTestId('diff-lines')).not.toBeInTheDocument()
+    })
+
+    it('shows diff-lines segment with +A −R when linesAdded > 0', () => {
+      render(<StatusBar {...base} linesAdded={12} linesRemoved={3} />)
+      const seg = screen.getByTestId('diff-lines')
+      expect(seg).toBeInTheDocument()
+      expect(seg).toHaveTextContent('+12')
+      expect(seg).toHaveTextContent('−3')
+    })
+
+    it('shows diff-lines segment when only linesRemoved > 0', () => {
+      render(<StatusBar {...base} linesAdded={0} linesRemoved={5} />)
+      expect(screen.getByTestId('diff-lines')).toBeInTheDocument()
+    })
+  })
 })

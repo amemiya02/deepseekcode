@@ -22,6 +22,8 @@ export function StatusBar({
   jobs = 0,
   retryAttempt = 0,
   retryMax = 0,
+  linesAdded = 0,
+  linesRemoved = 0,
 }: {
   status?: AgentStatus
   model?: string
@@ -37,7 +39,12 @@ export function StatusBar({
   jobs?: number
   retryAttempt?: number
   retryMax?: number
+  linesAdded?: number
+  linesRemoved?: number
 }) {
+  const ctxClass =
+    ctxPct >= 0.8 ? styles.ctxDanger : ctxPct >= 0.55 ? styles.ctxWarn : ''
+
   return (
     <footer className={`${styles.statusBar} status-bar`} role="status">
       <span className={styles.dot} data-testid="status-dot" data-status={status} aria-label={t(`status.${status}`, status)} />
@@ -45,7 +52,7 @@ export function StatusBar({
       <span className={`${styles.seg} ${styles.model}`} title={t('status.model', 'Model')}>{model}</span>
       <span className={styles.seg} title={t('status.effort', 'Effort')}>{effort}</span>
 
-      <span className={styles.seg} data-testid="ctx-pct" title={t('status.context', 'Context used')}>
+      <span className={`${styles.seg} ${ctxClass}`} data-testid="ctx-pct" title={t('status.context', 'Context used')}>
         {t('status.ctx', 'ctx')} {formatPct(ctxPct)}
       </span>
 
@@ -64,6 +71,13 @@ export function StatusBar({
       )}
 
       <span className={styles.spacer} />
+
+      {(linesAdded > 0 || linesRemoved > 0) && (
+        <span className={styles.seg} data-testid="diff-lines" title={t('status.lines', 'Lines changed this turn')}>
+          <span className={styles.add}>+{linesAdded}</span>
+          <span className={styles.del}>−{linesRemoved}</span>
+        </span>
+      )}
 
       <span className={styles.seg} data-testid="turn-cost" title={t('status.turnCost', 'This-turn cost')}>
         <Coins size={11} aria-hidden="true" />

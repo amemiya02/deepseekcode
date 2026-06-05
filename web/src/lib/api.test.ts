@@ -116,8 +116,52 @@ describe('fetchModelState', () => {
     expect(state.effort).toBe('medium')
   })
 
-  it('EFFORT_LEVELS contains low, medium, high', () => {
-    expect([...EFFORT_LEVELS]).toEqual(['low', 'medium', 'high'])
+  it('EFFORT_LEVELS contains low, medium, high, and max', () => {
+    expect([...EFFORT_LEVELS]).toContain('low')
+    expect([...EFFORT_LEVELS]).toContain('medium')
+    expect([...EFFORT_LEVELS]).toContain('high')
+    expect([...EFFORT_LEVELS]).toContain('max')
+  })
+
+  it('fetchModels parses descriptor response and surfaces capability fields', async () => {
+    const descriptorPayload = {
+      active: 'deepseek-v4-flash',
+      effort: 'max',
+      models: [
+        {
+          id: 'deepseek-v4-flash',
+          label: 'DeepSeek V4 Flash',
+          provider: 'deepseek',
+          caps: { vision: false, tools: true, reasoning: true },
+          effort: { kind: 'levels', levels: ['low', 'medium', 'high', 'max'], default: 'max' },
+          context: 1000000,
+        },
+      ],
+    }
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => descriptorPayload,
+    }) as unknown as typeof fetch
+    const models = await fetchModels()
+    expect(models).toHaveLength(1)
+    const m = models[0]
+    expect(m.id).toBe('deepseek-v4-flash')
+    expect(m.label).toBe('DeepSeek V4 Flash')
+    expect(m.caps?.reasoning).toBe(true)
+    expect(m.caps?.tools).toBe(true)
+    expect(m.effort?.kind).toBe('levels')
+    expect(m.effort?.levels).toContain('max')
+    expect(m.effort?.default).toBe('max')
+    expect(m.context).toBe(1000000)
+  })
+
+  it('fetchModels still tolerates legacy bare-string model list', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ models: ['a', 'b'], active: 'a', effort: 'high' }),
+    }) as unknown as typeof fetch
+    const models = await fetchModels()
+    expect(models).toEqual([{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }])
   })
 })
 

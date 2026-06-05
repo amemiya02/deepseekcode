@@ -52,35 +52,6 @@
 .splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
 .splitter:hover::after, .splitter:focus-visible::after { background: color-mix(in oklch, var(--accent) 55%, transparent); }
 
-/* Preset segmented control */
-.presetRow {
-  position: absolute;
-  top: var(--s-2);
-  right: calc(var(--s-2) + 32px); /* clear the collapse-right button */
-  z-index: 2;
-}
-.presetGroup {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--elevated);
-  border-radius: var(--r-sm);
-}
-.presetBtn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  font: var(--type-label);
-  padding: var(--s-1) var(--s-2);
-  border-radius: var(--r-sm);
-  color: var(--text-3);
-  cursor: pointer;
-}
-.presetBtn[aria-pressed='true'] {
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow-1);
-}
 .collapseTab {
   position: absolute;
   top: var(--s-2);

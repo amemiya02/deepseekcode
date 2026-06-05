@@ -74,18 +74,9 @@ describe('AppShell', () => {
     expect(shell).not.toHaveAttribute('data-dragging', 'true')
   })
 
-  it('preset buttons are rendered inside the shell', () => {
+  it('conversation no longer renders floating layout presets', () => {
     renderShell()
-    expect(screen.getByTestId('preset-balanced')).toBeInTheDocument()
-    expect(screen.getByTestId('preset-focus')).toBeInTheDocument()
-    expect(screen.getByTestId('preset-review')).toBeInTheDocument()
-  })
-
-  it('clicking Focus preset collapses both rails', () => {
-    renderShell()
-    const shell = screen.getByTestId('app-shell')
-    fireEvent.click(screen.getByTestId('preset-focus'))
-    expect(shell.getAttribute('data-sessions-collapsed')).toBe('true')
-    expect(shell.getAttribute('data-workspace-collapsed')).toBe('true')
+    expect(screen.queryByTestId('preset-balanced')).toBeNull()
+    expect(screen.queryByRole('group', { name: /layout preset/i })).toBeNull()
   })
 })

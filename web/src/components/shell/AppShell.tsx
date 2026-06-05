@@ -2,11 +2,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { IconPanelLeft, IconPanelRight } from '../../lib/icons'
 import { useT } from '../../lib/i18n'
 import {
-  loadLayout, saveLayout, applyPreset, clampLeft, clampRight,
+  loadLayout, saveLayout, clampLeft, clampRight,
   LEFT_MIN, LEFT_MAX, RIGHT_MIN, RIGHT_MAX,
   type Layout,
 } from './layout'
-import { LayoutPresets } from './LayoutPresets'
 import styles from './index.module.css'
 
 export interface AppShellProps {
@@ -147,16 +146,6 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       return next
     })
 
-  // ── Preset handler ────────────────────────────────────────────────────────
-
-  const onPreset = (p: Parameters<typeof applyPreset>[1]) => {
-    setLayout((prev) => {
-      const next = applyPreset(prev, p)
-      saveLayout(next)
-      return next
-    })
-  }
-
   // ── CSS custom properties → grid ──────────────────────────────────────────
 
   const gridStyle: CSSProperties = {
@@ -202,10 +191,6 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
         >
           <IconPanelLeft size={14} />
         </button>
-
-        <div className={styles.presetRow}>
-          <LayoutPresets value={layout.preset} onChange={onPreset} />
-        </div>
 
         {conversation}
 

@@ -14,7 +14,8 @@ export interface ToolItem {
   truncated?: boolean
 }
 export interface RoutingItem { type: 'routing'; from: string; to: string; reason: string }
-export type TranscriptItem = UserItem | AssistantItem | ThinkingItem | ToolItem | RoutingItem
+export interface DuetItem { type: 'duet'; decision: string; reason: string }
+export type TranscriptItem = UserItem | AssistantItem | ThinkingItem | ToolItem | RoutingItem | DuetItem
 
 // Events use the Contract-2 snake_case field names so the reducer can be fed
 // straight from the GatewayClient handlers without a rename layer.
@@ -26,6 +27,7 @@ export type TranscriptEvent =
   | { kind: 'tool_delta'; id: string; delta: string }
   | { kind: 'tool_end'; id: string; result: string; is_error: boolean; truncated?: boolean }
   | { kind: 'routing'; from: string; to: string; reason: string }
+  | { kind: 'duet'; decision: string; reason: string }
   | { kind: 'turn_done'; stop_reason: string }
 
 export type Clock = () => number
@@ -94,6 +96,8 @@ export function applyEvent(
     }
     case 'routing':
       return [...closeOpenThinking(items, now()), { type: 'routing', from: e.from, to: e.to, reason: e.reason }]
+    case 'duet':
+      return [...closeOpenThinking(items, now()), { type: 'duet', decision: e.decision, reason: e.reason }]
     case 'turn_done': {
       const base = closeOpenThinking(items, now())
       const tail = base[base.length - 1]

@@ -57,6 +57,11 @@ describe('applyEvent', () => {
     expect(items[0]).toMatchObject({ type: 'routing', from: 'flash', to: 'pro', reason: 'hard' })
   })
 
+  it('a duet event appends a DuetItem', () => {
+    const out = applyEvent([], { kind: 'duet', decision: 'deny', reason: 'scope' })
+    expect(out).toEqual([{ type: 'duet', decision: 'deny', reason: 'scope' }])
+  })
+
   it('user appends a user item with pills', () => {
     const items = run([{ kind: 'user', text: 'fix it', pills: ['a.go'] }])
     expect(items[0]).toMatchObject({ type: 'user', text: 'fix it', pills: ['a.go'] })

@@ -38,6 +38,7 @@ export interface PermissionRequestEvent { id: string; tool: string; args: Record
 export interface AskQuestion { question: string; header: string; multiple: boolean; options: PermissionOption[] }
 export interface AskRequestEvent { id: string; questions: AskQuestion[] }
 export interface RoutingEvent { from: string; to: string; reason: string }
+export interface DuetEvent { decision: string; reason: string }
 export interface CacheUpdateEvent { turn_pct: number; avg_pct: number; prefixes: number; eviction: boolean }
 export interface CostUpdateEvent { turn_cny: number; session_cny: number; output_tokens: number }
 export interface JobUpdateEvent { running: number }
@@ -60,6 +61,7 @@ export interface StreamHandlers {
   onPermissionRequest?: (e: PermissionRequestEvent) => void
   onAskRequest?: (e: AskRequestEvent) => void
   onRouting?: (e: RoutingEvent) => void
+  onDuet?: (e: DuetEvent) => void
   onCacheUpdate?: (e: CacheUpdateEvent) => void
   onCostUpdate?: (e: CostUpdateEvent) => void
   onJobUpdate?: (e: JobUpdateEvent) => void
@@ -243,6 +245,7 @@ export class GatewayClient {
     if (handlers.onToolDelta) es.addEventListener('tool_delta', j(handlers.onToolDelta))
     if (handlers.onToolEnd) es.addEventListener('tool_end', j(handlers.onToolEnd))
     if (handlers.onRouting) es.addEventListener('routing', j(handlers.onRouting))
+    if (handlers.onDuet) es.addEventListener('duet', j(handlers.onDuet))
     if (handlers.onPlanUpdate) es.addEventListener('plan_update', j(handlers.onPlanUpdate))
     if (handlers.onPermissionRequest) es.addEventListener('permission_request', j(handlers.onPermissionRequest))
     if (handlers.onAskRequest) es.addEventListener('ask_request', j(handlers.onAskRequest))

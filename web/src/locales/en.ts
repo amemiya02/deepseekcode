@@ -104,4 +104,11 @@ export const en: Record<string, string> = {
   'onboarding.finish': 'Finish',
   'review.pick': 'Select a changed file to review its diff.',
   'telemetry.cache': 'cache',
+  'approval.aria': 'edit approval',
+  'approval.once': 'Accept',
+  'approval.more': 'More approval options',
+  'approval.session': 'Allow for session',
+  'approval.always': 'Always allow',
+  'approval.deny': 'Reject',
+  'approval.hint': '⏎ accept · ⌫ reject',
 }

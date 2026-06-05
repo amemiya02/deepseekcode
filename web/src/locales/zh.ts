@@ -102,4 +102,11 @@ export const zhCN: Record<string, string> = {
   'onboarding.finish': '完成',
   'review.pick': '选择一个变更文件以查看其差异。',
   'telemetry.cache': '缓存',
+  'approval.aria': '编辑审批',
+  'approval.once': '接受',
+  'approval.more': '更多审批选项',
+  'approval.session': '本会话允许',
+  'approval.always': '始终允许',
+  'approval.deny': '拒绝',
+  'approval.hint': '⏎ 接受 · ⌫ 拒绝',
 }

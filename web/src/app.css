@@ -177,6 +177,45 @@ button { font-family: inherit; }
 .island .hljs-attribute, .island .hljs-variable, .island .hljs-template-variable { color: #d9a35f; }
 .island .hljs-tag { color: var(--island-ink-2); }
 
+/* Inline diff approval gate (§5) — the diff island IS the gate; the action bar reads
+   as its obsidian footer (reuses the P3.1 --island-* tokens). */
+.approval { display: flex; flex-direction: column; margin: var(--s-2) 0; outline: none; }
+.approval__actions {
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: 8px var(--s-2);
+  background: var(--island-header);
+  border: 1px solid var(--island-line);
+  border-top: none;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+  margin-top: -1px;
+}
+.approval__accept { position: relative; display: inline-flex; }
+.approval__btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: var(--type-label); cursor: pointer; padding: 4px 12px;
+  border: 1px solid var(--island-line); border-radius: var(--r-sm);
+  background: var(--island-card); color: var(--island-ink);
+}
+.approval__btn--accept { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.approval__btn--accept:hover { background: var(--accent-ink); }
+.approval__caret {
+  display: inline-flex; align-items: center; padding: 4px 6px; cursor: pointer;
+  border: 1px solid var(--accent); border-left: none; border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent); color: var(--text-on-accent);
+}
+.approval__caret:hover { background: var(--accent-ink); }
+.approval__btn--deny { color: var(--island-ink-2); }
+.approval__btn--deny:hover { color: var(--del-fg); border-color: var(--del-fg); }
+.approval__menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 5;
+  display: flex; flex-direction: column; min-width: 168px;
+  background: var(--island-card); border: 1px solid var(--island-line);
+  border-radius: var(--r-sm); box-shadow: var(--shadow-2); overflow: hidden;
+}
+.approval__menuitem { text-align: left; padding: 7px 12px; background: none; border: none; color: var(--island-ink); font: var(--type-label); cursor: pointer; }
+.approval__menuitem:hover { background: var(--accent-weak); color: var(--accent); }
+.approval__hint { margin-left: auto; color: var(--island-ink-3); font: var(--type-label); font-variant-numeric: tabular-nums; }
+
 /* (d) Brand highlight theme — light defaults; .island .hljs-* overrides above win inside islands */
 .markdown-body .hljs-comment, .markdown-body .hljs-quote { color: #8a93a3; font-style: italic; }
 .markdown-body .hljs-keyword, .markdown-body .hljs-selector-tag, .markdown-body .hljs-built_in, .markdown-body .hljs-literal, .markdown-body .hljs-type { color: #8a3ffc; }

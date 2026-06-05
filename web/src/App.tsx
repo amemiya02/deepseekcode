@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { WorkspacePanel } from './components/WorkspacePanel'
+import { ReviewPanel } from './components/ReviewPanel'
+import { TelemetryStrip } from './components/TelemetryStrip'
 import { SessionRail } from './components/SessionRail'
 import { StatusBarLive } from './components/StatusBarLive'
-import { Cockpit } from './components/cockpit/Cockpit'
 import { SettingsWindow } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -44,8 +44,6 @@ import type { AutonomyMode } from './lib/autonomy'
 import styles from './components/shell/index.module.css'
 
 const EMPTY_PERMISSION: PermissionRequest = { id: '', tool: '', args: {}, options: [] }
-
-type WorkspaceTab = 'cockpit' | 'workspace'
 
 // AppInner lives under LocaleProvider so hooks (useT/useLocale) have their context.
 function AppInner() {
@@ -115,7 +113,7 @@ function AppInner() {
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
 
-  // Wave-3 state: sessions zone + workspace tabs
+  // Wave-3 state: sessions zone
   const sessions = useSessionStore((s) => s.sessions)
   const activeId = useSessionStore((s) => s.activeId)
   const sessionsLoading = useSessionStore((s) => s.loading)
@@ -123,7 +121,6 @@ function AppInner() {
   const createSession = useSessionStore((s) => s.create)
   const removeSession = useSessionStore((s) => s.remove)
   const setActiveSession = useSessionStore((s) => s.setActive)
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('cockpit')
 
   // Wave-6 state: settings / onboarding / update banner
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -257,12 +254,6 @@ function AppInner() {
   const onEffortChange = (level: string) => {
     setEffort(level)
     if (sessionId) apiSetEffort(sessionId, level).catch(() => {})
-  }
-
-  // Wave-5: add-to-chat handler — content is appended to the composer draft.
-  // Contract 4 non-negotiable: add-to-chat content must be appended to the composer draft.
-  const handleAddToChat = (content: string) => {
-    setComposerDraft((d) => (d ? d + '\n\n' + content : content))
   }
 
   // Map the flat TranscriptMessage[] returned by switchSession back to the
@@ -410,33 +401,8 @@ function AppInner() {
 
   const workspaceZone = (
     <div data-testid="zone-workspace" className={styles.workspaceZone}>
-      <div className={styles.workspaceTabs} role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workspaceTab === 'cockpit'}
-          data-testid="ws-tab-cockpit"
-          className={styles.workspaceTab}
-          onClick={() => setWorkspaceTab('cockpit')}
-        >
-          {t('workspace.cockpitTab', 'Cockpit')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workspaceTab === 'workspace'}
-          data-testid="ws-tab-workspace"
-          className={styles.workspaceTab}
-          onClick={() => setWorkspaceTab('workspace')}
-        >
-          {t('workspace.workspaceTab', 'Workspace')}
-        </button>
-      </div>
-      {workspaceTab === 'cockpit' ? (
-        <Cockpit sessionId={sessionId ?? undefined} />
-      ) : (
-        <WorkspacePanel refreshKey={workspaceRefreshKey} onAddToChat={handleAddToChat} />
-      )}
+      <ReviewPanel refreshKey={workspaceRefreshKey} />
+      <TelemetryStrip sessionId={sessionId ?? undefined} />
     </div>
   )
 

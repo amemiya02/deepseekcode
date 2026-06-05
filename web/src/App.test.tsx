@@ -119,24 +119,31 @@ describe('App — Wave 4 wiring', () => {
   })
 })
 
-describe('App workspace zone (Wave 5)', () => {
+describe('App workspace zone (SP5)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    // Route fetch calls: files listing → entries; add-to-chat → content pill.
+    // Route fetch calls: changed files → entries; diff → patch; file → content.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
-        if (typeof url === 'string' && url.includes('add-to-chat')) {
+        if (typeof url === 'string' && url.includes('/v1/changed')) {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: async () => ({ content: 'main.go' }),
+            json: async () => ({ entries: [{ path: 'main.go', status: 'M', deleted: false }] }),
+          } as Response)
+        }
+        if (typeof url === 'string' && url.includes('/v1/diff')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ path: 'main.go', patch: '' }),
           } as Response)
         }
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: async () => ({ entries: [{ name: 'main.go', path: 'main.go', is_dir: false }] }),
+          json: async () => ({ entries: [] }),
         } as Response)
       }),
     )
@@ -147,15 +154,15 @@ describe('App workspace zone (Wave 5)', () => {
     )
   })
 
-  it('mounts WorkspacePanel into the workspace zone', async () => {
+  it('mounts review-hero and telemetry-toggle inside zone-workspace (no tabs)', async () => {
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
-    // The workspace zone is now tabbed (Cockpit ‖ Workspace); select the
-    // Workspace tab to mount the WorkspacePanel. WorkspacePanel now shows only
-    // the Changed view (the Files tab was removed — /v1/files 400s without a
-    // workspace root under `dsc serve`).
-    fireEvent.click(within(zone).getByTestId('ws-tab-workspace'))
-    await waitFor(() => expect(zone.querySelector('[data-testid="tab-changed"]')).not.toBeNull())
+    // No workspace tabs — the old cockpit/workspace tablist is gone
+    expect(within(zone).queryByTestId('ws-tab-cockpit')).toBeNull()
+    expect(within(zone).queryByTestId('ws-tab-workspace')).toBeNull()
+    // Review hero and telemetry toggle are rendered directly
+    expect(await within(zone).findByTestId('review-hero')).toBeInTheDocument()
+    expect(within(zone).getByTestId('telemetry-toggle')).toBeInTheDocument()
   })
 })
 
@@ -221,19 +228,13 @@ describe('App — full shell integration (Wave 0)', () => {
     expect(within(hero).getByTestId('turn-cost')).toBeInTheDocument()
   })
 
-  it('exposes a Cockpit tab in the workspace zone (shown by default)', async () => {
+  it('workspace zone has review-hero and telemetry-toggle (no tabs)', async () => {
     render(<App />)
     const zone = screen.getByTestId('zone-workspace')
-    expect(await within(zone).findByTestId('ws-tab-cockpit')).toBeInTheDocument()
-    expect(within(zone).getByTestId('ws-tab-workspace')).toBeInTheDocument()
-  })
-
-  it('switches the workspace zone to the Workspace (changed) tab', async () => {
-    const user = userEvent.setup()
-    render(<App />)
-    const zone = screen.getByTestId('zone-workspace')
-    await user.click(within(zone).getByTestId('ws-tab-workspace'))
-    await waitFor(() => expect(zone.querySelector('[data-testid="tab-changed"]')).not.toBeNull())
+    expect(await within(zone).findByTestId('review-hero')).toBeInTheDocument()
+    expect(within(zone).getByTestId('telemetry-toggle')).toBeInTheDocument()
+    expect(within(zone).queryByTestId('ws-tab-cockpit')).toBeNull()
+    expect(within(zone).queryByTestId('ws-tab-workspace')).toBeNull()
   })
 
   it('opens the SettingsWindow via the titlebar gear button', async () => {
@@ -291,7 +292,8 @@ describe('App — full shell integration (Wave 0)', () => {
             }),
           } as Response)
         }
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as Response)
+        // Fallback: return entries so ChangedFiles (now always mounted in workspace zone) doesn't crash.
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response)
       }),
     )
 

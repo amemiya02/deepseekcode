@@ -1,7 +1,7 @@
 // Adapted from deepseek-reasonix (MIT) — components/WorkspacePanel.tsx
 // (change-row rendering: git status badge + deleted marker).
-import { useEffect, useState, type ComponentType } from 'react'
-import { File, FileCode, FileJson, FileText, Folder, Image } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { File, FileCode, FileJson, FileText, Folder, Image, type LucideIcon } from 'lucide-react'
 import { fetchChanged, type ChangedEntry } from '../lib/workspace'
 import { t } from '../lib/i18n'
 import styles from './ChangedFiles.module.css'
@@ -23,7 +23,7 @@ const TEXT_EXT = new Set(['md', 'mdx', 'txt', 'rst', 'yml', 'yaml', 'toml', 'ini
 // iconFor picks a file-type glyph from the extension so the change row reads at a
 // glance (a real .png/.json icon, not a raw "??" git code the user mistook for a
 // broken file). Directories get a folder glyph.
-function iconFor(path: string, isDir: boolean): ComponentType<{ size?: number; className?: string }> {
+function iconFor(path: string, isDir: boolean): LucideIcon {
   if (isDir) return Folder
   const dot = path.lastIndexOf('.')
   const ext = dot >= 0 ? path.slice(dot + 1).toLowerCase() : ''

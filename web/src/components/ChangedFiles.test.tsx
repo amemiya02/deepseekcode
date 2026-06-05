@@ -53,6 +53,27 @@ describe('ChangedFiles', () => {
     })
   })
 
+  it('renders a file-type icon for each row', async () => {
+    vi.stubGlobal('fetch', mockFetch([{ path: 'src/a.json', status: ' M', deleted: false }]))
+    render(<ChangedFiles />)
+    await waitFor(() => {
+      const icon = screen.getByTestId('change-icon')
+      expect(icon).toBeInTheDocument()
+      // lucide renders an <svg>
+      expect(icon.querySelector('svg')).toBeTruthy()
+    })
+  })
+
+  it('renders a directory entry (trailing slash) with a clean name, not a mangled string', async () => {
+    vi.stubGlobal('fetch', mockFetch([{ path: 'pkg/sub/', status: '??', deleted: false }]))
+    render(<ChangedFiles />)
+    await waitFor(() => {
+      // name is the last real segment ("sub"), dir is the parent ("pkg/")
+      expect(screen.getByText('sub')).toBeInTheDocument()
+      expect(screen.getByText('pkg/')).toBeInTheDocument()
+    })
+  })
+
   it('marks selected row with aria-current="true"', async () => {
     vi.stubGlobal('fetch', mockFetch([
       { path: 'a.go', status: ' M', deleted: false },

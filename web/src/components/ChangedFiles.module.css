@@ -54,13 +54,18 @@
 .status[data-code='R'] {
   color: var(--text-2, #555);
 }
+.icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3, #888);
+}
 .dir {
   color: var(--text-3, #888);
   font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
   flex-shrink: 1;
   min-width: 0;
 }

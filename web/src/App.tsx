@@ -33,11 +33,15 @@ import {
   respondAnswer,
   cancelTurn,
   renameSession,
+  fetchModelState,
+  setModel as apiSetModel,
+  setEffort as apiSetEffort,
+  EFFORT_LEVELS,
 } from './lib/api'
-import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, TurnDoneEvent, PlanUpdateEvent } from './lib/api'
+import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, TurnDoneEvent, PlanUpdateEvent, ModelInfo } from './lib/api'
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
-import type { AutonomyMode } from './components/AutonomyToggle'
+import type { AutonomyMode } from './lib/autonomy'
 import styles from './components/shell/index.module.css'
 
 const EMPTY_PERMISSION: PermissionRequest = { id: '', tool: '', args: {}, options: [] }
@@ -56,6 +60,11 @@ function AppInner() {
   const [mode, setMode] = useState<AutonomyMode>('ask')
   const [items, setItems] = useState<TranscriptItem[]>([])
 
+  // Model / effort state (wired to gateway /v1/models, /v1/model, /v1/effort)
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('medium')
+
   // DEV-only fixture seed: ?fixture=<name> loads a canned transcript for visual QA.
   // Dynamic import keeps the module tree-shaken out of the production bundle.
   useEffect(() => {
@@ -66,6 +75,21 @@ function AppInner() {
       if (fixtures[name]) setItems(fixtures[name])
     })
   }, [])
+
+  // Fetch model/effort state from the gateway on mount and whenever the active
+  // session changes. Errors are swallowed — the Composer falls back to defaults.
+  useEffect(() => {
+    let live = true
+    fetchModelState()
+      .then((s) => {
+        if (!live) return
+        setModels(s.models)
+        setModel(s.active)
+        setEffort(s.effort)
+      })
+      .catch(() => {})
+    return () => { live = false }
+  }, [sessionId])
 
   // dispatch wraps applyEvent so existing call sites need no changes.
   const dispatch = useCallback(
@@ -215,6 +239,17 @@ function AppInner() {
     }
   }
 
+  // Model/effort change handlers — optimistically update local state, then POST
+  // to the gateway if there's an active session. Errors are swallowed silently.
+  const onModelChange = (id: string) => {
+    setModel(id)
+    if (sessionId) apiSetModel(sessionId, id).catch(() => {})
+  }
+  const onEffortChange = (level: string) => {
+    setEffort(level)
+    if (sessionId) apiSetEffort(sessionId, level).catch(() => {})
+  }
+
   // Wave-5: add-to-chat handler — content is appended to the composer draft.
   // Contract 4 non-negotiable: add-to-chat content must be appended to the composer draft.
   const handleAddToChat = (content: string) => {
@@ -350,6 +385,12 @@ function AppInner() {
         onCancel={onStop}
         onModeChange={setMode}
         draft={composerDraft}
+        models={models}
+        activeModel={model}
+        effort={effort}
+        effortLevels={[...EFFORT_LEVELS]}
+        onModelChange={onModelChange}
+        onEffortChange={onEffortChange}
       />
       <PermissionModal
         open={pendingPermission !== null}

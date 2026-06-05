@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { IconPanelLeft, IconPanelRight } from '../../lib/icons'
 import { useT } from '../../lib/i18n'
 import {
-  loadLayout, saveLayout, clampLeft, clampRight,
+  loadLayout, saveLayout, clampLeft, clampRight, isReviewOpen,
   LEFT_MIN, LEFT_MAX, RIGHT_MIN, RIGHT_MAX,
   type Layout,
 } from './layout'
@@ -12,6 +12,8 @@ export interface AppShellProps {
   sessions?: ReactNode
   conversation?: ReactNode
   workspace?: ReactNode
+  /** True when the working tree has changes — drives the 'auto' review reveal. */
+  workspaceHasContent?: boolean
 }
 
 type Edge = 'left' | 'right'
@@ -20,10 +22,11 @@ const STEP = 16
 const STEP_BIG = 64
 const GUTTER = 24
 
-export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
+export function AppShell({ sessions, conversation, workspace, workspaceHasContent }: AppShellProps) {
   const t = useT()
   const [layout, setLayout] = useState<Layout>(() => loadLayout())
   const [dragging, setDragging] = useState(false)
+  const reviewOpen = isReviewOpen(layout, !!workspaceHasContent)
 
   const drag = useRef<{ edge: Edge; startX: number; startVal: number } | null>(null)
   const leftHost = useRef<HTMLDivElement>(null)
@@ -98,7 +101,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       const next =
         edge === 'left'
           ? { ...prev, left: clampLeft(content), leftCollapsed: false }
-          : { ...prev, right: clampRight(content), rightCollapsed: false }
+          : { ...prev, right: clampRight(content), reviewPin: 'open' as const }
       saveLayout(next)
       return next
     })
@@ -112,7 +115,8 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       if (mod && e.key === '\\') {
         e.preventDefault()
         setLayout((prev) => {
-          const next = { ...prev, rightCollapsed: !prev.rightCollapsed }
+          const open = isReviewOpen(prev, !!workspaceHasContent)
+          const next = { ...prev, reviewPin: open ? 'closed' as const : 'open' as const }
           saveLayout(next)
           return next
         })
@@ -128,7 +132,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [])
+  }, [workspaceHasContent])
 
   // ── Collapse toggles ──────────────────────────────────────────────────────
 
@@ -141,7 +145,8 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
 
   const toggleRight = () =>
     setLayout((prev) => {
-      const next = { ...prev, rightCollapsed: !prev.rightCollapsed }
+      const open = isReviewOpen(prev, !!workspaceHasContent)
+      const next = { ...prev, reviewPin: open ? 'closed' as const : 'open' as const }
       saveLayout(next)
       return next
     })
@@ -150,7 +155,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
 
   const gridStyle: CSSProperties = {
     ['--col-left' as string]: layout.leftCollapsed ? '0px' : `${layout.left}px`,
-    ['--col-right' as string]: layout.rightCollapsed ? '0px' : `${layout.right}px`,
+    ['--col-right' as string]: reviewOpen ? `${layout.right}px` : '0px',
   }
 
   return (
@@ -158,7 +163,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
       className={styles.appShell}
       data-testid="app-shell"
       data-sessions-collapsed={layout.leftCollapsed}
-      data-workspace-collapsed={layout.rightCollapsed}
+      data-workspace-collapsed={!reviewOpen}
       data-dragging={dragging || undefined}
       style={gridStyle}
     >
@@ -220,7 +225,7 @@ export function AppShell({ sessions, conversation, workspace }: AppShellProps) {
 
       <aside className={`${styles.zone} ${styles.zoneWorkspace} shell-panel`}>
         <div ref={rightHost} data-testid="zone-workspace-host" style={{ height: '100%' }}>
-          {!layout.rightCollapsed && workspace}
+          {reviewOpen && workspace}
         </div>
       </aside>
     </div>

@@ -4,13 +4,14 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { AppShell } from './AppShell'
 import { LocaleProvider } from '../../lib/i18n'
 
-function renderShell() {
+function renderShell(props: { workspaceHasContent?: boolean } = {}) {
   return render(
     <LocaleProvider>
       <AppShell
         sessions={<div data-testid="zone-sessions">SESSIONS</div>}
         conversation={<div data-testid="zone-conversation">CONVO</div>}
         workspace={<div data-testid="zone-workspace">WORK</div>}
+        workspaceHasContent={props.workspaceHasContent}
       />
     </LocaleProvider>,
   )
@@ -19,10 +20,30 @@ function renderShell() {
 beforeEach(() => localStorage.clear())
 
 describe('AppShell', () => {
-  it('renders all three named zones', () => {
-    renderShell()
+  it('renders rail + conversation always; workspace only with content', () => {
+    renderShell({ workspaceHasContent: true })
     expect(screen.getByTestId('zone-sessions')).toBeInTheDocument()
     expect(screen.getByTestId('zone-conversation')).toBeInTheDocument()
+    expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
+  })
+
+  it('hides the review pane by default (auto, no changes) → 2 columns', () => {
+    renderShell({ workspaceHasContent: false })
+    expect(screen.queryByTestId('zone-workspace')).toBeNull()
+    expect(screen.getByTestId('app-shell').getAttribute('data-workspace-collapsed')).toBe('true')
+  })
+
+  it('auto-reveals the review pane when changes appear', () => {
+    renderShell({ workspaceHasContent: true })
+    expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
+    expect(screen.getByTestId('app-shell').getAttribute('data-workspace-collapsed')).toBe('false')
+  })
+
+  it('the workspace toggle pins the pane open even without changes', async () => {
+    const user = userEvent.setup()
+    renderShell({ workspaceHasContent: false })
+    expect(screen.queryByTestId('zone-workspace')).toBeNull()
+    await user.click(screen.getByTestId('collapse-workspace'))
     expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
   })
 

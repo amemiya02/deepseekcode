@@ -12,7 +12,7 @@
 }
 .zone { overflow: auto; min-width: 0; }
 .zoneSessions { background: var(--surface); border-right: 1px solid var(--border); }
-.zoneWorkspace { background: var(--surface); border-left: 1px solid var(--border); }
+.zoneWorkspace { background: var(--surface); border-left: 1px solid var(--border); box-shadow: -16px 0 28px -22px oklch(0 0 0 / 0.22); }
 .zoneConversation {
   position: relative;
   background:

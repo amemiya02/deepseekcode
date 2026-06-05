@@ -9,12 +9,22 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import 'katex/dist/katex.min.css'
-import 'highlight.js/styles/github-dark.css'
+import { CodeBlock } from './CodeBlock'
 
 const components: Components = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noreferrer noopener">{children}</a>
   ),
+  // Block code: react-markdown wraps fenced code as <pre><code class="language-x">.
+  pre: ({ children }) => {
+    const child = Array.isArray(children) ? children[0] : children
+    if (child && typeof child === 'object' && 'props' in child) {
+      const props = (child as { props: { className?: string; children?: React.ReactNode } }).props
+      return <CodeBlock className={props.className}>{props.children}</CodeBlock>
+    }
+    return <pre>{children}</pre>
+  },
+  // Inline code keeps the soft chip.
   code: ({ className, children, ...rest }) => (
     <code className={`md-code ${className ?? ''}`} {...rest}>{children}</code>
   ),

@@ -35,6 +35,7 @@ func newStubAgent(events []agent.Event, err error) *stubAgent {
 
 func (s *stubAgent) Bus() *agent.Bus                  { return s.bus }
 func (s *stubAgent) ToolIsReadOnly(_ string) bool      { return false }
+func (s *stubAgent) Steer(_ string)                    {}
 
 // Run publishes all events in order, then emits EventDone (mirroring the real
 // Agent.Run defer), then writes to done — matching the production ordering
@@ -103,6 +104,7 @@ func newPermAskAgent() *permAskAgent {
 
 func (s *permAskAgent) Bus() *agent.Bus               { return s.bus }
 func (s *permAskAgent) ToolIsReadOnly(_ string) bool   { return false }
+func (s *permAskAgent) Steer(_ string)                 {}
 
 func (s *permAskAgent) Run(ctx context.Context, _ string) (agent.StopReason, error) {
 	reply := make(chan agent.PermissionResponse, 1)
@@ -165,6 +167,7 @@ type closeBeforeDoneAgent struct {
 
 func (s *closeBeforeDoneAgent) Bus() *agent.Bus               { return s.bus }
 func (s *closeBeforeDoneAgent) ToolIsReadOnly(_ string) bool   { return false }
+func (s *closeBeforeDoneAgent) Steer(_ string)                 {}
 
 func (s *closeBeforeDoneAgent) Run(_ context.Context, _ string) (agent.StopReason, error) {
 	// Close the bus mid-run without ever publishing EventDone.
@@ -204,6 +207,7 @@ type busAgent struct {
 
 func (a *busAgent) Bus() *agent.Bus               { return a.bus }
 func (a *busAgent) ToolIsReadOnly(_ string) bool   { return false }
+func (a *busAgent) Steer(_ string)                 {}
 func (a *busAgent) Run(ctx context.Context, userPrompt string) (agent.StopReason, error) {
 	a.script(a.bus)
 	a.bus.Publish(agent.EventDone{Reason: agent.StopModelDone})

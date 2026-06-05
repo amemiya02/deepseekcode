@@ -21,6 +21,8 @@ func (s *stubAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp
 	return nil
 }
 
+func (s *stubAgent) Steer(_ string) {}
+
 func TestSessionManagerCreateAndLookup(t *testing.T) {
 	sm := acp.NewSessionManager(stubAgentFactory)
 	id, err := sm.NewSession(context.Background(), "/tmp")
@@ -81,6 +83,38 @@ func TestSessionCtxOutlivesCreatingContext(t *testing.T) {
 
 	// The only intentional cancellation path is Cancel().
 	sm.Cancel(id)
+}
+
+// steerStub implements AgentRunner and records calls to Steer.
+type steerStub struct {
+	steer func(string)
+}
+
+func (s *steerStub) Run(_ context.Context, _ string, _ func(acp.AgentEvent)) error {
+	return nil
+}
+
+func (s *steerStub) Steer(text string) {
+	if s.steer != nil {
+		s.steer(text)
+	}
+}
+
+func TestSessionManagerSteer(t *testing.T) {
+	var got []string
+	factory := func(string) (acp.AgentRunner, error) {
+		return &steerStub{steer: func(s string) { got = append(got, s) }}, nil
+	}
+	sm := acp.NewSessionManager(factory)
+	id, err := sm.NewSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm.Steer(id, "focus here")
+	sm.Steer("sess-unknown", "ignored") // no-op, must not panic
+	if len(got) != 1 || got[0] != "focus here" {
+		t.Fatalf("expected [focus here], got %#v", got)
+	}
 }
 
 // TestSessionCtxMissingIsCancelled verifies the footgun fix: SessionCtx for an

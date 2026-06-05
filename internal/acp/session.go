@@ -137,6 +137,9 @@ type AgentRunner interface {
 	// Run executes the agent with the given prompt. It calls onEvent
 	// synchronously for each event and returns when the agent is done.
 	Run(ctx context.Context, userPrompt string, onEvent func(AgentEvent)) error
+	// Steer injects a mid-turn instruction into the in-flight Run. No-op if no
+	// run is active. Safe to call concurrently with Run.
+	Steer(text string)
 }
 
 // AgentFactory creates a new AgentRunner for the given working directory.
@@ -236,6 +239,18 @@ func (sm *SessionManager) Cancel(id string) {
 	sm.mu.Unlock()
 	if ok {
 		s.cancel()
+	}
+}
+
+// Steer injects a mid-turn instruction into the session's in-flight run.
+// No-op if the session does not exist. Mirrors Cancel's lookup pattern but
+// does NOT remove or cancel the session — the turn stays alive.
+func (sm *SessionManager) Steer(id, text string) {
+	sm.mu.Lock()
+	s, ok := sm.sessions[id]
+	sm.mu.Unlock()
+	if ok {
+		s.runner.Steer(text)
 	}
 }
 

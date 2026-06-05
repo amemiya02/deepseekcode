@@ -28,6 +28,8 @@ func (f *fakeRunner) Run(_ context.Context, _ string, onEvent func(acp.AgentEven
 	return f.err
 }
 
+func (f *fakeRunner) Steer(_ string) {}
+
 // TestAgentRunnerEventOrder verifies correct event forwarding and error propagation
 // through the AgentRunner interface.
 func TestAgentRunnerEventOrder(t *testing.T) {

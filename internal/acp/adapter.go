@@ -16,6 +16,7 @@ type agentIface interface {
 	Bus() *agent.Bus
 	Run(ctx context.Context, userPrompt string) (agent.StopReason, error)
 	ToolIsReadOnly(name string) bool
+	Steer(text string)
 }
 
 // AgentAdapter adapts internal/agent.Agent to the AgentRunner interface.
@@ -32,6 +33,9 @@ type AgentAdapter struct {
 func NewAgentAdapter(a *agent.Agent) *AgentAdapter {
 	return &AgentAdapter{a: a}
 }
+
+// Steer forwards a mid-turn instruction to the wrapped agent.
+func (ad *AgentAdapter) Steer(text string) { ad.a.Steer(text) }
 
 // Run implements AgentRunner. It subscribes to the agent bus, calls Agent.Run
 // in a goroutine, and forwards events to onEvent. The subscription uses the

@@ -154,6 +154,8 @@ button { font-family: inherit; }
 .island__label { color: var(--island-accent); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .island__right { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; flex: none; }
 .island__meta { display: inline-flex; gap: 8px; font: var(--type-mono); font-variant-numeric: tabular-nums; }
+.island__add { color: var(--island-add-fg); }
+.island__del { color: var(--island-del-fg); }
 .island__copy {
   display: inline-flex; align-items: center; gap: 4px;
   background: none; border: none; color: var(--island-ink-2);

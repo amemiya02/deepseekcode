@@ -29,10 +29,10 @@ export function CodeBlock({ className, children }: { className?: string; childre
   }
   return (
     <CodeIsland
-      label={<span className="codecard__lang" data-testid="codecard-lang">{lang}</span>}
+      label={<span data-testid="codecard-lang">{lang}</span>}
       actions={
-        <button className="island__copy" data-testid="codecard-copy" onClick={copy} type="button">
-          {copied ? <Check size={13} /> : <Copy size={13} />}
+        <button className="island__copy" data-testid="codecard-copy" onClick={copy} type="button" aria-label={copied ? 'Copied' : 'Copy code'}>
+          {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       }

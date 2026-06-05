@@ -2144,12 +2144,21 @@ func (a *Agent) selectTurnThinking(userText string, repairErrorsLastTurn int) bo
 	case "off":
 		return false
 	case "adaptive":
-		return a.turnsSeen == 0 || repairErrorsLastTurn > 0
+		// A repair turn always thinks to recover. Otherwise the first turn primes
+		// reasoning — but not for a trivial greeting/ack, where the model returns
+		// reasoning_content ≈ the answer (a redundant "Thought for <1s" block over
+		// a duplicate of the reply).
+		if repairErrorsLastTurn > 0 {
+			return true
+		}
+		return a.turnsSeen == 0 && !llm.IsTrivialMessage(userText)
 	default:
 		if a.AutoReasoning {
 			return llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
 		}
-		return a.Thinking
+		// Legacy default-on honors a.Thinking, but never forces it for a trivial
+		// greeting/ack — same redundant-thinking-block reason as above.
+		return a.Thinking && !llm.IsTrivialMessage(userText)
 	}
 }
 

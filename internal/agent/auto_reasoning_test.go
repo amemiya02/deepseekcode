@@ -104,11 +104,11 @@ func TestRunStepAutoReasoningLow(t *testing.T) {
 
 func TestRunStepAutoReasoningOff(t *testing.T) {
 	// AutoReasoning=false → preserves the static Thinking field (true)
-	if !captureThinking(t, "随便什么消息", false, true) {
+	if !captureThinking(t, "implement the parser", false, true) {
 		t.Error("AutoReasoning=false should preserve Thinking=true")
 	}
 	// AutoReasoning=false + Thinking=false → no thinking
-	if captureThinking(t, "随便什么消息", false, false) {
+	if captureThinking(t, "implement the parser", false, false) {
 		t.Error("AutoReasoning=false should preserve Thinking=false")
 	}
 }

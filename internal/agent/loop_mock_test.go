@@ -93,7 +93,7 @@ func TestLoopThinkingSerializesAsStruct(t *testing.T) {
 		a := newMockLoopAgent(t, srv)
 		a.Thinking = true
 		a.AutoReasoning = false
-		if _, err := a.Run(context.Background(), "x"); err != nil {
+		if _, err := a.Run(context.Background(), "implement the parser"); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 		body := string(srv.LastRequest())
@@ -127,7 +127,7 @@ func TestLoopReasoningEffortAppearsWhenThinkingEnabled(t *testing.T) {
 	a.Thinking = true
 	a.AutoReasoning = false
 	a.ReasoningEffort = llm.ReasoningEffortMax
-	if _, err := a.Run(context.Background(), "x"); err != nil {
+	if _, err := a.Run(context.Background(), "implement the parser"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	body := string(srv.LastRequest())
@@ -160,7 +160,7 @@ func TestLoopReasoningEffortDefaultsMaxWhenThinkingEnabled(t *testing.T) {
 	a.AutoReasoning = false
 	// ReasoningEffort left as zero value (empty) — effectiveReasoningEffort
 	// should fall back to max when thinking is enabled.
-	if _, err := a.Run(context.Background(), "x"); err != nil {
+	if _, err := a.Run(context.Background(), "implement the parser"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	body := string(srv.LastRequest())

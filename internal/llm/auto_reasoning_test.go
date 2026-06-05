@@ -79,3 +79,24 @@ func TestSelectThinkingDefault(t *testing.T) {
 		t.Error("no hit, defaultOn=true → true")
 	}
 }
+
+func TestIsTrivialMessage(t *testing.T) {
+	// Short greetings/acks (no task) are trivial → must not force thinking.
+	for _, m := range []string{"你好", "hi", "hey", "thanks", "谢谢", "好的", "ok", "  hi  ", ""} {
+		if !IsTrivialMessage(m) {
+			t.Errorf("IsTrivialMessage(%q) = false, want true", m)
+		}
+	}
+	// Substantive messages, or short ones carrying a high-effort keyword, are not.
+	for _, m := range []string{
+		"implement the review panel",
+		"refactor the gateway hub",
+		"please fix the login flow now",
+		"报错",         // short but high-effort keyword → not trivial
+		"debug this", // high-effort keyword
+	} {
+		if IsTrivialMessage(m) {
+			t.Errorf("IsTrivialMessage(%q) = true, want false", m)
+		}
+	}
+}

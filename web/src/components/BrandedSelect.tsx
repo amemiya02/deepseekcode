@@ -104,11 +104,12 @@ export function BrandedSelect({
     }
   }, [open, place])
 
-  // Move focus to the listbox once it is open so keyboard events land without a
-  // second interaction.
+  // Move focus to the listbox once it is open AND positioned (the portal only
+  // mounts when `pos` resolves). Re-running on reflow is harmless: focusing an
+  // already-focused element is a no-op, so it never steals focus.
   useEffect(() => {
-    if (open) listboxRef.current?.focus()
-  }, [open])
+    if (open && pos) listboxRef.current?.focus()
+  }, [open, pos])
 
   // Outside-close: any pointerdown outside the trigger AND the listbox closes the
   // menu. Capture phase + ref containment make this bulletproof regardless of the
@@ -200,6 +201,7 @@ export function BrandedSelect({
         <ChevronsUpDown size={11} />
       </button>
       {open &&
+        pos &&
         createPortal(
           /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-to-interactive-role */
           <div
@@ -211,7 +213,7 @@ export function BrandedSelect({
             aria-activedescendant={activeId}
             tabIndex={-1}
             onKeyDown={handleListboxKeyDown}
-            style={{ position: 'fixed', left: 0, top: 0, ...(pos ?? {}) }}
+            style={pos}
           >
             {options.map((o, i) => {
               const isSelected = o.value === value

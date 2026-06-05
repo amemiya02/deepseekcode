@@ -7,6 +7,7 @@ import styles from './ChangedFiles.module.css'
 
 export interface ChangedFilesProps {
   refreshKey?: number
+  selected?: string
   onOpen?: (path: string) => void
 }
 
@@ -15,7 +16,7 @@ export interface ChangedFilesProps {
 // bumps refreshKey after each turn so the working-tree view stays current. A
 // per-render request guard drops a stale response if refreshKey changed again
 // before the previous fetch resolved.
-export function ChangedFiles({ refreshKey = 0, onOpen }: ChangedFilesProps) {
+export function ChangedFiles({ refreshKey = 0, selected, onOpen }: ChangedFilesProps) {
   const [entries, setEntries] = useState<ChangedEntry[]>([])
   const [error, setError] = useState('')
 
@@ -54,19 +55,37 @@ export function ChangedFiles({ refreshKey = 0, onOpen }: ChangedFilesProps) {
   return (
     <div className={styles.changed}>
       <ul className={styles.list}>
-        {entries.map((entry) => (
-          <li key={entry.path} className={styles.row}>
-            <span className={styles.status}>{(entry.status ?? '').trim() || '·'}</span>
-            <button className={styles.path} onClick={() => onOpen?.(entry.path)}>
-              {entry.path}
-            </button>
-            {entry.deleted && (
-              <span className={styles.deleted} data-testid={`deleted-${entry.path}`}>
-                {t('workspace.deleted', 'deleted')}
-              </span>
-            )}
-          </li>
-        ))}
+        {entries.map((entry) => {
+          const slash = entry.path.lastIndexOf('/')
+          const dir = slash >= 0 ? entry.path.slice(0, slash + 1) : ''
+          const name = slash >= 0 ? entry.path.slice(slash + 1) : entry.path
+          const code = (entry.status ?? '').trim() || '?'
+          const isSel = entry.path === selected
+          return (
+            <li key={entry.path}>
+              <button
+                className={styles.row}
+                aria-current={isSel ? 'true' : undefined}
+                onClick={() => onOpen?.(entry.path)}
+              >
+                <span
+                  className={styles.status}
+                  data-testid="change-status"
+                  data-code={code[0]}
+                >
+                  {code}
+                </span>
+                <span className={styles.dir}>{dir}</span>
+                <span className={styles.name}>{name}</span>
+                {entry.deleted && (
+                  <span className={styles.deleted} data-testid={`deleted-${entry.path}`}>
+                    {t('workspace.deleted', 'deleted')}
+                  </span>
+                )}
+              </button>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

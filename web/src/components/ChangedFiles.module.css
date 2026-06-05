@@ -12,30 +12,68 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px;
-}
-.status {
-  width: 1.5em;
-  text-align: center;
-  color: var(--warning);
-  font-family: var(--type-mono);
-}
-.path {
-  flex: 1;
-  text-align: left;
+  padding: 3px 6px;
+  width: 100%;
   background: none;
   border: none;
-  color: var(--text);
   cursor: pointer;
   font: inherit;
-  padding: 0;
+  text-align: left;
+  border-radius: 4px;
+  color: var(--text);
+  transition: background 0.1s;
 }
-.path:hover {
-  color: var(--accent);
+.row:hover {
+  background: var(--elevated, rgba(0,0,0,0.06));
+}
+.row[aria-current='true'] {
+  background: color-mix(in oklch, var(--accent, #4d6bfe) 12%, var(--surface, #fff));
+  border-left: 2px solid var(--accent, #4d6bfe);
+  padding-left: 4px;
+}
+.status {
+  flex-shrink: 0;
+  width: 1.4em;
+  text-align: center;
+  font-family: var(--type-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 2px;
+  color: var(--text-3, #888);
+}
+.status[data-code='M'] {
+  color: var(--accent, #4d6bfe);
+}
+.status[data-code='A'] {
+  color: var(--success, #22c55e);
+}
+.status[data-code='D'] {
+  color: var(--danger, #ef4444);
+}
+.status[data-code='R'] {
+  color: var(--text-2, #555);
+}
+.dir {
+  color: var(--text-3, #888);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.name {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .deleted {
   color: var(--danger);
   font-size: 0.72rem;
+  flex-shrink: 0;
 }
 .empty,
 .error {

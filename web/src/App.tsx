@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WorkspacePanel } from './components/WorkspacePanel'
 import { SessionRail } from './components/SessionRail'
-import { HistoryDrawer } from './components/HistoryDrawer'
 import { StatusBarLive } from './components/StatusBarLive'
 import { Cockpit } from './components/cockpit/Cockpit'
 import { SettingsWindow } from './components/settings/SettingsWindow'
@@ -116,11 +115,11 @@ function AppInner() {
   // Wave-3 state: sessions zone + workspace tabs
   const sessions = useSessionStore((s) => s.sessions)
   const activeId = useSessionStore((s) => s.activeId)
+  const sessionsLoading = useSessionStore((s) => s.loading)
   const loadSessions = useSessionStore((s) => s.load)
   const createSession = useSessionStore((s) => s.create)
   const removeSession = useSessionStore((s) => s.remove)
   const setActiveSession = useSessionStore((s) => s.setActive)
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('cockpit')
 
   // Wave-6 state: settings / onboarding / update banner
@@ -277,7 +276,6 @@ function AppInner() {
   const onSelectSession = useCallback(async (id: string) => {
     setSessionId(id)
     setActiveSession(id)
-    setHistoryOpen(false)
     const res = await switchSession(id)
     setItems(transcriptFromMessages(res.messages))
     setWorkspaceRefreshKey((k) => k + 1)
@@ -370,6 +368,7 @@ function AppInner() {
       <SessionRail
         sessions={sessions}
         activeId={activeId}
+        loading={sessionsLoading}
         onNew={() => void onNewSession()}
         onSelect={(id) => void onSelectSession(id)}
         onDelete={(id) => void onDeleteSession(id)}
@@ -453,15 +452,7 @@ function AppInner() {
         </div>
         <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
         <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        <HistoryDrawer
-          open={historyOpen}
-          sessions={sessions}
-          onResume={(id) => void onSelectSession(id)}
-          onDelete={(id) => void onDeleteSession(id)}
-          onRename={(id, title) => void onRenameSession(id, title)}
-          onClose={() => setHistoryOpen(false)}
-        />
-        <OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
+<OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
         <Toasts />
       </ErrorBoundary>
     </ThemeProvider>

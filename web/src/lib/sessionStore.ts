@@ -18,7 +18,7 @@ interface SessionState {
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessions: [],
   activeId: '',
-  loading: false,
+  loading: true,
   error: '',
 
   async load() {

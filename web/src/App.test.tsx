@@ -209,7 +209,8 @@ describe('App — full shell integration (Wave 0)', () => {
     // update) inside act so state updates don't warn.
     const zone = screen.getByTestId('zone-sessions')
     expect(await within(zone).findByTestId('session-new')).toBeInTheDocument()
-    expect(within(zone).getByTestId('session-history')).toBeInTheDocument()
+    // HistoryDrawer has been deleted; history is now integrated into the rail.
+    expect(within(zone).queryByTestId('session-history')).toBeNull()
   })
 
   it('mounts the hero status bar persistently', async () => {

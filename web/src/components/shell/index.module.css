@@ -19,12 +19,53 @@
     radial-gradient(110% 55% at 50% -8%, color-mix(in oklch, var(--accent) 8%, transparent), transparent 62%),
     var(--bg);
 }
+.appShell { transition: grid-template-columns var(--dur-base) var(--ease-standard); }
+.appShell[data-dragging='true'] { transition: none; }
+
 .splitter {
+  position: relative;
+  width: 1px;
   background: var(--border);
   cursor: col-resize;
   transition: background var(--dur-fast) var(--ease-standard);
 }
-.splitter:hover { background: var(--accent); }
+.splitter::before { /* invisible 8px grab zone centered on the line */
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+  z-index: 3;
+}
+.splitter:hover, .splitter:focus-visible { background: var(--accent); outline: none; }
+
+/* Preset segmented control */
+.presetRow {
+  position: absolute;
+  top: var(--s-2);
+  right: calc(var(--s-2) + 32px); /* clear the collapse-right button */
+  z-index: 2;
+}
+.presetGroup {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--elevated);
+  border-radius: var(--r-sm);
+}
+.presetBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font: var(--type-label);
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.presetBtn[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
 .collapseTab {
   position: absolute;
   top: var(--s-2);

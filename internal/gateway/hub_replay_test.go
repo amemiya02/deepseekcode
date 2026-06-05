@@ -27,6 +27,22 @@ func TestHubReplaysBufferedTurnToLateSubscriber(t *testing.T) {
 	}
 }
 
+// Task-3 diagnostic result (2026-06-05): a live SSE trace of `dsc serve` with
+// prompt "你好" confirmed that:
+//   - reasoning text arrives as  event: thinking_delta  (EventKindThinking)
+//   - answer text arrives as     event: message_delta   (EventKindTextDelta)
+//   - turn_done fires last       event: turn_done
+//
+// The adapter mapping in internal/acp/adapter.go is therefore correct:
+//   agent.EventTextDelta      → EventKindTextDelta  (adapter.go:68-69)
+//   agent.EventReasoningDelta → EventKindThinking   (adapter.go:130-131)
+//
+// The "answer renders as Thinking" symptom was the lost-turn_done race: when a
+// fast reply finished before the SPA's EventSource connected, turn_done was
+// dropped so the UI never promoted the thinking block into a completed answer
+// bubble. Tasks 1 (hub replay buffer) and 2 (subscribe-before-dispatch) fix the
+// race; this comment records the diagnostic evidence and closes the loop.
+
 // resetTurn (called at the start of each prompt) must clear the previous turn's
 // frames so a new subscriber does not replay a stale turn_done.
 func TestHubResetTurnClearsBuffer(t *testing.T) {

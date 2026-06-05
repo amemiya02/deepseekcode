@@ -34,7 +34,7 @@ import {
   cancelTurn,
   renameSession,
 } from './lib/api'
-import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem } from './lib/api'
+import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, TurnDoneEvent, PlanUpdateEvent } from './lib/api'
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
 import type { AutonomyMode } from './components/AutonomyToggle'
@@ -120,53 +120,61 @@ function AppInner() {
   }, [])
 
   async function handleSubmit(payload: ComposerPayload) {
-    // Dispatch the optimistic user bubble FIRST so the message persists on screen
-    // even if the gateway send fails — otherwise a thrown submitPrompt() would
-    // swallow the input and the composer would look dead ("Enter does nothing").
     dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
     setStreaming(true)
+
+    // The stream handlers are identical regardless of when we connect; extract
+    // them so we can subscribe BEFORE the POST for an existing session.
+    const handlers = {
+      onMessageDelta: (text: string) => dispatch({ kind: 'message_delta', text }),
+      onThinkingDelta: (text: string) => dispatch({ kind: 'thinking_delta', text }),
+      onToolStart: (e: ToolStartEvent) =>
+        dispatch({ kind: 'tool_start', id: e.id, name: e.name, args: e.args, read_only: e.read_only }),
+      onToolDelta: (e: ToolDeltaEvent) => dispatch({ kind: 'tool_delta', id: e.id, delta: e.delta }),
+      onToolEnd: (e: ToolEndEvent) =>
+        dispatch({ kind: 'tool_end', id: e.id, result: e.result, is_error: e.is_error }),
+      onRouting: (e: RoutingEvent) =>
+        dispatch({ kind: 'routing', from: e.from, to: e.to, reason: e.reason }),
+      onTurnDone: (e: TurnDoneEvent) => {
+        dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
+        clientRef.current.close()
+        setStreaming(false)
+        setWorkspaceRefreshKey((k) => k + 1)
+        void loadSessions()
+      },
+      onPermissionRequest: (req: PermissionRequest) => setPendingPermission(req),
+      onAskRequest: (req: AskRequest) => setPendingAsk(req),
+      onPlanUpdate: (u: PlanUpdateEvent) => setPlanItems(u.items),
+    }
+
+    // Existing session: subscribe FIRST so no frame is missed before the POST
+    // resolves. New session (id unknown until POST returns): connect after, and
+    // the gateway replay buffer (Task 1) recovers any frames emitted in the gap.
+    if (sessionId) {
+      clientRef.current.close()
+      clientRef.current.openEventStream(sessionId, handlers)
+    }
+
     let sid: string
     try {
       sid = await submitPrompt(payload.text, sessionId ?? undefined)
     } catch (e) {
-      // Surface the failure instead of silently dropping it. The user bubble
-      // remains so the typed text is not lost; they can retry.
       setStreaming(false)
+      clientRef.current.close()
       pushToast({ kind: 'danger', message: t('composer.sendFailed', 'Could not send message: ') + (e instanceof Error ? e.message : String(e)) })
       return
     }
+
     setSessionId(sid)
     setActiveSession(sid)
-    // First-send auto-creates a session server-side; reflect it in the rail +
-    // history drawer immediately so "All history" is never perpetually empty.
     void loadSessions()
-    // Close any previous SSE connection before opening a new one to prevent
-    // stale event handlers from a prior turn dispatching into current state.
-    clientRef.current.close()
-    clientRef.current.openEventStream(sid, {
-      onMessageDelta: (text) => dispatch({ kind: 'message_delta', text }),
-      onThinkingDelta: (text) => dispatch({ kind: 'thinking_delta', text }),
-      onToolStart: (e) => dispatch({ kind: 'tool_start', id: e.id, name: e.name, args: e.args, read_only: e.read_only }),
-      onToolDelta: (e) => dispatch({ kind: 'tool_delta', id: e.id, delta: e.delta }),
-      onToolEnd: (e) => dispatch({ kind: 'tool_end', id: e.id, result: e.result, is_error: e.is_error }),
-      onRouting: (e) => dispatch({ kind: 'routing', from: e.from, to: e.to, reason: e.reason }),
-      onTurnDone: (e) => {
-        dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
-        // Close the SSE connection once the turn is complete so connections do
-        // not accumulate across turns.
-        clientRef.current.close()
-        setStreaming(false)
-        // Bump the workspace refresh key so ChangedFiles re-fetches after a turn.
-        setWorkspaceRefreshKey((k) => k + 1)
-        // Refresh the session list so the turn count / updated_at reflects the
-        // completed turn in the rail + history drawer.
-        void loadSessions()
-      },
-      // Wave-4 handlers
-      onPermissionRequest: (req) => setPendingPermission(req),
-      onAskRequest: (req) => setPendingAsk(req),
-      onPlanUpdate: (u) => setPlanItems(u.items),
-    })
+
+    // If the id changed (new session) or we hadn't subscribed yet, (re)connect on
+    // the real id; replay backfills anything already emitted.
+    if (sid !== sessionId) {
+      clientRef.current.close()
+      clientRef.current.openEventStream(sid, handlers)
+    }
   }
 
   async function onPermissionDecision(d: PermissionDecision) {

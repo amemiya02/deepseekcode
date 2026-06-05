@@ -73,6 +73,32 @@ it('option items are div[role="option"], not buttons', () => {
   })
 })
 
+it('renders the listbox in a portal (not nested in the trigger wrapper) so an overflow:hidden ancestor cannot clip it', () => {
+  render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
+  fireEvent.click(screen.getByTestId('sel'))
+  const listbox = screen.getByRole('listbox')
+  const wrapper = screen.getByTestId('sel').closest('.brandsel')
+  expect(wrapper).toBeTruthy()
+  // The menu must escape the .brandsel subtree (it lives under document.body).
+  expect(wrapper!.contains(listbox)).toBe(false)
+})
+
+it('closes when a pointerdown lands outside the trigger and the listbox (no stuck-open)', () => {
+  render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
+  fireEvent.click(screen.getByTestId('sel'))
+  expect(screen.getByRole('listbox')).toBeInTheDocument()
+  fireEvent.pointerDown(document.body)
+  expect(screen.queryByRole('listbox')).toBeNull()
+})
+
+it('a pointerdown inside the listbox does NOT close it', () => {
+  render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
+  fireEvent.click(screen.getByTestId('sel'))
+  const listbox = screen.getByRole('listbox')
+  fireEvent.pointerDown(listbox)
+  expect(screen.getByRole('listbox')).toBeInTheDocument()
+})
+
 describe('keyboard navigation', () => {
   it('ArrowDown moves active descendant to next item', () => {
     render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)

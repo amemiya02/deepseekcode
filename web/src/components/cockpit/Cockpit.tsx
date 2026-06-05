@@ -6,7 +6,7 @@ import { RoutingCard } from './RoutingCard'
 import { LedgerDrillDown } from './LedgerDrillDown'
 import styles from './Cockpit.module.css'
 
-export function Cockpit({ sessionId = '' }: { sessionId?: string }) {
+export function Cockpit({ sessionId = '', manageConnection = true }: { sessionId?: string; manageConnection?: boolean }) {
   const liveCache = useCockpitStore((s) => s.liveCache)
   const liveCost = useCockpitStore((s) => s.liveCost)
   const routing = useCockpitStore((s) => s.routing)
@@ -17,11 +17,11 @@ export function Cockpit({ sessionId = '' }: { sessionId?: string }) {
   const refreshBalance = useCockpitStore((s) => s.refreshBalance)
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || !manageConnection) return
     connect(sessionId)
     void refreshBalance()
     return () => disconnect()
-  }, [sessionId, connect, disconnect, refreshBalance])
+  }, [sessionId, manageConnection, connect, disconnect, refreshBalance])
 
   return (
     <div className={styles.cockpit}>

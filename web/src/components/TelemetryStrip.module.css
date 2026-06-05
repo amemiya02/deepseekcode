@@ -1,0 +1,54 @@
+/* TelemetryStrip — compact telemetry bar at the bottom of the right pane.
+   Sits above the workspace floor; clicking expands to show full Cockpit cards. */
+
+.strip {
+  border-top: 1px solid var(--border, #e5e7eb);
+  background: var(--surface, #fff);
+  flex-shrink: 0;
+}
+
+/* Full-width slim button — the always-visible compact row */
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2, #6b7280);
+  font-size: var(--type-label, 11px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  transition: background 120ms ease;
+}
+
+.bar:hover {
+  background: var(--elevated, rgba(0, 0, 0, 0.04));
+}
+
+/* Compact metrics row */
+.compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.metric {
+  color: var(--text-3, #9ca3af);
+  white-space: nowrap;
+}
+
+/* Expanded panel holding the Cockpit cards */
+.expanded {
+  border-top: 1px solid var(--border, #e5e7eb);
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--surface, #fff);
+}

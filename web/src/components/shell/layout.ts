@@ -10,13 +10,16 @@ export interface Layout {
   leftCollapsed: boolean
   rightCollapsed: boolean
   preset: Preset
+  // Adaptive review companion (spec §4): 'auto' reveals only when the working tree
+  // has changes; 'open' pins it visible; 'closed' hides it (back to 2 columns).
+  reviewPin: 'auto' | 'open' | 'closed'
 }
 
 export const LEFT_MIN = 160, LEFT_MAX = 480
 export const RIGHT_MIN = 240, RIGHT_MAX = 720
 
 export const DEFAULT_LAYOUT: Layout = {
-  left: 260, right: 420, leftCollapsed: false, rightCollapsed: false, preset: 'balanced',
+  left: 260, right: 420, leftCollapsed: false, rightCollapsed: false, preset: 'balanced', reviewPin: 'auto',
 }
 
 const KEY = 'dsc.shell.layout'
@@ -24,6 +27,15 @@ const LEGACY_KEY = 'dsc.shell.splits'
 
 export const clampLeft = (n: number) => Math.max(LEFT_MIN, Math.min(LEFT_MAX, n))
 export const clampRight = (n: number) => Math.max(RIGHT_MIN, Math.min(RIGHT_MAX, n))
+
+// isReviewOpen derives whether the review companion pane is visible: a pinned-open
+// pane always shows, a closed one never does, and 'auto' follows whether the working
+// tree has changes — driving the 2↔3-column adaptive layout (spec §4).
+export function isReviewOpen(l: Layout, hasChanges: boolean): boolean {
+  if (l.reviewPin === 'open') return true
+  if (l.reviewPin === 'closed') return false
+  return hasChanges
+}
 
 export function loadLayout(): Layout {
   try {

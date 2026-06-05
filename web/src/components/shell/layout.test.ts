@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { loadLayout, saveLayout, applyPreset, DEFAULT_LAYOUT, clampLeft, clampRight, type Layout } from './layout'
+import { loadLayout, saveLayout, applyPreset, DEFAULT_LAYOUT, clampLeft, clampRight, isReviewOpen, type Layout } from './layout'
 
 beforeEach(() => localStorage.clear())
 
@@ -8,7 +8,7 @@ describe('layout persistence', () => {
     expect(loadLayout()).toEqual(DEFAULT_LAYOUT)
   })
   it('round-trips a saved layout', () => {
-    const l: Layout = { left: 300, right: 500, leftCollapsed: true, rightCollapsed: false, preset: 'review' }
+    const l: Layout = { left: 300, right: 500, leftCollapsed: true, rightCollapsed: false, preset: 'review', reviewPin: 'open' }
     saveLayout(l)
     expect(loadLayout()).toEqual(l)
   })
@@ -33,5 +33,21 @@ describe('layout persistence', () => {
     expect(review).toMatchObject({ leftCollapsed: true, rightCollapsed: false, preset: 'review' })
     expect(review.right).toBeGreaterThanOrEqual(base.right)
     expect(applyPreset(base, 'balanced')).toMatchObject({ leftCollapsed: false, rightCollapsed: false, preset: 'balanced' })
+  })
+})
+
+const L = (pin: Layout['reviewPin']): Layout => ({ ...DEFAULT_LAYOUT, reviewPin: pin })
+
+describe('isReviewOpen', () => {
+  it('auto follows whether there are changes', () => {
+    expect(isReviewOpen(L('auto'), true)).toBe(true)
+    expect(isReviewOpen(L('auto'), false)).toBe(false)
+  })
+  it('open is always visible; closed is never', () => {
+    expect(isReviewOpen(L('open'), false)).toBe(true)
+    expect(isReviewOpen(L('closed'), true)).toBe(false)
+  })
+  it('defaults to auto', () => {
+    expect(DEFAULT_LAYOUT.reviewPin).toBe('auto')
   })
 })

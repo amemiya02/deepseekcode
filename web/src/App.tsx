@@ -71,12 +71,15 @@ function AppInner() {
     if (!import.meta.env.DEV) return
     const name = new URLSearchParams(window.location.search).get('fixture')
     if (!name) return
-    import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels }) => {
+    import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels, sessionsFixture }) => {
       if (fixtures[name]) setItems(fixtures[name])
       setSlashCommands(demoCommands)
       setModels(demoModels)
       setModel('deepseek-chat')
       setEffort('high')
+      if (name === 'sessions') {
+        useSessionStore.setState({ sessions: sessionsFixture(Date.now()), loading: false })
+      }
     })
   }, [])
 

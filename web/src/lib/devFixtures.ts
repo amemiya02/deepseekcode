@@ -1,6 +1,6 @@
 import type { TranscriptItem } from './transcript'
 import type { SlashCommand } from '../components/SlashMenu'
-import type { ModelInfo } from './api'
+import type { ModelInfo, Session } from './api'
 
 export const chatFixture: TranscriptItem[] = [
   { type: 'user', text: 'Refactor the auth module and show me the diff.', pills: ['auth.ts', 'src/'] },
@@ -51,3 +51,20 @@ export const demoModels: ModelInfo[] = [
   { id: 'deepseek-chat', label: 'deepseek-chat' },
   { id: 'deepseek-reasoner', label: 'deepseek-reasoner' },
 ]
+
+// DEV seam: demo sessions for session-rail QA — one each in today (×2), yesterday,
+// week, month, older. Pass the current epoch ms so grouping is deterministic.
+export function sessionsFixture(now: number): Session[] {
+  const h = 3_600_000, d = 86_400_000
+  const mk = (id: string, title: string, ago: number, turns: number): Session =>
+    ({ id, title, turns, updated_at: now - ago, created_at: now - ago })
+  return [
+    mk('s1', 'Wire gateway SSE replay buffer', 0.5 * h, 8),
+    mk('s2', 'Composer single-bar redesign', 2 * h, 14),
+    mk('s3', 'Fix /v1/models active shape', 26 * h, 3),
+    mk('s4', 'Tau-bench parity investigation', 4 * d, 21),
+    mk('s5', 'Prefix-cache A/B harness', 12 * d, 9),
+    mk('s6', 'Initial Wails v3 migration', 40 * d, 33),
+    mk('s7', 'Repo bootstrap', 95 * d, 2),
+  ]
+}

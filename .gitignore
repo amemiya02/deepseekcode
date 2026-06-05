@@ -57,3 +57,5 @@ docs/competitive/
 .superpowers/
 .playwright-mcp/
 /*.png
+web/test-results/
+web/playwright-report/

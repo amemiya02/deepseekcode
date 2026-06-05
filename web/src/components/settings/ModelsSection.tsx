@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
+import { EFFORT_LEVELS } from '../../lib/api'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
-
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'max'] as const
 
 export function ModelsSection() {
   const [cfg, setCfg] = useState<ConfigDTO | null>(null)

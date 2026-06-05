@@ -22,7 +22,10 @@ export interface CacheReport {
 // ── Shared cross-wave types (Contract 1: defined ONCE here) ──────────────────
 export interface ModelCaps { vision: boolean; tools: boolean; reasoning: boolean }
 export interface ModelEffortDesc {
-  kind: 'levels' | 'toggle' | 'none'
+  // 'levels' — model has a named effort scale (e.g. low/medium/high/max).
+  // 'none'   — model has no effort control; composer hides the effort chip.
+  // 'toggle' is reserved for future boolean-effort models; no Go code emits it yet.
+  kind: 'levels' | 'none'
   levels?: string[]
   default?: string
 }

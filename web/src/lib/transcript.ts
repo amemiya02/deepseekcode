@@ -2,7 +2,7 @@
 // No DOM, no React — unit-testable in isolation; the Transcript component renders the result.
 export interface UserItem { type: 'user'; text: string; pills?: string[] }
 export interface AssistantItem { type: 'assistant'; text: string; streaming: boolean }
-export interface ThinkingItem { type: 'thinking'; text: string }
+export interface ThinkingItem { type: 'thinking'; text: string; startedAt?: number; endedAt?: number }
 export interface ToolItem {
   type: 'tool'
   id: string
@@ -28,27 +28,54 @@ export type TranscriptEvent =
   | { kind: 'routing'; from: string; to: string; reason: string }
   | { kind: 'turn_done'; stop_reason: string }
 
-export function applyEvent(items: TranscriptItem[], e: TranscriptEvent): TranscriptItem[] {
+export type Clock = () => number
+const defaultNow: Clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+
+export function formatThinkingDuration(startedAt: number, endedAt: number): string {
+  const ms = Math.max(0, endedAt - startedAt)
+  if (ms < 1000) return 'Thought for <1s'
+  return `Thought for ${Math.round(ms / 1000)}s`
+}
+
+// Stamp endedAt on the trailing thinking item if it is still open.
+function closeOpenThinking(items: TranscriptItem[], at: number): TranscriptItem[] {
+  const last = items[items.length - 1]
+  if (last && last.type === 'thinking' && last.endedAt == null) {
+    const updated = items.slice()
+    updated[updated.length - 1] = { ...last, endedAt: at }
+    return updated
+  }
+  return items
+}
+
+export function applyEvent(
+  items: TranscriptItem[],
+  e: TranscriptEvent,
+  now: Clock = defaultNow,
+): TranscriptItem[] {
   const last = items[items.length - 1]
   switch (e.kind) {
     case 'user':
-      return [...items, { type: 'user', text: e.text, pills: e.pills }]
-    case 'message_delta':
-      if (last && last.type === 'assistant' && last.streaming) {
-        const updated = items.slice()
-        updated[updated.length - 1] = { ...last, text: last.text + e.text }
+      return [...closeOpenThinking(items, now()), { type: 'user', text: e.text, pills: e.pills }]
+    case 'message_delta': {
+      const base = closeOpenThinking(items, now())
+      const tail = base[base.length - 1]
+      if (tail && tail.type === 'assistant' && tail.streaming) {
+        const updated = base.slice()
+        updated[updated.length - 1] = { ...tail, text: tail.text + e.text }
         return updated
       }
-      return [...items, { type: 'assistant', text: e.text, streaming: true }]
+      return [...base, { type: 'assistant', text: e.text, streaming: true }]
+    }
     case 'thinking_delta':
-      if (last && last.type === 'thinking') {
+      if (last && last.type === 'thinking' && last.endedAt == null) {
         const updated = items.slice()
         updated[updated.length - 1] = { ...last, text: last.text + e.text }
         return updated
       }
-      return [...items, { type: 'thinking', text: e.text }]
+      return [...items, { type: 'thinking', text: e.text, startedAt: now() }]
     case 'tool_start':
-      return [...items, { type: 'tool', id: e.id, name: e.name, args: e.args, readOnly: e.read_only, status: 'running' }]
+      return [...closeOpenThinking(items, now()), { type: 'tool', id: e.id, name: e.name, args: e.args, readOnly: e.read_only, status: 'running' }]
     case 'tool_delta': {
       const idx = items.findIndex((it) => it.type === 'tool' && it.id === e.id)
       if (idx === -1) return items
@@ -66,13 +93,16 @@ export function applyEvent(items: TranscriptItem[], e: TranscriptEvent): Transcr
       return updated
     }
     case 'routing':
-      return [...items, { type: 'routing', from: e.from, to: e.to, reason: e.reason }]
-    case 'turn_done':
-      if (last && last.type === 'assistant' && last.streaming) {
-        const updated = items.slice()
-        updated[updated.length - 1] = { ...last, streaming: false }
+      return [...closeOpenThinking(items, now()), { type: 'routing', from: e.from, to: e.to, reason: e.reason }]
+    case 'turn_done': {
+      const base = closeOpenThinking(items, now())
+      const tail = base[base.length - 1]
+      if (tail && tail.type === 'assistant' && tail.streaming) {
+        const updated = base.slice()
+        updated[updated.length - 1] = { ...tail, streaming: false }
         return updated
       }
-      return items
+      return base
+    }
   }
 }

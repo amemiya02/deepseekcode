@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { applyEvent, type TranscriptItem, type TranscriptEvent } from './transcript'
+import { applyEvent, formatThinkingDuration, type TranscriptItem, type TranscriptEvent } from './transcript'
 
 function run(events: TranscriptEvent[]): TranscriptItem[] {
   return events.reduce<TranscriptItem[]>((items, e) => applyEvent(items, e), [])
@@ -69,4 +69,46 @@ describe('applyEvent', () => {
     ])
     expect(items[0]).toMatchObject({ type: 'assistant', streaming: false })
   })
+})
+
+describe('thinking timing', () => {
+  const clock = () => { let t = 1000; return () => (t += 500) } // +0.5s each call
+
+  it('stamps startedAt when a thinking item is created', () => {
+    const now = clock()
+    const out = applyEvent([], { kind: 'thinking_delta', text: 'hmm' }, now)
+    const item = out[0]
+    expect(item.type).toBe('thinking')
+    if (item.type === 'thinking') expect(item.startedAt).toBe(1500)
+  })
+
+  it('does not restamp startedAt on subsequent thinking deltas', () => {
+    const now = clock()
+    let s = applyEvent([], { kind: 'thinking_delta', text: 'a' }, now)
+    s = applyEvent(s, { kind: 'thinking_delta', text: 'b' }, now)
+    const item = s[0]
+    if (item.type === 'thinking') expect(item.startedAt).toBe(1500)
+  })
+
+  it('stamps endedAt when a non-thinking item follows', () => {
+    const now = clock()
+    let s = applyEvent([], { kind: 'thinking_delta', text: 'a' }, now) // started 1500
+    s = applyEvent(s, { kind: 'message_delta', text: 'hi' }, now)       // ends 2000
+    const item = s[0]
+    if (item.type === 'thinking') expect(item.endedAt).toBe(2000)
+  })
+
+  it('stamps endedAt on turn_done', () => {
+    const now = clock()
+    let s = applyEvent([], { kind: 'thinking_delta', text: 'a' }, now)
+    s = applyEvent(s, { kind: 'turn_done', stop_reason: 'end' }, now)
+    const item = s[0]
+    if (item.type === 'thinking') expect(typeof item.endedAt).toBe('number')
+  })
+})
+
+describe('formatThinkingDuration', () => {
+  it('formats whole seconds', () => expect(formatThinkingDuration(1000, 4200)).toBe('Thought for 3s'))
+  it('formats sub-second as <1s', () => expect(formatThinkingDuration(1000, 1400)).toBe('Thought for <1s'))
+  it('rounds to nearest second', () => expect(formatThinkingDuration(0, 2600)).toBe('Thought for 3s'))
 })

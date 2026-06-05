@@ -1,4 +1,6 @@
 import type { TranscriptItem } from './transcript'
+import type { SlashCommand } from '../components/SlashMenu'
+import type { ModelInfo } from './api'
 
 export const chatFixture: TranscriptItem[] = [
   { type: 'user', text: 'Refactor the auth module and show me the diff.', pills: ['auth.ts', 'src/'] },
@@ -31,3 +33,21 @@ export const chatFixture: TranscriptItem[] = [
 ]
 
 export const fixtures: Record<string, TranscriptItem[]> = { chat: chatFixture }
+
+// DEV seam: demo slash commands for composer QA (fixture only — tree-shaken from prod).
+export const demoCommands: SlashCommand[] = [
+  { name: 'fix', description: 'Fix the selected code or error', kind: 'builtin' },
+  { name: 'explain', description: 'Explain the selected code in plain English', kind: 'builtin' },
+  { name: 'test', description: 'Generate unit tests for the selected code', kind: 'builtin' },
+  { name: 'refactor', description: 'Refactor for readability and performance', kind: 'builtin' },
+  { name: 'docs', description: 'Add or update documentation comments', kind: 'builtin' },
+  { name: 'commit', description: 'Draft a conventional-commit message', kind: 'skill' },
+  { name: 'pr-review', description: 'Summarise and review the open pull request', kind: 'skill' },
+  { name: 'search', description: 'Search the codebase with a semantic query', kind: 'mcp', hint: 'codegraph' },
+]
+
+// DEV seam: demo models for composer model-switcher QA.
+export const demoModels: ModelInfo[] = [
+  { id: 'deepseek-chat', label: 'deepseek-chat' },
+  { id: 'deepseek-reasoner', label: 'deepseek-reasoner' },
+]

@@ -59,6 +59,7 @@ function AppInner() {
   const [streaming, setStreaming] = useState(false)
   const [mode, setMode] = useState<AutonomyMode>('ask')
   const [items, setItems] = useState<TranscriptItem[]>([])
+  const [slashCommands, setSlashCommands] = useState<import('./components/SlashMenu').SlashCommand[]>([])
 
   // Model / effort state (wired to gateway /v1/models, /v1/model, /v1/effort)
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -71,8 +72,12 @@ function AppInner() {
     if (!import.meta.env.DEV) return
     const name = new URLSearchParams(window.location.search).get('fixture')
     if (!name) return
-    import('./lib/devFixtures').then(({ fixtures }) => {
+    import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels }) => {
       if (fixtures[name]) setItems(fixtures[name])
+      setSlashCommands(demoCommands)
+      setModels(demoModels)
+      setModel('deepseek-chat')
+      setEffort('high')
     })
   }, [])
 
@@ -380,7 +385,7 @@ function AppInner() {
       <Composer
         streaming={streaming}
         mode={mode}
-        commands={[]}
+        commands={slashCommands}
         onSend={handleSubmit}
         onCancel={onStop}
         onModeChange={setMode}

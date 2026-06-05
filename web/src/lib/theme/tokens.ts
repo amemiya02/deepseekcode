@@ -124,6 +124,9 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--elevated': p.bg2,
     '--card': p.surface,
     '--overlay': isLight ? '#ffffff' : '#0f1320',
+    // Full-screen modal backdrop. Translucent in BOTH modes so opening a modal
+    // dims the app behind a contained panel instead of wiping it to a flat color.
+    '--scrim': isLight ? 'oklch(0.2 0.02 264 / 0.38)' : 'oklch(0 0 0 / 0.55)',
     // Lines
     '--border': border,
     '--border-strong': borderStrong,

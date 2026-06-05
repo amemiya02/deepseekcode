@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, test } from 'vitest'
 import React from 'react'
 import { LocaleProvider } from '../../lib/i18n'
 import { SettingsWindow, SETTINGS_SECTIONS } from './SettingsWindow'
@@ -33,4 +33,13 @@ describe('SettingsWindow', () => {
     const { container } = wrap(<SettingsWindow open={false} onClose={() => {}} />)
     expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
+})
+
+test('settings overlay uses a translucent scrim, never an opaque white wipe', () => {
+  render(<LocaleProvider><SettingsWindow open onClose={() => {}} /></LocaleProvider>)
+  const overlay = document.querySelector('[class*="overlay"]') as HTMLElement
+  expect(overlay).toBeTruthy()
+  const bg = getComputedStyle(overlay).background + getComputedStyle(overlay).backgroundColor
+  // must not be solid white, and must reference the scrim variable
+  expect(bg).not.toMatch(/#ffffff|rgb\(255,\s*255,\s*255\)/i)
 })

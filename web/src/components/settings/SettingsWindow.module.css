@@ -1,7 +1,9 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: var(--overlay);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   z-index: 50;

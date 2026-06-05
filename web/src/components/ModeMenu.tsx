@@ -10,6 +10,8 @@ export function ModeMenu({ mode, onChange }: { mode: AutonomyMode; onChange: (m:
       <button
         className={`modelsw__trigger modemenu__trigger autonomy--${mode}`}
         data-testid="mode-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="autonomy__dot" />

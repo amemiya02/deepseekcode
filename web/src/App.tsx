@@ -81,8 +81,10 @@ function AppInner() {
     })
   }, [])
 
-  // Fetch model/effort state from the gateway on mount and whenever the active
-  // session changes. Errors are swallowed — the Composer falls back to defaults.
+  // Fetch model/effort state from the gateway once on mount. /v1/models is
+  // global (not per-session), so we deliberately do NOT re-key this on the
+  // active session — doing so would clobber an optimistic model/effort pick
+  // on every session switch. Errors are swallowed (Composer falls back to defaults).
   useEffect(() => {
     let live = true
     fetchModelState()
@@ -94,7 +96,7 @@ function AppInner() {
       })
       .catch(() => {})
     return () => { live = false }
-  }, [sessionId])
+  }, [])
 
   // dispatch wraps applyEvent so existing call sites need no changes.
   const dispatch = useCallback(

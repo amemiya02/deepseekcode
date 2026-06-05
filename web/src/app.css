@@ -178,7 +178,8 @@ button { font-family: inherit; }
 .filemenu__icon { color: var(--text-2); }
 .filemenu__icon--dir { color: var(--accent); }
 
-/* AutonomyToggle (legacy — removed in Task 10; keep .autonomy base for transition) */
+/* Approval-mode dots — .autonomy base + .autonomy--* colors are LIVE: reused by
+   ModeMenu (autonomy--{mode} / .autonomy__dot). Do not delete. */
 .autonomy { display: inline-flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-2); font: var(--type-label); padding: 2px 8px; cursor: pointer; }
 .autonomy__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
 

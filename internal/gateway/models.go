@@ -3,9 +3,12 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 // defaultModels is the fallback model list advertised when config can't be
@@ -18,10 +21,108 @@ var defaultModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 // /v1/effort. It is the gateway's view; applying it to a live agent run is the
 // concern of a later wave (the session factory reads config today).
 type modelState struct {
-	mu     sync.Mutex
-	models []string
-	active string
-	effort string
+	mu          sync.Mutex
+	models      []string
+	descriptors []modelDescriptor
+	active      string
+	effort      string
+}
+
+// modelCaps is the per-model capability flags the composer renders as glyphs.
+type modelCaps struct {
+	Vision    bool `json:"vision"`
+	Tools     bool `json:"tools"`
+	Reasoning bool `json:"reasoning"`
+}
+
+// modelEffort describes a model's effort control. Kind "levels" carries the
+// allowed levels + default; "none" tells the composer to hide the effort chip.
+type modelEffort struct {
+	Kind    string   `json:"kind"` // "levels" | "none"
+	Levels  []string `json:"levels,omitempty"`
+	Default string   `json:"default,omitempty"`
+}
+
+// modelDescriptor is one row of the capability-driven /v1/models contract.
+type modelDescriptor struct {
+	ID       string      `json:"id"`
+	Label    string      `json:"label"`
+	Provider string      `json:"provider"`
+	Caps     modelCaps   `json:"caps"`
+	Effort   modelEffort `json:"effort"`
+	Context  int         `json:"context"`
+}
+
+// modelLabel maps a bare model id to a friendly display label. SupportsModels
+// carries only ids; the picker wants human labels.
+func modelLabel(id string) string {
+	switch id {
+	case "deepseek-v4-flash":
+		return "DeepSeek V4 Flash"
+	case "deepseek-v4-pro":
+		return "DeepSeek V4 Pro"
+	default:
+		return id
+	}
+}
+
+// buildDescriptors enumerates the active provider's advertised models into
+// capability descriptors. Legacy aliases are filtered (still POST-accepted by
+// handleModel for back-compat, just not shown as picker rows). On any provider
+// error it returns nil and the caller falls back to the bare model list.
+func buildDescriptors(cfg config.Config) []modelDescriptor {
+	providerName := cfg.Active.Provider
+	if providerName == "" {
+		providerName = "deepseek"
+	}
+	// capsProvider is constructed solely to read Capabilities(), which is a pure
+	// value return needing no APIKey/BaseURL/timeouts. It must NOT be used for a
+	// live Stream/Validate call — the empty ProviderConfig has no credentials.
+	capsProvider, err := llm.NewProvider(providerName, llm.ProviderConfig{})
+	if err != nil {
+		return nil
+	}
+	caps := capsProvider.Capabilities()
+	// The descriptor's effort default is the model's *capability* default — a
+	// stable property of the model, not the user's currently-selected effort
+	// (that lives in the response's top-level "effort"). It is read exclusively
+	// from config.Default() (the provider/model baseline, "max" for DeepSeek V4)
+	// so the user's loaded preference never leaks into this capability field.
+	def := config.Default().Defaults.ReasoningEffort
+	if def == "" {
+		def = "max"
+	}
+	var effort modelEffort
+	if len(caps.ReasoningEfforts) > 0 {
+		levels := make([]string, len(caps.ReasoningEfforts))
+		for i, e := range caps.ReasoningEfforts {
+			levels[i] = string(e) // type ReasoningEffort string → "low"/"medium"/"high"/"max"
+		}
+		effort = modelEffort{Kind: "levels", Levels: levels, Default: def}
+	} else {
+		effort = modelEffort{Kind: "none"}
+	}
+	var out []modelDescriptor
+	for _, id := range caps.SupportsModels {
+		if config.IsLegacyDeepSeekAlias(id) {
+			continue
+		}
+		// All DeepSeek V4 models (Flash and Pro) share the same effort tiers and
+		// context window today, so every descriptor reuses the provider-level
+		// `effort` value and `caps.MaxContextTokens`. The descriptor shape is
+		// per-model on purpose — revisit this loop and compute these per id if a
+		// future model diverges (e.g. a model without reasoning, or a different
+		// context window), otherwise it would silently advertise a wrong descriptor.
+		out = append(out, modelDescriptor{
+			ID:       id,
+			Label:    modelLabel(id),
+			Provider: providerName,
+			Caps:     modelCaps{Vision: false, Tools: true, Reasoning: caps.Thinking},
+			Effort:   effort,
+			Context:  caps.MaxContextTokens,
+		})
+	}
+	return out
 }
 
 // newModelState seeds selection from config; on any load error it falls back to
@@ -34,23 +135,31 @@ func newModelState() *modelState {
 	}
 	if cfg.Defaults.Model != "" {
 		ms.active = cfg.Defaults.Model
-		if !contains(ms.models, ms.active) {
+		if !slices.Contains(ms.models, ms.active) {
 			ms.models = append([]string{ms.active}, ms.models...)
 		}
 	}
 	if cfg.Defaults.ReasoningEffort != "" {
 		ms.effort = cfg.Defaults.ReasoningEffort
 	}
-	return ms
-}
-
-func contains(xs []string, x string) bool {
-	for _, v := range xs {
-		if v == x {
-			return true
+	// TODO(p3.4): descriptors are built once here at construction and cached on
+	// modelState with no invalidation. If the user later switches provider/model
+	// in settings, GET /v1/models keeps advertising the descriptors captured at
+	// boot until the process restarts. Rebuild (or invalidate) descriptors when
+	// the active provider config changes once settings can mutate it live.
+	if d := buildDescriptors(cfg); len(d) > 0 {
+		ms.descriptors = d
+		// Keep ms.models in sync with the advertised descriptor IDs so a model
+		// shown by GET /v1/models is always accepted by POST /v1/model (which
+		// validates against ms.models). Without this, a descriptor row absent
+		// from the bare config list would 400 on selection.
+		for _, dd := range d {
+			if !slices.Contains(ms.models, dd.ID) {
+				ms.models = append(ms.models, dd.ID)
+			}
 		}
 	}
-	return false
+	return ms
 }
 
 // handleModels implements GET /v1/models.
@@ -60,7 +169,12 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.models.mu.Lock()
-	resp := map[string]any{"models": h.models.models, "active": h.models.active, "effort": h.models.effort}
+	resp := map[string]any{"active": h.models.active, "effort": h.models.effort}
+	if len(h.models.descriptors) > 0 {
+		resp["models"] = h.models.descriptors
+	} else {
+		resp["models"] = h.models.models // bare-id fallback (web tolerates both)
+	}
 	h.models.mu.Unlock()
 	writeJSON(w, resp)
 }
@@ -80,7 +194,7 @@ func (h *Handler) handleModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.models.mu.Lock()
-	ok := contains(h.models.models, body.Model)
+	ok := slices.Contains(h.models.models, body.Model)
 	if ok {
 		h.models.active = body.Model
 	}
@@ -92,7 +206,8 @@ func (h *Handler) handleModel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleEffort implements POST /v1/effort. Accepts low|medium|high.
+// handleEffort implements POST /v1/effort. Accepts low|medium|high|max
+// (max is the configured DeepSeek V4 default).
 func (h *Handler) handleEffort(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -105,16 +220,38 @@ func (h *Handler) handleEffort(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	switch body.Effort {
-	case "low", "medium", "high":
-	default:
-		http.Error(w, "invalid effort (low|medium|high)", http.StatusBadRequest)
+	h.models.mu.Lock()
+	levels := h.models.validEffortLevels()
+	ok := slices.Contains(levels, body.Effort)
+	if ok {
+		h.models.effort = body.Effort
+	}
+	h.models.mu.Unlock()
+	if !ok {
+		http.Error(w, "invalid effort ("+strings.Join(levels, "|")+")", http.StatusBadRequest)
 		return
 	}
-	h.models.mu.Lock()
-	h.models.effort = body.Effort
-	h.models.mu.Unlock()
 	w.WriteHeader(http.StatusOK)
+}
+
+// fallbackEffortLevels is the DeepSeek V4 baseline effort set used when the
+// active model has no capability descriptor (e.g. a config-less boot). It mirrors
+// llm.DeepSeekProvider.Capabilities().ReasoningEfforts.
+var fallbackEffortLevels = []string{"low", "medium", "high", "max"}
+
+// validEffortLevels returns the effort levels POST /v1/effort accepts, derived
+// from the active model's capability descriptor (descriptor.Effort.Levels) so the
+// validator stays in sync automatically when a provider or model changes the
+// valid set. Falls back to the DeepSeek V4 baseline when no descriptor matches
+// the active model (descriptor-less boot or a kind=="none" effort control).
+// Caller must hold ms.mu.
+func (ms *modelState) validEffortLevels() []string {
+	for _, d := range ms.descriptors {
+		if d.ID == ms.active && d.Effort.Kind == "levels" && len(d.Effort.Levels) > 0 {
+			return d.Effort.Levels
+		}
+	}
+	return fallbackEffortLevels
 }
 
 // handleBalance implements GET /v1/balance. Wallet balance comes from the

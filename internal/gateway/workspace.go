@@ -112,6 +112,36 @@ type changedEntry struct {
 	Deleted bool   `json:"deleted"`
 }
 
+// handleDiff implements GET /v1/diff?path= — the unified working-tree diff for a
+// single path via `git diff --no-color HEAD -- <path>` (staged + unstaged vs the
+// last commit). A non-git root, missing HEAD, or git error yields an empty patch
+// (200), never a 500 — the SPA shows "no diff" / falls back to a full-file view.
+func (h *Handler) handleDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	if _, err := resolveInRoot(h.root, rel); err != nil {
+		http.Error(w, "bad path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	patch := ""
+	if h.root != "" {
+		cmd := exec.CommandContext(r.Context(), "git", "-C", h.root, "diff", "--no-color", "HEAD", "--", rel)
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		if err := cmd.Run(); err == nil {
+			patch = buf.String()
+		}
+	}
+	writeJSON(w, map[string]any{"path": filepath.ToSlash(rel), "patch": patch})
+}
+
 // handleChanged implements GET /v1/changed — the workspace's changed files via
 // `git status --porcelain -z`. A non-git root (or git error) yields an empty
 // list (200), never a 500 — the SPA shows "no changes" rather than an error.

@@ -121,6 +121,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 	h.mux.HandleFunc("/v1/files", h.handleFiles)
 	h.mux.HandleFunc("/v1/file", h.handleFile)
 	h.mux.HandleFunc("/v1/changed", h.handleChanged)
+	h.mux.HandleFunc("/v1/diff", h.handleDiff)
 	// Wave 5: checkpoint/branch control.
 	h.mux.HandleFunc("/v1/rewind", h.handleRewind)
 	h.mux.HandleFunc("/v1/fork", h.handleFork)

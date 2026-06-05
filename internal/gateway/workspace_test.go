@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
@@ -107,4 +109,69 @@ func TestChangedReturnsEntries(t *testing.T) {
 	}
 	// A pristine (or non-git) temp root yields an empty list, not an error.
 	r.Body.Close()
+}
+
+func TestDiffReturnsPatch(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "main.go")
+	runGit("commit", "-m", "init")
+	os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
+
+	sm := acp.NewSessionManager(stubAgentFactory)
+	h := gateway.NewHandlerWithRoot(sm, "", root)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	r, _ := http.Get(ts.URL + "/v1/diff?path=main.go")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("diff: got %d", r.StatusCode)
+	}
+	var out struct {
+		Path  string `json:"path"`
+		Patch string `json:"patch"`
+	}
+	json.NewDecoder(r.Body).Decode(&out)
+	r.Body.Close()
+	if !strings.Contains(out.Patch, "func main") || !strings.Contains(out.Patch, "@@") {
+		t.Fatalf("patch missing change: %q", out.Patch)
+	}
+}
+
+func TestDiffRejectsEscape(t *testing.T) {
+	ts, _ := newWorkspaceServer(t)
+	r, _ := http.Get(ts.URL + "/v1/diff?path=" + url.QueryEscape("../../../etc/passwd"))
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("escape: got %d, want 400", r.StatusCode)
+	}
+	r.Body.Close()
+}
+
+func TestDiffNonGitRootIsEmpty(t *testing.T) {
+	ts, _ := newWorkspaceServer(t) // temp root, NOT a git repo
+	r, _ := http.Get(ts.URL + "/v1/diff?path=main.go")
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("non-git diff: got %d, want 200", r.StatusCode)
+	}
+	var out struct {
+		Patch string `json:"patch"`
+	}
+	json.NewDecoder(r.Body).Decode(&out)
+	r.Body.Close()
+	if out.Patch != "" {
+		t.Fatalf("non-git patch = %q, want empty", out.Patch)
+	}
 }

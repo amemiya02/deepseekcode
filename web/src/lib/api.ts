@@ -20,7 +20,20 @@ export interface CacheReport {
 }
 
 // ── Shared cross-wave types (Contract 1: defined ONCE here) ──────────────────
-export interface ModelInfo { id: string; label: string }
+export interface ModelCaps { vision: boolean; tools: boolean; reasoning: boolean }
+export interface ModelEffortDesc {
+  kind: 'levels' | 'toggle' | 'none'
+  levels?: string[]
+  default?: string
+}
+export interface ModelInfo {
+  id: string
+  label: string
+  provider?: string
+  caps?: ModelCaps
+  effort?: ModelEffortDesc
+  context?: number
+}
 export type PlanStatus = 'pending' | 'in_progress' | 'done'
 export interface PlanItem { text: string; status: PlanStatus }
 
@@ -200,33 +213,43 @@ export async function setEffort(sessionId: string, effort: string): Promise<void
 export async function setOutputStyle(sessionId: string, style: string): Promise<void> {
   await postJSON('/v1/output-style', { session_id: sessionId, style })
 }
-// GET /v1/models returns {active, effort, models: string[]} (internal/gateway/
-// models.go). Map the bare id list into ModelInfo[] the picker expects. We also
-// tolerate a server that already returns ModelInfo[] (array) for forward-compat.
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'max'] as const
+
+// Parse a /v1/models payload into ModelInfo[]. Accepts the capability-descriptor
+// objects (current contract) AND the legacy bare-string list (back-compat).
+function parseModelList(data: unknown): ModelInfo[] {
+  const arr = Array.isArray(data) ? data : ((data as { models?: unknown[] }).models ?? [])
+  return arr.map((m): ModelInfo => {
+    if (typeof m === 'string') return { id: m, label: m }
+    const d = m as Partial<ModelInfo> & { id: string }
+    return {
+      id: d.id,
+      label: d.label ?? d.id,
+      provider: d.provider,
+      caps: d.caps,
+      effort: d.effort,
+      context: d.context,
+    }
+  })
+}
+
+// GET /v1/models returns {active, effort, models: string[]|descriptor[]}
+// (internal/gateway/models.go). Parses both shapes into ModelInfo[].
 export async function fetchModels(): Promise<ModelInfo[]> {
   const res = await fetch('/v1/models')
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
-  const data = (await res.json()) as unknown
-  if (Array.isArray(data)) return data as ModelInfo[]
-  const ids = (data as { models?: string[] }).models ?? []
-  return ids.map((id) => ({ id, label: id }))
+  return parseModelList(await res.json())
 }
 
-export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
-
-// GET /v1/models → {models:string[], active, effort}. Returns the full state
+// GET /v1/models → {models:string[]|descriptor[], active, effort}. Returns the full state
 // (fetchModels above intentionally returns only the list for the picker popover).
 export async function fetchModelState(): Promise<{ models: ModelInfo[]; active: string; effort: string }> {
   const res = await fetch('/v1/models')
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   const data = (await res.json()) as unknown
-  if (Array.isArray(data)) return { models: data as ModelInfo[], active: '', effort: 'medium' }
-  const d = data as { models?: string[]; active?: string; effort?: string }
-  return {
-    models: (d.models ?? []).map((id) => ({ id, label: id })),
-    active: d.active ?? '',
-    effort: d.effort ?? 'medium',
-  }
+  const models = parseModelList(data)
+  const d = (Array.isArray(data) ? {} : data) as { active?: string; effort?: string }
+  return { models, active: d.active ?? '', effort: d.effort ?? 'medium' }
 }
 
 export class GatewayClient {

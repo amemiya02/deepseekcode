@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseHunks, hunkSides } from './diff'
+import { parseHunks, hunkSides, countDiffLines } from './diff'
 
 const PATCH = `@@ -1,3 +1,4 @@
  context line
@@ -40,5 +40,14 @@ describe('hunkSides', () => {
     const { original, modified } = hunkSides(h)
     expect(original).toBe('context line\nremoved line\ntrailing context')
     expect(modified).toBe('context line\nadded line one\nadded line two\ntrailing context')
+  })
+})
+
+describe('countDiffLines', () => {
+  it('counts added and removed lines across hunks', () => {
+    expect(countDiffLines(PATCH)).toEqual({ added: 3, removed: 2 })
+  })
+  it('returns zeros for an empty patch', () => {
+    expect(countDiffLines('')).toEqual({ added: 0, removed: 0 })
   })
 })

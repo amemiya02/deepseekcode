@@ -52,8 +52,7 @@ button { font-family: inherit; }
 .tool__note { padding: 4px var(--s-2); color: var(--warning); font: var(--type-label); border-top: 1px solid var(--border); }
 
 /* DiffView */
-.diffview { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; font: var(--type-mono); }
-.diffview__path { padding: 4px var(--s-2); background: var(--surface); border-bottom: 1px solid var(--border); color: var(--text-2); }
+.diffview { font: var(--type-mono); }
 .hunk { border-bottom: 1px solid var(--border); }
 .hunk[data-decided='true'] { opacity: 0.55; }
 .hunk__head { display: flex; align-items: center; justify-content: space-between; padding: 2px var(--s-2); background: var(--surface); color: var(--text-3); }
@@ -315,8 +314,8 @@ button { font-family: inherit; }
 
 /* (brand polish — msg__label rules removed; SP2 lane + bubble handle layout) */
 
-/* Tool / diff / fold cards lift off the white canvas. */
-.tool, .diffview, .fold {
+/* Tool / fold cards lift off the white canvas. */
+.tool, .fold {
   box-shadow: var(--shadow-1);
   border-radius: var(--r-md);
 }

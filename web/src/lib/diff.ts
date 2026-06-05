@@ -28,3 +28,16 @@ export function hunkSides(hunk: Hunk): { original: string; modified: string } {
   const modified = hunk.lines.filter((l) => l.kind !== 'del').map((l) => l.text).join('\n')
   return { original, modified }
 }
+
+// countDiffLines totals added/removed lines across all hunks (for the island header).
+export function countDiffLines(patch: string): { added: number; removed: number } {
+  let added = 0
+  let removed = 0
+  for (const hunk of parseHunks(patch)) {
+    for (const line of hunk.lines) {
+      if (line.kind === 'add') added++
+      else if (line.kind === 'del') removed++
+    }
+  }
+  return { added, removed }
+}

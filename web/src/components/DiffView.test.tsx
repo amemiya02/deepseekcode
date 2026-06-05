@@ -48,4 +48,11 @@ describe('DiffView', () => {
     expect(screen.queryByTestId('hunk-reject')).toBeNull()
     expect(screen.getAllByTestId('diff-hunk').length).toBeGreaterThan(0)
   })
+
+  it('renders as an island with +N −M counts in the header', () => {
+    const { container } = wrap(<DiffView path="a.go" patch={PATCH} />)
+    expect(container.querySelector('.island')).not.toBeNull()
+    expect(screen.getByTestId('diff-added')).toHaveTextContent('+2')
+    expect(screen.getByTestId('diff-removed')).toHaveTextContent('2')
+  })
 })

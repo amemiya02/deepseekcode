@@ -11,6 +11,22 @@ function makeFile(name: string): File {
 const wrap = (ui: React.ReactElement) => render(<LocaleProvider>{ui}</LocaleProvider>)
 
 describe('AttachmentDrop', () => {
+  it('renders children inside the drop zone', () => {
+    wrap(<AttachmentDrop onAttach={() => {}}><span data-testid="child">hi</span></AttachmentDrop>)
+    expect(screen.getByTestId('attach-zone')).toBeTruthy()
+    expect(screen.getByTestId('child')).toBeTruthy()
+  })
+
+  it('applies attach--over class on dragOver and removes it on dragLeave', () => {
+    wrap(<AttachmentDrop onAttach={() => {}} />)
+    const zone = screen.getByTestId('attach-zone')
+    expect(zone.className).not.toContain('attach--over')
+    fireEvent.dragOver(zone, { dataTransfer: { items: [], types: ['Files'] } })
+    expect(zone.className).toContain('attach--over')
+    fireEvent.dragLeave(zone)
+    expect(zone.className).not.toContain('attach--over')
+  })
+
   it('drop fires onAttach with the dropped files', () => {
     const got: string[][] = []
     wrap(<AttachmentDrop onAttach={(files) => got.push(files.map((f) => f.name))} />)
@@ -19,11 +35,9 @@ describe('AttachmentDrop', () => {
     expect(got).toEqual([['a.txt']])
   })
 
-  it('file input change fires onAttach', () => {
-    const got: string[][] = []
-    wrap(<AttachmentDrop onAttach={(files) => got.push(files.map((f) => f.name))} />)
-    const input = screen.getByTestId('attach-input') as HTMLInputElement
-    fireEvent.change(input, { target: { files: [makeFile('b.png')] } })
-    expect(got).toEqual([['b.png']])
+  it('does not render an inline attach button or file input', () => {
+    wrap(<AttachmentDrop onAttach={() => {}} />)
+    expect(document.querySelector('.attach__btn')).toBeNull()
+    expect(document.querySelector('[data-testid="attach-input"]')).toBeNull()
   })
 })

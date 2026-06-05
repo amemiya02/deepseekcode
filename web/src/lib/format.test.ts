@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { formatPct, formatCNY, formatTokens } from './format'
-import { relativeDay, groupSessionsByDay } from './format'
-import type { Session } from './api'
+import { relativeDay, groupSessionsByDay, formatRelativeTime } from './format'
 
 describe('formatPct', () => {
   it('renders a 0..1 ratio as a rounded percent', () => {
@@ -36,10 +35,6 @@ describe('formatTokens', () => {
   })
 })
 
-function sess(id: string, updatedMs: number): Session {
-  return { id, title: id, turns: 1, updated_at: updatedMs, created_at: updatedMs }
-}
-
 // Build timezone-safe anchors using local-time setHours so tests are correct
 // on any host timezone (UTC, UTC+8, UTC+9, etc.).
 function localNoon(year: number, month: number, day: number): number {
@@ -52,48 +47,67 @@ function localHour(year: number, month: number, day: number, hour: number): numb
 }
 
 describe('relativeDay', () => {
-  // Use local-time anchors so tests pass on any timezone.
   const now = localNoon(2026, 6, 4)
-  it('labels same calendar day as today', () => {
+  it('labels timestamps from today as today', () => {
     expect(relativeDay(localHour(2026, 6, 4, 1), now)).toBe('today')
   })
-  it('labels the previous calendar day as yesterday', () => {
+  it('labels timestamps from yesterday as yesterday', () => {
     expect(relativeDay(localHour(2026, 6, 3, 23), now)).toBe('yesterday')
   })
-  it('labels anything older as earlier', () => {
-    expect(relativeDay(localHour(2026, 5, 30, 10), now)).toBe('earlier')
+  it('labels within the last 7 days as week', () => {
+    expect(relativeDay(localHour(2026, 5, 30, 10), now)).toBe('week')
   })
-
-  // Explicit timezone-boundary test: a session at local 01:00 on the same
-  // calendar day must be 'today' even when that hour is UTC-yesterday.
-  // This would fail if startOfDay() used UTC midnight instead of local midnight.
-  it('uses local midnight as the day boundary (timezone-safe)', () => {
-    const nowMs = localNoon(2026, 6, 4)
-    // Local 01:00 same day → today
-    expect(relativeDay(localHour(2026, 6, 4, 1), nowMs)).toBe('today')
-    // Local 23:00 previous day → yesterday
-    expect(relativeDay(localHour(2026, 6, 3, 23), nowMs)).toBe('yesterday')
+  it('labels within the last 30 days as month', () => {
+    expect(relativeDay(localHour(2026, 5, 18, 10), now)).toBe('month')
+  })
+  it('labels anything older as older', () => {
+    expect(relativeDay(localHour(2026, 3, 1, 10), now)).toBe('older')
   })
 })
 
 describe('groupSessionsByDay', () => {
-  // Use local-time anchors so tests pass on any timezone.
   const now = localNoon(2026, 6, 4)
-  it('buckets sessions into today/yesterday/earlier, newest first within a bucket', () => {
+  const sess = (id: string, updated: number) => ({ id, title: id, turns: 1, updated_at: updated, created_at: updated })
+  it('buckets into today/yesterday/week/month/older, newest first within a bucket', () => {
     const sessions = [
-      sess('old', localHour(2026, 5, 1, 10)),
-      sess('today-early', localHour(2026, 6, 4, 2)),
-      sess('today-late', localHour(2026, 6, 4, 10)),
-      sess('yday', localHour(2026, 6, 3, 10)),
+      sess('old', localHour(2026, 3, 1, 9)),
+      sess('t1', localHour(2026, 6, 4, 9)),
+      sess('t2', localHour(2026, 6, 4, 11)),
+      sess('y', localHour(2026, 6, 3, 9)),
+      sess('w', localHour(2026, 5, 31, 9)),
+      sess('m', localHour(2026, 5, 18, 9)),
     ]
     const groups = groupSessionsByDay(sessions, now)
-    expect(groups.map((g) => g.key)).toEqual(['today', 'yesterday', 'earlier'])
-    expect(groups[0].sessions.map((s) => s.id)).toEqual(['today-late', 'today-early'])
-    expect(groups[1].sessions.map((s) => s.id)).toEqual(['yday'])
-    expect(groups[2].sessions.map((s) => s.id)).toEqual(['old'])
+    expect(groups.map((g) => g.key)).toEqual(['today', 'yesterday', 'week', 'month', 'older'])
+    expect(groups[0].sessions.map((s) => s.id)).toEqual(['t2', 't1'])
   })
   it('omits empty buckets', () => {
     const groups = groupSessionsByDay([sess('a', now)], now)
     expect(groups.map((g) => g.key)).toEqual(['today'])
+  })
+})
+
+describe('formatRelativeTime', () => {
+  const now = localNoon(2026, 6, 4)
+  it('renders sub-minute as now', () => {
+    expect(formatRelativeTime(now - 5_000, now)).toBe('now')
+  })
+  it('renders minutes', () => {
+    expect(formatRelativeTime(now - 5 * 60_000, now)).toBe('5m')
+  })
+  it('renders hours', () => {
+    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe('3h')
+  })
+  it('renders days', () => {
+    expect(formatRelativeTime(now - 3 * 86_400_000, now)).toBe('3d')
+  })
+  it('renders a same-year month-day for older timestamps', () => {
+    expect(formatRelativeTime(localNoon(2026, 3, 4), now)).toBe('Mar 4')
+  })
+  it('includes the year when not the current year', () => {
+    expect(formatRelativeTime(localNoon(2024, 3, 4), now)).toBe('Mar 4 2024')
+  })
+  it('never renders a future negative', () => {
+    expect(formatRelativeTime(now + 10_000, now)).toBe('now')
   })
 })

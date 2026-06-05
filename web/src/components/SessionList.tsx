@@ -23,7 +23,9 @@ export function SessionList({
   const labels: Record<DayKey, string> = {
     today: t('session.group.today', 'Today'),
     yesterday: t('session.group.yesterday', 'Yesterday'),
-    earlier: t('session.group.earlier', 'Earlier'),
+    week: t('session.group.week', 'Previous 7 Days'),
+    month: t('session.group.month', 'Previous 30 Days'),
+    older: t('session.group.older', 'Older'),
   }
   const groups = useMemo(() => groupSessionsByDay(sessions, now), [sessions, now])
 

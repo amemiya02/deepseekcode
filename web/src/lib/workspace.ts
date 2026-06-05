@@ -59,6 +59,15 @@ export function fetchChanged(): Promise<ChangedResult> {
   return getJSON<ChangedResult>('/v1/changed')
 }
 
+export interface DiffResult {
+  path: string
+  patch: string
+}
+
+export function fetchDiff(path: string): Promise<DiffResult> {
+  return getJSON<DiffResult>(`/v1/diff?path=${encodeURIComponent(path)}`)
+}
+
 export async function addToChat(req: AddToChatRequest): Promise<AddToChatResult> {
   const res = await fetch('/v1/add-to-chat', {
     method: 'POST',

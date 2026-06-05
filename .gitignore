@@ -2,6 +2,10 @@
 /bin/
 /dist/
 /dsc
+# Root-level dependency / bundler caches (only web/node_modules was ignored
+# before, so a stray root node_modules/.vite leaked into the review surface).
+/node_modules/
+/.vite/
 # Root-only: an unanchored `benchrunner` also matches paths like
 # bench/cmd/benchrunner/main_test.go, which silently drops tests from PRs.
 /benchrunner
@@ -59,3 +63,6 @@ docs/competitive/
 /*.png
 web/test-results/
 web/playwright-report/
+# Playwright visual-QA output (regenerated each run; keep only the dir marker).
+web/e2e/screenshots/*
+!web/e2e/screenshots/.gitkeep

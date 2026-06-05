@@ -7,6 +7,29 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/acp"
 )
 
+// steerRequest is the POST /v1/steer body.
+type steerRequest struct {
+	SessionID string `json:"session_id"`
+	Prompt    string `json:"prompt"`
+}
+
+// handleSteer implements POST /v1/steer. It injects a mid-turn instruction into
+// the session's in-flight run via the SessionManager. Steering an unknown
+// session is a no-op 200 (idempotent), matching handleCancel.
+func (h *Handler) handleSteer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req steerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	h.sm.Steer(req.SessionID, req.Prompt)
+	w.WriteHeader(http.StatusOK)
+}
+
 // cancelRequest is the POST /v1/cancel body.
 type cancelRequest struct {
 	SessionID string `json:"session_id"`

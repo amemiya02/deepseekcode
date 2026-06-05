@@ -52,6 +52,8 @@ func (s *stubAgentInternal) Run(ctx context.Context, userPrompt string, onEvent 
 	return nil
 }
 
+func (s *stubAgentInternal) Steer(_ string) {}
+
 func TestHandlePrompt_PopulatesSessionList(t *testing.T) {
 	sm := acp.NewSessionManager(stubAgentFactoryInternal)
 	h := NewHandler(sm, "")

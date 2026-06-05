@@ -464,7 +464,11 @@ func (a *Agent) Steer(text string) {
 // anything was drained. Called only from the agent goroutine at a step
 // boundary, where appending a user message keeps tool_call/tool_result pairing
 // valid.
-func (a *Agent) drainSteer() bool {
+//
+// ctx should be the live step context (or the loop context before stepCtx is
+// created) so that a slow Persister call is cancelled when the step tears down,
+// rather than leaking into context.Background().
+func (a *Agent) drainSteer(ctx context.Context) bool {
 	a.steerMu.Lock()
 	pending := a.steerQueue
 	a.steerQueue = nil
@@ -476,7 +480,7 @@ func (a *Agent) drainSteer() bool {
 		blocks := []llm.ContentBlock{llm.TextBlock{Text: text}}
 		a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: blocks})
 		if a.Persister != nil {
-			_, _ = a.Persister.AppendUserMessage(context.Background(), blocks)
+			_, _ = a.Persister.AppendUserMessage(ctx, blocks)
 		}
 	}
 	return true
@@ -593,8 +597,10 @@ agentLoop:
 		}
 
 		// Drain any mid-turn steering queued since the last iteration so the
-		// upcoming step sees the user's new instruction.
-		a.drainSteer()
+		// upcoming step sees the user's new instruction. Pass the loop-level
+		// ctx (not stepCtx, which hasn't been created yet) so the persister
+		// call is bounded by the session lifetime, not Background().
+		a.drainSteer(ctx)
 
 		// Per-step deadline covers BOTH the model turn and tool execution.
 		// stepCancel is always non-nil so we can defer it unconditionally.
@@ -678,7 +684,8 @@ agentLoop:
 			// this (final) step ran, append it and keep the turn alive instead
 			// of ending. Without this, a steer landing during the last step
 			// would be stranded in the queue when the loop returns.
-			if a.drainSteer() {
+			// Pass stepCtx so the persister call is cancelled if the step tears down.
+			if a.drainSteer(stepCtx) {
 				stepCancel()
 				a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 				continue agentLoop

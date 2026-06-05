@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
@@ -9,15 +10,16 @@ import (
 // Steer enqueues; drainSteer pops the queue, appends each as a user message,
 // and reports whether anything was drained. Empty steer is a no-op.
 func TestSteerDrainAppendsUserMessages(t *testing.T) {
+	ctx := context.Background()
 	a := &Agent{}
-	if a.drainSteer() {
+	if a.drainSteer(ctx) {
 		t.Fatal("drainSteer on empty queue should report false")
 	}
 	a.Steer("focus on the parser")
 	a.Steer("") // ignored
 	a.Steer("and add a test")
 	before := len(a.Messages)
-	if !a.drainSteer() {
+	if !a.drainSteer(ctx) {
 		t.Fatal("drainSteer with queued items should report true")
 	}
 	if got := len(a.Messages) - before; got != 2 {
@@ -32,7 +34,7 @@ func TestSteerDrainAppendsUserMessages(t *testing.T) {
 		t.Fatalf("expected steer text, got %#v", last.Blocks[0])
 	}
 	// Queue is emptied after a drain.
-	if a.drainSteer() {
+	if a.drainSteer(ctx) {
 		t.Fatal("second drainSteer should report false (queue emptied)")
 	}
 }

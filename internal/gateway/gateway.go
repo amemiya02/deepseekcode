@@ -75,6 +75,12 @@ type Handler struct {
 	mu          sync.Mutex
 	pendingPerm map[string]pendingPermission
 	pendingAsk  map[string]pendingAsk
+	// activeTurns guards against a second concurrent run on one session: a
+	// prompt arriving while a turn is in flight is routed to Steer (mid-turn
+	// redirect) rather than spawning a second goroutine that would race the
+	// live *agent.Agent (shared a.Messages/a.steps mutated without a lock).
+	activeMu    sync.Mutex
+	activeTurns map[string]bool
 	intSeq      atomic.Int64 // interaction id sequence
 	sessions    *sessionStore
 	models      *modelState
@@ -97,6 +103,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 		hub:         newHub(),
 		pendingPerm: make(map[string]pendingPermission),
 		pendingAsk:  make(map[string]pendingAsk),
+		activeTurns: make(map[string]bool),
 		sessions:    newSessionStore(),
 		models:      newModelState(),
 		outputStyle: newOutputStyleState(),
@@ -108,6 +115,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 	h.mux.HandleFunc("/v1/cache", h.handleCache)
 	h.mux.HandleFunc("/v1/events", h.handleEvents)
 	h.mux.HandleFunc("/v1/cancel", h.handleCancel)
+	h.mux.HandleFunc("/v1/steer", h.handleSteer)
 	h.mux.HandleFunc("/v1/permission", h.handlePermission)
 	h.mux.HandleFunc("/v1/answer", h.handleAnswer)
 	h.mux.HandleFunc("/v1/sessions", h.handleSessions)
@@ -235,6 +243,23 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	runCtx := h.sm.SessionCtx(sessionID)
 
+	// If a turn is already running for this session, redirect it instead of
+	// starting a concurrent run (which would race the live Agent and reset its
+	// replay buffer). This closes the latent double-POST race.
+	h.activeMu.Lock()
+	if h.activeTurns[sessionID] {
+		h.activeMu.Unlock()
+		h.sm.Steer(sessionID, req.Prompt)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(promptResponse{
+			RequestID: fmt.Sprintf("req-%d", h.reqSeq.Add(1)),
+			SessionID: sessionID,
+		})
+		return
+	}
+	h.activeTurns[sessionID] = true
+	h.activeMu.Unlock()
+
 	// Register/refresh UI metadata so the session rail reflects sessions started
 	// by a bare prompt (previously only POST /v1/sessions registered meta, so a
 	// prompt-created session never appeared in GET /v1/sessions).
@@ -263,6 +288,13 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	h.hub.resetTurn(sid)
 
 	go func() {
+		// Release the active-turn guard when this run ends (success or error) so
+		// subsequent prompts on this session start a new turn rather than steering.
+		defer func() {
+			h.activeMu.Lock()
+			delete(h.activeTurns, sid)
+			h.activeMu.Unlock()
+		}()
 		// Per-run live-signal accumulators (one prompt = one goroutine).
 		var (
 			cacheSum, cacheN float64 // rolling avg of turn_pct

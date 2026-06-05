@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
 )
@@ -116,6 +117,66 @@ func TestSessionManagerSteer(t *testing.T) {
 		t.Fatalf("expected [focus here], got %#v", got)
 	}
 }
+
+// TestSessionManagerSteerCancelRace is the race-detector counterpart to
+// TestSessionManagerSteer. It exercises concurrent Steer + Cancel on the same
+// session from two separate goroutines, verifying that the SessionManager's
+// mutex protects the sessions map under the -race detector. Neither call must
+// panic or produce a data race even when they interleave at the map level.
+func TestSessionManagerSteerCancelRace(t *testing.T) {
+	// blockingFactory returns a runner whose Run blocks until ctx is cancelled,
+	// giving the test goroutines a live session to race against.
+	blockingFactory := func(string) (acp.AgentRunner, error) {
+		return &blockingSteerCancel{}, nil
+	}
+	sm := acp.NewSessionManager(blockingFactory)
+	id, err := sm.NewSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start the run in a goroutine so the session is live.
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		// Prompt drives the runner; it will return once Cancel cancels the context.
+		_ = sm.Prompt(sm.SessionCtx(id), id, "start", func(acp.AgentEvent) {})
+	}()
+
+	// Give Run a moment to enter the runner.
+	time.Sleep(5 * time.Millisecond)
+
+	// Fire Steer and Cancel concurrently from two goroutines — the race detector
+	// flags any unsynchronised access to the sessions map.
+	done := make(chan struct{}, 2)
+	go func() {
+		sm.Steer(id, "concurrent steer")
+		done <- struct{}{}
+	}()
+	go func() {
+		sm.Cancel(id)
+		done <- struct{}{}
+	}()
+	<-done
+	<-done
+
+	// Wait for Run to finish (Cancel cancelled the context).
+	select {
+	case <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not finish after Cancel")
+	}
+}
+
+// blockingSteerCancel is an AgentRunner whose Run blocks until ctx is done.
+type blockingSteerCancel struct{}
+
+func (b *blockingSteerCancel) Run(ctx context.Context, _ string, _ func(acp.AgentEvent)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b *blockingSteerCancel) Steer(_ string) {}
 
 // TestSessionCtxMissingIsCancelled verifies the footgun fix: SessionCtx for an
 // unknown/removed session returns an already-cancelled context, not a live

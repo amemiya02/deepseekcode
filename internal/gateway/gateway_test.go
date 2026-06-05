@@ -32,6 +32,8 @@ func (s *stubAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp
 	return nil
 }
 
+func (s *stubAgent) Steer(_ string) {}
+
 // fixtureTrace is a minimal JSONL trace exercising both an expected-miss first
 // turn and an evicted warm turn, so the derived CacheReport fields are non-zero.
 const fixtureTrace = `{"type":"prefix.snapshot","epoch_id":"e1","static_prefix_hash":"aabbccdd","schema_version":2}
@@ -274,6 +276,8 @@ func questionAgentFactory(workingDir string) (acp.AgentRunner, error) {
 
 type questionAgent struct{}
 
+func (a *questionAgent) Steer(_ string) {}
+
 func (a *questionAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp.AgentEvent)) error {
 	resp := make(chan [][]string, 1)
 	onEvent(acp.AgentEvent{
@@ -295,6 +299,8 @@ func askingAgentFactory(workingDir string) (acp.AgentRunner, error) {
 }
 
 type askingAgent struct{}
+
+func (a *askingAgent) Steer(_ string) {}
 
 func (a *askingAgent) Run(ctx context.Context, userPrompt string, onEvent func(acp.AgentEvent)) error {
 	resp := make(chan acp.PermissionDecision, 1)

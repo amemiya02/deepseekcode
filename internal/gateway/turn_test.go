@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,4 +162,177 @@ func TestCancelUnknownSession(t *testing.T) {
 		t.Fatalf("cancel unknown: got %d, want 200", r.StatusCode)
 	}
 	r.Body.Close()
+}
+
+// TestSteerEndpoint verifies POST /v1/steer is wired and behaves correctly:
+//   - known session: 200, steer reaches the runner
+//   - unknown session: 200 (idempotent no-op, like cancel)
+func TestSteerEndpoint(t *testing.T) {
+	var steered []string
+	factory := func(string) (acp.AgentRunner, error) {
+		return &recordingSteerAgent{record: func(s string) { steered = append(steered, s) }}, nil
+	}
+	sm := acp.NewSessionManager(factory)
+	h := gateway.NewHandler(sm, "")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// Create a session.
+	resp, err := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(resp.Body).Decode(&first)
+	resp.Body.Close()
+
+	// Steer the known session.
+	body := `{"session_id":"` + first.SessionID + `","prompt":"focus here"}`
+	r, err := http.Post(ts.URL+"/v1/steer", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/steer known session: got %d, want 200", r.StatusCode)
+	}
+	r.Body.Close()
+	if len(steered) != 1 || steered[0] != "focus here" {
+		t.Fatalf("expected steer to reach runner with 'focus here', got %v", steered)
+	}
+
+	// Steer an unknown session is a no-op 200, must not panic.
+	r2, err := http.Post(ts.URL+"/v1/steer", "application/json",
+		strings.NewReader(`{"session_id":"sess-unknown","prompt":"ignored"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/steer unknown session: got %d, want 200", r2.StatusCode)
+	}
+	r2.Body.Close()
+}
+
+// recordingSteerAgent is an AgentRunner that records Steer calls and completes
+// its Run immediately, used by TestSteerEndpoint.
+type recordingSteerAgent struct {
+	record func(string)
+}
+
+func (a *recordingSteerAgent) Run(_ context.Context, _ string, onEvent func(acp.AgentEvent)) error {
+	onEvent(acp.AgentEvent{Kind: acp.EventKindDone, StopReason: "end_turn"})
+	return nil
+}
+
+func (a *recordingSteerAgent) Steer(text string) {
+	if a.record != nil {
+		a.record(text)
+	}
+}
+
+// TestPromptWhileActiveSteers verifies the double-POST race guard: when a turn
+// is already in flight for a session, a second POST /v1/prompt routes to Steer
+// rather than spawning a concurrent run. Run is called exactly once; the second
+// prompt is delivered via Steer.
+func TestPromptWhileActiveSteers(t *testing.T) {
+	// blockingAgent parks until its release channel is closed, giving the test
+	// a window to send a second POST /v1/prompt while the turn is in flight.
+	release := make(chan struct{})
+	agent := newBlockingSteerAgent(release)
+
+	factory := func(string) (acp.AgentRunner, error) { return agent, nil }
+	sm := acp.NewSessionManager(factory)
+	h := gateway.NewHandler(sm, "")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	// First prompt — starts the blocking turn.
+	resp, err := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(`{"prompt":"first"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		SessionID string `json:"session_id"`
+	}
+	json.NewDecoder(resp.Body).Decode(&first)
+	resp.Body.Close()
+
+	// Wait until Run is actually entered before sending the second prompt.
+	select {
+	case <-agent.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run never entered")
+	}
+
+	// Second POST /v1/prompt while first is in flight — must steer, not re-run.
+	body := `{"prompt":"second","session_id":"` + first.SessionID + `"}`
+	r2, err := http.Post(ts.URL+"/v1/prompt", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.StatusCode != http.StatusOK {
+		t.Fatalf("second prompt while active: got %d, want 200", r2.StatusCode)
+	}
+	r2.Body.Close()
+
+	// Release the blocking run so it can finish.
+	close(release)
+
+	// Wait for Run to finish so the deferred activeTurns clear runs.
+	select {
+	case <-agent.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not finish after release")
+	}
+
+	if n := agent.runs.Load(); n != 1 {
+		t.Fatalf("Run called %d times, want exactly 1 (second prompt must steer not re-run)", n)
+	}
+	steered := agent.steered.Load().([]string)
+	if len(steered) != 1 || steered[0] != "second" {
+		t.Fatalf("expected steer 'second', got %v", steered)
+	}
+}
+
+// blockingSteerAgent parks in Run until release is closed.
+// It uses sync/atomic for runCount and a mutex-protected slice for steered
+// texts so the race detector is satisfied when the test goroutine reads them
+// after the run goroutine writes them.
+type blockingSteerAgent struct {
+	release chan struct{}
+	entered chan struct{}
+	done    chan struct{}
+	runs    atomic.Int32
+	mu      sync.Mutex
+	steered atomic.Value // holds []string
+}
+
+func newBlockingSteerAgent(release chan struct{}) *blockingSteerAgent {
+	a := &blockingSteerAgent{
+		release: release,
+		entered: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	a.steered.Store([]string(nil))
+	return a
+}
+
+func (a *blockingSteerAgent) Run(ctx context.Context, _ string, onEvent func(acp.AgentEvent)) error {
+	a.runs.Add(1)
+	close(a.entered)
+	defer close(a.done)
+	select {
+	case <-a.release:
+	case <-ctx.Done():
+	}
+	onEvent(acp.AgentEvent{Kind: acp.EventKindDone, StopReason: "end_turn"})
+	return nil
+}
+
+func (a *blockingSteerAgent) Steer(text string) {
+	a.mu.Lock()
+	prev, _ := a.steered.Load().([]string)
+	a.steered.Store(append(prev, text))
+	a.mu.Unlock()
 }

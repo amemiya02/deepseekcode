@@ -26,6 +26,8 @@ func (cpStubAgent) Run(ctx context.Context, prompt string, onEvent func(acp.Agen
 	return nil
 }
 
+func (cpStubAgent) Steer(_ string) {}
+
 // newCheckpointServer builds a gateway wired to a real temp Store + snapshots
 // Manager rooted under t.TempDir(), plus a seeded root session with 4 messages.
 // It returns the server, the store, the session id, and the snapshots root dir

@@ -4,7 +4,7 @@
 /* AppShell */
 .appShell {
   display: grid;
-  grid-template-columns: var(--col-left) 1px 1fr 1px var(--col-right);
+  grid-template-columns: var(--col-left) 6px 1fr 6px var(--col-right);
   height: 100%;
   background: var(--bg);
   color: var(--text);
@@ -24,18 +24,33 @@
 
 .splitter {
   position: relative;
-  width: 1px;
-  background: var(--border);
+  width: 6px;
+  background: var(--surface);
   cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: background var(--dur-fast) var(--ease-standard);
 }
-.splitter::before { /* invisible 8px grab zone centered on the line */
+.splitter::before { /* the visible 1px seam line */
+  content: '';
+  width: 1px;
+  height: 100%;
+  background: var(--border);
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+.splitter::after { /* grip dots, revealed on hover/focus */
   content: '';
   position: absolute;
-  inset: 0 -4px;
-  z-index: 3;
+  width: 4px;
+  height: 26px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-standard);
 }
-.splitter:hover, .splitter:focus-visible { background: var(--accent); outline: none; }
+.splitter:hover, .splitter:focus-visible { background: var(--accent-weak); outline: none; }
+.splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
+.splitter:hover::after, .splitter:focus-visible::after { background: color-mix(in oklch, var(--accent) 55%, transparent); }
 
 /* Preset segmented control */
 .presetRow {

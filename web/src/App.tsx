@@ -374,7 +374,6 @@ function AppInner() {
         onSelect={(id) => void onSelectSession(id)}
         onDelete={(id) => void onDeleteSession(id)}
         onRename={(id, title) => void onRenameSession(id, title)}
-        onOpenHistory={() => setHistoryOpen(true)}
       />
     </div>
   )

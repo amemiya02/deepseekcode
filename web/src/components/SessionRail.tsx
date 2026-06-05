@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search, History } from 'lucide-react'
+import { Plus, Search, MessageSquareDashed } from 'lucide-react'
 import { t } from '../lib/i18n'
 import type { Session } from '../lib/api'
 import { SessionList } from './SessionList'
@@ -9,26 +9,27 @@ export function SessionRail({
   sessions = [],
   activeId = '',
   now = Date.now(),
+  loading = false,
   onNew,
   onSelect,
   onDelete,
   onRename,
-  onOpenHistory,
 }: {
   sessions?: Session[]
   activeId?: string
   now?: number
+  loading?: boolean
   onNew?: () => void
   onSelect?: (id: string) => void
   onDelete?: (id: string) => void
   onRename?: (id: string, title: string) => void
-  onOpenHistory?: () => void
 }) {
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions
   }, [query, sessions])
+  const count = sessions.length
 
   return (
     <aside className={styles.rail}>
@@ -45,17 +46,40 @@ export function SessionRail({
           placeholder={t('session.search', 'Search sessions')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setQuery('') }}
         />
       </label>
 
       <div className={styles.scroll}>
-        <SessionList sessions={filtered} activeId={activeId} now={now} onSelect={onSelect} onDelete={onDelete} onRename={onRename} />
+        {loading ? (
+          <div className={styles.skeleton} data-testid="session-skeleton" aria-hidden="true">
+            {Array.from({ length: 5 }).map((_, i) => <div key={i} className={styles.skelRow} />)}
+          </div>
+        ) : count === 0 ? (
+          <div className={styles.empty} data-testid="sessions-empty">
+            <MessageSquareDashed size={22} aria-hidden="true" />
+            <p className={styles.emptyTitle}>{t('session.empty', 'No sessions yet.')}</p>
+            <p className={styles.emptyHint}>{t('session.emptyHint', 'Start a new session above.')}</p>
+          </div>
+        ) : (
+          <SessionList
+            sessions={filtered}
+            activeId={activeId}
+            now={now}
+            onSelect={onSelect}
+            onDelete={onDelete}
+            onRename={onRename}
+          />
+        )}
       </div>
 
-      <button type="button" className={styles.history} data-testid="session-history" onClick={() => onOpenHistory?.()}>
-        <History size={14} aria-hidden="true" />
-        <span>{t('session.allHistory', 'All history')}</span>
-      </button>
+      {count > 0 && (
+        <footer className={styles.footer} data-testid="session-count">
+          {count === 1
+            ? t('session.countOne', '{n} session', { n: count })
+            : t('session.countOther', '{n} sessions', { n: count })}
+        </footer>
+      )}
     </aside>
   )
 }

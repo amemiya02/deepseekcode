@@ -31,10 +31,30 @@ describe('SessionRail', () => {
     expect(onNew).toHaveBeenCalledTimes(1)
   })
 
-  it('calls onOpenHistory when the All history trigger is clicked', async () => {
-    const onOpenHistory = vi.fn()
-    render(<SessionRail sessions={sessions} activeId="" now={now} onOpenHistory={onOpenHistory} />)
-    await userEvent.click(screen.getByTestId('session-history'))
-    expect(onOpenHistory).toHaveBeenCalledTimes(1)
+  it('shows a session count footer', () => {
+    render(<SessionRail sessions={sessions} activeId="" now={now} />)
+    expect(screen.getByTestId('session-count')).toHaveTextContent('2 sessions')
+  })
+
+  it('shows singular session count for one session', () => {
+    const one: Session[] = [{ id: 's1', title: 'Fix login', turns: 2, updated_at: now, created_at: now }]
+    render(<SessionRail sessions={one} activeId="" now={now} />)
+    expect(screen.getByTestId('session-count')).toHaveTextContent('1 session')
+  })
+
+  it('does not show a footer when sessions is empty', () => {
+    render(<SessionRail sessions={[]} now={now} />)
+    expect(screen.queryByTestId('session-count')).toBeNull()
+  })
+
+  it('renders skeletons while loading', () => {
+    render(<SessionRail sessions={[]} loading now={now} />)
+    expect(screen.getByTestId('session-skeleton')).toBeInTheDocument()
+    expect(screen.queryByTestId('sessions-empty')).toBeNull()
+  })
+
+  it('renders an empty hint when there are no sessions', () => {
+    render(<SessionRail sessions={[]} now={now} />)
+    expect(screen.getByTestId('sessions-empty')).toBeInTheDocument()
   })
 })

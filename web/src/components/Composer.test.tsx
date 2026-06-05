@@ -48,4 +48,43 @@ describe('Composer', () => {
     await userEvent.keyboard('{Shift>}{Tab}{/Shift}')
     expect(modes).toEqual(['auto-edit'])
   })
+
+  it('renders the attach button in the composer bar', () => {
+    wrap(<Composer streaming={false} mode="ask" commands={commands} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />)
+    expect(screen.getByTestId('attach-btn')).toBeInTheDocument()
+  })
+
+  it('renders the mode-trigger in the composer bar', () => {
+    wrap(<Composer streaming={false} mode="plan" commands={commands} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />)
+    expect(screen.getByTestId('mode-trigger')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-trigger')).toHaveTextContent('Plan')
+  })
+
+  it('renders ModelSwitcher when models and onModelChange are provided', () => {
+    const models = [{ id: 'deepseek-chat', label: 'deepseek-chat' }]
+    wrap(
+      <Composer
+        streaming={false} mode="ask" commands={commands}
+        onSend={() => {}} onCancel={() => {}} onModeChange={() => {}}
+        models={models} activeModel="deepseek-chat" onModelChange={() => {}}
+      />
+    )
+    expect(screen.getByTestId('model-trigger')).toBeInTheDocument()
+  })
+
+  it('does not render ModelSwitcher when no models provided', () => {
+    wrap(<Composer streaming={false} mode="ask" commands={commands} onSend={() => {}} onCancel={() => {}} onModeChange={() => {}} />)
+    expect(screen.queryByTestId('model-trigger')).not.toBeInTheDocument()
+  })
+
+  it('renders EffortSwitcher when onEffortChange is provided with levels', () => {
+    wrap(
+      <Composer
+        streaming={false} mode="ask" commands={commands}
+        onSend={() => {}} onCancel={() => {}} onModeChange={() => {}}
+        effort="medium" effortLevels={['low', 'medium', 'high']} onEffortChange={() => {}}
+      />
+    )
+    expect(screen.getByTestId('effort-trigger')).toBeInTheDocument()
+  })
 })

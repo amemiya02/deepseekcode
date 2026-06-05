@@ -1,17 +1,21 @@
 // Adapted from deepseek-reasonix (MIT) — desktop/frontend/src/components/Composer.tsx
 // Assembles the input experience: textarea with "/" (slash) and trailing-"@" (file)
-// trigger detection, ContextPills, AutonomyToggle, SendStopButton, AttachmentDrop,
-// and long-paste folding. Leaf-testable: commands arrive as a prop; files come from
-// workspace.fetchFiles (Contract 1).
+// trigger detection, ContextPills, ModeMenu, ModelSwitcher, EffortSwitcher,
+// SendStopButton, AttachmentDrop, and long-paste folding.
+// Leaf-testable: commands arrive as a prop; files come from workspace.fetchFiles (Contract 1).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import { Paperclip } from 'lucide-react'
 import { fetchFiles } from '../lib/workspace'
-import type { FileEntry } from '../lib/api'
+import type { FileEntry, ModelInfo } from '../lib/api'
 import { useT } from '../lib/i18n'
+import { ORDER, type AutonomyMode } from '../lib/autonomy'
 import { SlashMenu, type SlashCommand } from './SlashMenu'
 import { FileMenu } from './FileMenu'
 import { ContextPills, type ContextPill } from './ContextPills'
-import { AutonomyToggle, type AutonomyMode } from './AutonomyToggle'
+import { ModelSwitcher } from './ModelSwitcher'
+import { EffortSwitcher } from './EffortSwitcher'
+import { ModeMenu } from './ModeMenu'
 import { SendStopButton } from './SendStopButton'
 import { AttachmentDrop } from './AttachmentDrop'
 
@@ -22,10 +26,9 @@ export interface ComposerPayload {
   files: File[]
 }
 
-const ORDER: AutonomyMode[] = ['ask', 'auto-edit', 'plan', 'yolo']
-
 export function Composer({
   streaming, mode, commands, onSend, onCancel, onModeChange, disabled = false, draft,
+  models = [], activeModel = '', effort = 'medium', effortLevels = [], onModelChange, onEffortChange,
 }: {
   streaming: boolean
   mode: AutonomyMode
@@ -36,6 +39,12 @@ export function Composer({
   disabled?: boolean
   /** External content to append to the draft (e.g. from add-to-chat). */
   draft?: string
+  models?: ModelInfo[]
+  activeModel?: string
+  effort?: string
+  effortLevels?: string[]
+  onModelChange?: (id: string) => void
+  onEffortChange?: (level: string) => void
 }) {
   const t = useT()
   const [text, setText] = useState('')
@@ -55,6 +64,13 @@ export function Composer({
   const [active, setActive] = useState(0)
   const [entries, setEntries] = useState<FileEntry[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = Array.from(e.target.files ?? [])
+    if (f.length) setFiles((p) => [...p, ...f])
+    e.target.value = ''
+  }
 
   // Slash query: whole-input "/token" with no whitespace yet.
   const slashQuery = useMemo(() => {
@@ -147,9 +163,26 @@ export function Composer({
           disabled={disabled}
         />
       </AttachmentDrop>
-      {/* Action row: mode toggle inline on the left, send/stop on the right. */}
-      <div className="composer-actions">
-        <AutonomyToggle mode={mode} onChange={onModeChange} />
+      <div className="composer-bar">
+        <div className="composer-bar__left">
+          <button
+            type="button"
+            className="composer-bar__btn"
+            data-testid="attach-btn"
+            onClick={() => fileRef.current?.click()}
+            aria-label={t('composer.attach', 'Attach files')}
+          >
+            <Paperclip size={15} />
+          </button>
+          <input ref={fileRef} data-testid="attach-input" type="file" multiple hidden onChange={onPickFiles} />
+          {models.length > 0 && onModelChange && (
+            <ModelSwitcher label={activeModel || t('composer.model', 'Model')} activeId={activeModel} onPick={onModelChange} />
+          )}
+          {onEffortChange && (
+            <EffortSwitcher levels={effortLevels} current={effort} disabled={streaming} onPick={onEffortChange} />
+          )}
+          <ModeMenu mode={mode} onChange={onModeChange} />
+        </div>
         <SendStopButton
           streaming={streaming}
           disabled={disabled || (!text.trim() && pills.length === 0 && files.length === 0)}

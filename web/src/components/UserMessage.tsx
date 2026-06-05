@@ -23,35 +23,42 @@ export function UserMessage({ text, pills = [], messageIndex = 0, onRewind, onFo
   const hasActions = onRewind != null || onFork != null || onSummarize != null
   return (
     <div className="msg msg--user">
-      <div className="msg__label">
-        {t('msg.you', 'You')}
-        {hasActions && (
-          <button
-            className="msg__rewind-trigger"
-            data-testid="rewind-trigger"
-            aria-label={t('rewind.open', 'Open rewind menu')}
-            onClick={() => setMenuOpen((o) => !o)}
-          >
-            &#8635;
-          </button>
+      <div className="msg__avatar msg__avatar--user" data-testid="msg-avatar" aria-hidden="true">
+        <span className="msg__avatar-dot" />
+      </div>
+      <div className="msg__main">
+        <div className="msg__head">
+          <span className="msg__name">{t('msg.you', 'You')}</span>
+          {hasActions && (
+            <button
+              className="msg__rewind-trigger"
+              data-testid="rewind-trigger"
+              aria-label={t('rewind.open', 'Open rewind menu')}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              &#8635;
+            </button>
+          )}
+        </div>
+        {pills.length > 0 && (
+          <div className="msg__pills">
+            {pills.map((p) => (
+              <span className="pill" key={p}>{p}</span>
+            ))}
+          </div>
+        )}
+        <div className="msg__bubble">
+          {big ? <PastedTextFold text={text} /> : <div className="msg__text">{text}</div>}
+        </div>
+        {hasActions && menuOpen && (
+          <RewindMenu
+            messageIndex={messageIndex}
+            onRewind={onRewind}
+            onFork={onFork}
+            onSummarize={onSummarize}
+          />
         )}
       </div>
-      {pills.length > 0 && (
-        <div className="msg__pills">
-          {pills.map((p) => (
-            <span className="pill" key={p}>{p}</span>
-          ))}
-        </div>
-      )}
-      {big ? <PastedTextFold text={text} /> : <div className="msg__text">{text}</div>}
-      {hasActions && menuOpen && (
-        <RewindMenu
-          messageIndex={messageIndex}
-          onRewind={onRewind}
-          onFork={onFork}
-          onSummarize={onSummarize}
-        />
-      )}
     </div>
   )
 }

@@ -22,4 +22,10 @@ describe('UserMessage', () => {
     wrap(<UserMessage text={big} />)
     expect(screen.getByText(/Pasted 40 lines/)).toBeInTheDocument()
   })
+
+  it('renders a user avatar and contained bubble', () => {
+    wrap(<UserMessage text="hello" />)
+    expect(screen.getByTestId('msg-avatar')).toBeInTheDocument()
+    expect(screen.getByText('You')).toBeInTheDocument()
+  })
 })

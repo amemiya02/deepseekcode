@@ -44,4 +44,14 @@ describe('ThemeProvider', () => {
     const { getByText } = render(<ThemeProvider><span>hello</span></ThemeProvider>)
     expect(getByText('hello')).toBeInTheDocument()
   })
+
+  it('switching mode to dark changes the --bg token', () => {
+    render(<ThemeProvider><div /></ThemeProvider>)
+    act(() => setThemeSettings({ mode: 'light' }))
+    const lightBg = document.documentElement.style.getPropertyValue('--bg')
+    act(() => setThemeSettings({ mode: 'dark' }))
+    const darkBg = document.documentElement.style.getPropertyValue('--bg')
+    expect(darkBg).not.toBe('')
+    expect(darkBg).not.toBe(lightBg) // dark palette is materially different
+  })
 })

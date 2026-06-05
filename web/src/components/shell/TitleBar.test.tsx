@@ -45,4 +45,10 @@ describe('TitleBar', () => {
     await user.click(screen.getByTestId('toggle-mode'))
     expect(useThemeStore.getState().settings.mode).toBe('dark')
   })
+
+  it('does not render the dead theme-cycle button', () => {
+    renderTitleBar()
+    expect(screen.queryByTestId('cycle-theme')).toBeNull()
+    expect(screen.getByTestId('toggle-mode')).toBeInTheDocument() // the working light/dark toggle stays
+  })
 })

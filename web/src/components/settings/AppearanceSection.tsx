@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { setThemeSettings, type ThemeSettings } from '../../lib/theme/store'
-import { type Accent, type Theme, type Density } from '../../lib/theme/tokens'
+import { type Accent, type Density } from '../../lib/theme/tokens'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
-const THEMES: Theme[] = ['graphite', 'lumen', 'halo']
 const ACCENTS: Accent[] = ['indigo', 'terracotta', 'emerald', 'amber', 'rose', 'cyan', 'violet', 'slate']
 const DENSITIES: Density[] = ['comfortable', 'compact']
 
@@ -48,14 +47,6 @@ export function AppearanceSection() {
   return (
     <div>
       <h2 className={styles.h2}>{t('settings.appearance', 'Appearance')}</h2>
-      <label className={styles.field}>
-        {t('settings.theme', 'Theme')}
-        <select className={styles.select} value={cfg.theme} onChange={(e) => void patch({ theme: e.target.value })}>
-          {THEMES.map((th) => (
-            <option key={th} value={th}>{th}</option>
-          ))}
-        </select>
-      </label>
       <label className={styles.field}>
         {t('settings.accent', 'Accent')}
         <select className={styles.select} value={cfg.accent} onChange={(e) => void patch({ accent: e.target.value })}>

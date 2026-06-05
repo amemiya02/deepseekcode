@@ -304,7 +304,7 @@ function AppInner() {
       },
       {
         id: 'toggle-locale',
-        title: t('titlebar.theme'),
+        title: t('titlebar.toggleLocale', 'Toggle language'),
         run: () => setLocale(locale === 'en' ? 'zh-CN' : 'en'),
       },
     ],

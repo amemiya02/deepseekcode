@@ -1,8 +1,8 @@
-.list { display: flex; flex-direction: column; gap: var(--s-3); }
-.group { display: flex; flex-direction: column; gap: var(--s-1); }
+.list { display: flex; flex-direction: column; gap: var(--s-4); }
+.group { display: flex; flex-direction: column; gap: 2px; }
 .groupLabel {
   margin: 0;
-  padding: 0 var(--s-2);
+  padding: var(--s-1) var(--s-2);
   font: var(--type-label);
   color: var(--text-3);
   text-transform: uppercase;

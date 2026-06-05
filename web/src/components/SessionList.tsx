@@ -46,6 +46,7 @@ export function SessionList({
             <SessionItem
               key={s.id}
               session={s}
+              now={now}
               active={s.id === activeId}
               onSelect={onSelect}
               onDelete={onDelete}

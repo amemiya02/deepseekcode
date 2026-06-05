@@ -103,6 +103,79 @@ button { font-family: inherit; }
 .cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* ── Code/diff islands — the obsidian material (§3). Always dark, in BOTH app modes. ── */
+.island {
+  /* Re-scope the mode-following surface/ink/border tokens to the fixed obsidian
+     palette so every token-driven child (codecard pre, diff hunks/lines) goes dark. */
+  --surface: var(--island-bg);
+  --elevated: var(--island-header);
+  --card: var(--island-card);
+  --text: var(--island-ink);
+  --text-2: var(--island-ink-2);
+  --text-3: var(--island-ink-3);
+  --border: var(--island-line);
+  --border-hair: var(--island-line-soft);
+  --accent: var(--island-accent);
+  --accent-weak: color-mix(in oklch, var(--island-dot) 22%, var(--island-card));
+  --add-bg: var(--island-add-bg);
+  --add-fg: var(--island-add-fg);
+  --del-bg: var(--island-del-bg);
+  --del-fg: var(--island-del-fg);
+  position: relative;
+  margin: 0;
+  background: var(--island-bg);
+  border: 1px solid var(--island-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+/* Spacing only when an island sits inline in the transcript prose. */
+.markdown-body .island { margin: var(--s-2) 0; }
+/* 1px top glass-edge highlight — island reads as lifted, not painted-on. */
+.island::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--island-glass-edge);
+  pointer-events: none;
+  z-index: 1;
+}
+.island__bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px var(--s-2);
+  background: var(--island-header);
+  border-bottom: 1px solid var(--island-line);
+  color: var(--island-accent);
+  font: var(--type-mono);
+}
+.island__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--island-dot); flex: none; }
+.island__label { color: var(--island-accent); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island__right { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.island__meta { display: inline-flex; gap: 8px; font: var(--type-mono); font-variant-numeric: tabular-nums; }
+.island__copy {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; color: var(--island-ink-2);
+  font: var(--type-label); cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm);
+}
+.island__copy:hover { color: var(--island-accent); background: var(--accent-weak); }
+.island__body { margin: 0; }
+.island__pre { margin: 0; padding: var(--s-2); overflow-x: auto; font: var(--type-mono); background: transparent; color: var(--island-ink); }
+.island__pre code.hljs { background: transparent; padding: 0; color: var(--island-ink); }
+
+/* Islands carry the dark hljs palette in EVERY app mode (material rule). Placed after
+   the light `.markdown-body .hljs-*` defaults so they win by source order at equal
+   specificity within an island. */
+.island .hljs-comment, .island .hljs-quote { color: #6b7488; font-style: italic; }
+.island .hljs-keyword, .island .hljs-built_in, .island .hljs-literal, .island .hljs-type { color: #c2a8ff; }
+.island .hljs-string, .island .hljs-attr, .island .hljs-meta-string { color: #7fe3b4; }
+.island .hljs-number, .island .hljs-symbol, .island .hljs-bullet { color: #f2a3a1; }
+.island .hljs-title, .island .hljs-section, .island .hljs-name { color: #8aa0ff; }
+.island .hljs-attribute, .island .hljs-variable, .island .hljs-template-variable { color: #d9a35f; }
+.island .hljs-tag { color: var(--island-ink-2); }
+
 /* (d) Code cards + brand highlight theme */
 .codecard { border: 1px solid var(--border-hair); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-1); overflow: hidden; margin: var(--s-2) 0; }
 .codecard__bar { display: flex; align-items: center; justify-content: space-between; padding: 4px var(--s-2); border-bottom: 1px solid var(--border-hair); background: var(--elevated); }

@@ -167,6 +167,10 @@ func mapAgentEvent(ev acp.AgentEvent) sseEvent {
 		return sseEvent{name: "tool_delta", data: mustJSON(map[string]any{"id": ev.ToolCallID, "delta": ev.ToolDelta})}
 	case acp.EventKindPlan:
 		return sseEvent{name: "plan_update", data: mustJSON(map[string]any{"items": ev.Plan})}
+	case acp.EventKindDuet:
+		return sseEvent{name: "duet", data: mustJSON(map[string]any{
+			"decision": ev.Decision, "reason": ev.Reason,
+		})}
 	default:
 		// EventKindInfo and any unknown kinds: emit as message_delta so the SPA
 		// can display them as prose. The legacy "step" event name is not part of

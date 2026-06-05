@@ -66,6 +66,7 @@ func TestMapLiveSignalNames(t *testing.T) {
 		{acp.AgentEvent{Kind: acp.EventKindThinking, Text: "hmm"}, "thinking_delta"},
 		{acp.AgentEvent{Kind: acp.EventKindToolDelta, ToolCallID: "c1", ToolDelta: "out"}, "tool_delta"},
 		{acp.AgentEvent{Kind: acp.EventKindPlan, Plan: []acp.PlanItem{{Text: "do", Status: "in_progress"}}}, "plan_update"},
+		{acp.AgentEvent{Kind: acp.EventKindDuet, Decision: "deny", Reason: "out of scope"}, "duet"},
 	}
 	for _, c := range cases {
 		if got := mapAgentEvent(c.in); got.name != c.name {

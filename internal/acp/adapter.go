@@ -159,6 +159,14 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 					items[i] = PlanItem{Text: it.Text, Status: it.Status}
 				}
 				onEvent(AgentEvent{Kind: EventKindPlan, Plan: items})
+			case agent.EventHookFired:
+				// Surface the Duet pro-validation result. The published decision is the
+				// merged PreToolUse-hook outcome; Duet is the pre-tool validator, and it
+				// only emits allow/deny WITH a reasoning when it actually adjudicated a
+				// destructive call. Pass-through allow(no reason)/continue is dropped.
+				if e.HookName == "PreToolUse" && e.Reason != "" && (e.Decision == "allow" || e.Decision == "deny") {
+					onEvent(AgentEvent{Kind: EventKindDuet, Decision: e.Decision, Reason: e.Reason})
+				}
 			}
 		case <-ctx.Done():
 			return ctx.Err()

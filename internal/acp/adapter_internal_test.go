@@ -273,4 +273,31 @@ func TestAdapterForwardsLiveSignals(t *testing.T) {
 	}
 }
 
+func TestAdapter_DuetHookFiredMapsToDuet(t *testing.T) {
+	// A PreToolUse hook that actually adjudicated (allow/deny WITH a reason)
+	// surfaces as a Duet AgentEvent; pass-through allow/continue is dropped.
+	bus := agent.NewBus()
+	stub := &busAgent{bus: bus, script: func(b *agent.Bus) {
+		b.Publish(agent.EventHookFired{HookName: "PreToolUse", Event: "PreToolUse", Decision: "deny", Reason: "risky"})
+		b.Publish(agent.EventHookFired{HookName: "PreToolUse", Event: "PreToolUse", Decision: "allow", Reason: ""})         // dropped
+		b.Publish(agent.EventHookFired{HookName: "PostToolUse", Event: "PostToolUse", Decision: "allow", Reason: "ok"}) // dropped (not PreToolUse)
+	}}
+	ad := &AgentAdapter{a: stub}
+	var got []AgentEvent
+	_ = ad.Run(context.Background(), "go", func(ev AgentEvent) { got = append(got, ev) })
+
+	var duet []AgentEvent
+	for _, e := range got {
+		if e.Kind == EventKindDuet {
+			duet = append(duet, e)
+		}
+	}
+	if len(duet) != 1 {
+		t.Fatalf("want 1 duet event, got %d", len(duet))
+	}
+	if duet[0].Decision != "deny" || duet[0].Reason != "risky" {
+		t.Fatalf("want deny/risky, got %q/%q", duet[0].Decision, duet[0].Reason)
+	}
+}
+
 var _ = time.Second

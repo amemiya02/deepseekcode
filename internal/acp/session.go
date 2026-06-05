@@ -32,6 +32,7 @@ const (
 	EventKindThinking   // live thinking_delta {text}
 	EventKindToolDelta  // live tool_delta {id, delta}
 	EventKindPlan       // live plan_update {items}
+	EventKindDuet       // live duet {decision, reason} — pro-validation result
 )
 
 // PermissionDecision is the user's answer to a permission request, mirroring
@@ -102,6 +103,10 @@ type AgentEvent struct {
 
 	// Plan (EventKindPlan).
 	Plan []PlanItem
+
+	// Duet (EventKindDuet): the pro-validation decision ("allow"|"deny") + reasoning
+	// (Reason is reused for the human-readable text).
+	Decision string
 }
 
 // PlanItem is one plan entry for plan_update. Status ∈ {pending,in_progress,done}.

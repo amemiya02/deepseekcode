@@ -13,10 +13,12 @@ export function DiffView({
   path = '',
   patch = '',
   onHunk = () => {},
+  readOnly = false,
 }: {
   path?: string
   patch?: string
   onHunk?: (index: number, accepted: boolean) => void
+  readOnly?: boolean
 }) {
   const t = useT()
   const hunks = parseHunks(patch)
@@ -45,14 +47,16 @@ export function DiffView({
         <div className="hunk" data-testid="diff-hunk" data-decided={decisions[i] !== null} key={i}>
           <div className="hunk__head">
             <span className="hunk__header">{hunk.header}</span>
-            <span className="hunk__actions">
-              <button data-testid="hunk-accept" disabled={decisions[i] !== null} onClick={() => decide(i, true)} aria-label={t('diff.accept', 'Accept')}>
-                <Check size={12} /> {t('diff.accept', 'Accept')}
-              </button>
-              <button data-testid="hunk-reject" disabled={decisions[i] !== null} onClick={() => decide(i, false)} aria-label={t('diff.reject', 'Reject')}>
-                <X size={12} /> {t('diff.reject', 'Reject')}
-              </button>
-            </span>
+            {!readOnly && (
+              <span className="hunk__actions">
+                <button data-testid="hunk-accept" disabled={decisions[i] !== null} onClick={() => decide(i, true)} aria-label={t('diff.accept', 'Accept')}>
+                  <Check size={12} /> {t('diff.accept', 'Accept')}
+                </button>
+                <button data-testid="hunk-reject" disabled={decisions[i] !== null} onClick={() => decide(i, false)} aria-label={t('diff.reject', 'Reject')}>
+                  <X size={12} /> {t('diff.reject', 'Reject')}
+                </button>
+              </span>
+            )}
           </div>
           <div className="hunk__lines">
             {hunk.lines.map((line, k) => (

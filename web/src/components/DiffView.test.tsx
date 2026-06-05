@@ -41,4 +41,11 @@ describe('DiffView', () => {
     await userEvent.click(screen.getAllByTestId('hunk-accept')[0])
     expect(screen.getAllByTestId('hunk-accept')[0]).toBeDisabled()
   })
+
+  it('hides per-hunk actions when readOnly', () => {
+    wrap(<DiffView path="a.ts" patch={PATCH} readOnly />)
+    expect(screen.queryByTestId('hunk-accept')).toBeNull()
+    expect(screen.queryByTestId('hunk-reject')).toBeNull()
+    expect(screen.getAllByTestId('diff-hunk').length).toBeGreaterThan(0)
+  })
 })

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
-import { setThemeSettings } from '../../lib/theme/store'
+import { setThemeSettings, type ThemeSettings } from '../../lib/theme/store'
 import { type Accent, type Theme, type Density } from '../../lib/theme/tokens'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
@@ -29,8 +29,12 @@ export function AppearanceSection() {
 
   async function patch(p: Partial<ConfigDTO>) {
     setCfg((prev) => (prev ? { ...prev, ...p } : prev))
-    // Live-apply visual settings before the round-trip so the change is instant.
-    setThemeSettings({ theme: p.theme as Theme, accent: p.accent as Accent, density: p.density as Density })
+    // Live-apply ONLY the visual keys that actually changed — never spread
+    // undefined siblings, which would wipe theme/density in the theme store.
+    const visual: Partial<ThemeSettings> = {}
+    if (p.accent !== undefined) visual.accent = p.accent as Accent
+    if (p.density !== undefined) visual.density = p.density as Density
+    if (Object.keys(visual).length > 0) setThemeSettings(visual)
     try {
       setCfg(await saveConfig(p))
     } catch (e) {

@@ -274,6 +274,11 @@ function AppInner() {
   const onModelChange = (id: string) => {
     setModel(id)
     if (sessionId) apiSetModel(sessionId, id).catch(() => {})
+    const desc = models.find((m) => m.id === id)?.effort
+    if (desc && desc.kind === 'levels' && desc.default && !(desc.levels ?? []).includes(effort)) {
+      setEffort(desc.default)
+      if (sessionId) apiSetEffort(sessionId, desc.default).catch(() => {})
+    }
   }
   const onEffortChange = (level: string) => {
     setEffort(level)
@@ -397,6 +402,15 @@ function AppInner() {
 
   const editApproval = isEditApproval(pendingPermission)
 
+  // Capability-driven effort: derive the active model's effort descriptor and
+  // the levels to pass to Composer (→ EffortSwitcher). kind 'none' → [] hides
+  // the effort chip; otherwise use the model's advertised levels, falling back
+  // to the global EFFORT_LEVELS when no descriptor is present.
+  const activeModelInfo = models.find((m) => m.id === model)
+  const effortDesc = activeModelInfo?.effort
+  const effortLevels =
+    effortDesc?.kind === 'none' ? [] : (effortDesc?.levels ?? [...EFFORT_LEVELS])
+
   const conversation = (
     <div data-testid="zone-conversation" className="conversation-zone">
       <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
@@ -416,7 +430,7 @@ function AppInner() {
         models={models}
         activeModel={model}
         effort={effort}
-        effortLevels={[...EFFORT_LEVELS]}
+        effortLevels={effortLevels}
         onModelChange={onModelChange}
         onEffortChange={onEffortChange}
       />

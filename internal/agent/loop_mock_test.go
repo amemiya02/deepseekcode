@@ -91,7 +91,7 @@ type steerTool struct {
 }
 
 func (steerTool) Name() string        { return "go" }
-func (steerTool) Description() string  { return "noop tool that triggers a mid-turn steer" }
+func (steerTool) Description() string { return "noop tool that triggers a mid-turn steer" }
 func (steerTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
@@ -148,6 +148,103 @@ func TestLoopMidTurnSteerInjectsBeforeNextStep(t *testing.T) {
 	}
 	if !sawSteer {
 		t.Fatalf("steer text %q absent from the second request as a user message; body=%s", "now do X", srv.Requests()[1])
+	}
+}
+
+// gateTool parks step 1: Execute closes `entered` (so the test knows the turn
+// is live and on the agent goroutine) and then blocks on `release`. This gives
+// the test goroutine a window to call a.Steer concurrently — from a goroutine
+// OTHER than the one driving Run — exercising the real cross-goroutine path the
+// steerMu mutex guards (and that the -race detector watches).
+type gateTool struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (gateTool) Name() string        { return "gate" }
+func (gateTool) Description() string { return "blocks until the test releases it" }
+func (gateTool) Parameters() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (g gateTool) Execute(_ context.Context, _ json.RawMessage) (tools.Result, error) {
+	close(g.entered)
+	<-g.release
+	return tools.Result{Content: "ok"}, nil
+}
+
+// TestLoopConcurrentSteerFromOtherGoroutine is the race-detector counterpart to
+// TestLoopMidTurnSteerInjectsBeforeNextStep. There, Steer is called from inside
+// the tool executor (the agent goroutine). Here, Run executes on its own
+// goroutine while the test calls a.Steer from the MAIN test goroutine, with the
+// turn parked mid-step on gateTool — so steerMu actually arbitrates a true
+// concurrent write/drain across two goroutines. Run under `go test -race` this
+// fails loudly if the steerQueue access is unsynchronised.
+func TestLoopConcurrentSteerFromOtherGoroutine(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{
+			ToolCalls: []llmtest.ToolCall{{ID: "call_1", Name: "gate", Args: `{}`}},
+			Finish:    "stop",
+		},
+		llmtest.Turn{Text: "done"},
+	)
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	gate := gateTool{entered: make(chan struct{}), release: make(chan struct{})}
+	a.Tools.Register(gate)
+
+	type result struct {
+		reason StopReason
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		reason, err := a.Run(context.Background(), "start")
+		done <- result{reason, err}
+	}()
+
+	// Wait until the turn is genuinely in flight (step 1 parked in the tool),
+	// then steer from THIS goroutine — concurrent with the live Run goroutine.
+	select {
+	case <-gate.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tool never executed; Run did not reach step 1")
+	}
+	a.Steer("now do X")
+	close(gate.release) // let step 1 finish; the loop drains the steer for step 2
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("Run: %v", r.err)
+		}
+		if r.reason != StopModelDone {
+			t.Fatalf("reason = %v, want StopModelDone", r.reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not complete after the gate released")
+	}
+
+	if srv.Count() < 2 {
+		t.Fatalf("served %d requests, want >= 2 (the steer must drive a second step)", srv.Count())
+	}
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(srv.Requests()[1], &req); err != nil {
+		t.Fatalf("decode second request: %v", err)
+	}
+	var sawSteer bool
+	for _, m := range req.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, "now do X") {
+			sawSteer = true
+		}
+	}
+	if !sawSteer {
+		t.Fatalf("concurrently-queued steer %q absent from the second request; body=%s", "now do X", srv.Requests()[1])
 	}
 }
 

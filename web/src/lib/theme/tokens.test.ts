@@ -13,6 +13,7 @@ const REQUIRED_KEYS = [
   '--s-1', '--s-2', '--s-3', '--s-4', '--s-5', '--s-6', '--s-7', '--s-8',
   '--r-sm', '--r-md', '--r-lg', '--r-xl',
   '--ease-standard', '--dur-fast', '--dur-base', '--dur-slow',
+  '--island-bg', '--island-header', '--island-ink', '--island-accent', '--island-dot',
 ] as const
 
 const themes: Theme[] = ['graphite', 'lumen', 'halo']
@@ -70,6 +71,30 @@ describe('buildTokens', () => {
     const comf = buildTokens({ theme: 'halo', mode: 'light', density: 'comfortable', accent: 'indigo' })
     const comp = buildTokens({ theme: 'halo', mode: 'light', density: 'compact', accent: 'indigo' })
     expect(parseFloat(comp['--s-4'])).toBeLessThan(parseFloat(comf['--s-4']))
+  })
+
+  it('emits a fixed obsidian island palette identical in every mode (spec §3 material rule)', () => {
+    const ISLAND: Record<string, string> = {
+      '--island-bg': '#0b0d13',
+      '--island-header': '#0f1320',
+      '--island-card': '#11141d',
+      '--island-ink': '#d6dae4',
+      '--island-ink-2': '#9aa3b4',
+      '--island-ink-3': '#6b7385',
+      '--island-line': '#1d2230',
+      '--island-line-soft': '#161b27',
+      '--island-accent': '#7d97ff',
+      '--island-dot': '#4d6bfe',
+      '--island-glass-edge': 'oklch(1 0 0 / 0.08)',
+      '--island-add-fg': '#7fe3b4',
+      '--island-del-fg': '#f2a3a1',
+    }
+    for (const mode of modes) {
+      const tok = buildTokens({ theme: 'graphite', mode, density: 'comfortable', accent: 'indigo' })
+      for (const [k, v] of Object.entries(ISLAND)) {
+        expect(tok[k], `${mode} ${k}`).toBe(v)
+      }
+    }
   })
 
   it('high-contrast mode strengthens the border token vs dark', () => {

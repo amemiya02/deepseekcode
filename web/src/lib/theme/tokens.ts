@@ -176,6 +176,25 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--add-fg': isLight ? '#1f7a52' : '#7fe3b4',
     '--del-bg': isLight ? '#fdeceb' : 'color-mix(in oklch, #e5484d 18%, #0b0d13)',
     '--del-fg': isLight ? '#b4322f' : '#f2a3a1',
+    // ── Code/diff "island" — ALWAYS obsidian, identical in every mode (§3 material rule).
+    // A fixed dark material: light mode = paper-vs-obsidian contrast; dark mode = island
+    // one step deeper than the #11141d surface + a brand glass edge. Mode-independent on
+    // purpose, so `.island` (app.css) can re-scope surface/ink/border to these anywhere.
+    '--island-bg': DARK.bg, // #0b0d13 — island body
+    '--island-header': DARK.bg2, // #0f1320 — brand header strip
+    '--island-card': DARK.surface, // #11141d — inset rows
+    '--island-ink': DARK.ink, // #d6dae4
+    '--island-ink-2': DARK.inkSoft, // #9aa3b4
+    '--island-ink-3': DARK.inkFaint, // #6b7385
+    '--island-line': DARK.line, // #1d2230
+    '--island-line-soft': DARK.lineSoft, // #161b27
+    '--island-accent': DARK.accentText, // #7d97ff — legible label/keyword text on dark
+    '--island-dot': ACCENT, // #4d6bfe — saturated brand dot in the header
+    '--island-glass-edge': 'oklch(1 0 0 / 0.08)',
+    '--island-add-bg': 'color-mix(in oklch, #3ecf8e 18%, #0b0d13)',
+    '--island-add-fg': '#7fe3b4',
+    '--island-del-bg': 'color-mix(in oklch, #e5484d 18%, #0b0d13)',
+    '--island-del-fg': '#f2a3a1',
     // Type roles: "weight size/line-height tracking" bundled per role.
     '--type-sans': SANS,
     '--type-display': '600 28px/34px -0.02em',

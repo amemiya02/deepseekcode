@@ -168,10 +168,8 @@ func TestCancelUnknownSession(t *testing.T) {
 //   - known session: 200, steer reaches the runner
 //   - unknown session: 200 (idempotent no-op, like cancel)
 func TestSteerEndpoint(t *testing.T) {
-	var steered []string
-	factory := func(string) (acp.AgentRunner, error) {
-		return &recordingSteerAgent{record: func(s string) { steered = append(steered, s) }}, nil
-	}
+	agent := &recordingSteerAgent{}
+	factory := func(string) (acp.AgentRunner, error) { return agent, nil }
 	sm := acp.NewSessionManager(factory)
 	h := gateway.NewHandler(sm, "")
 	ts := httptest.NewServer(h)
@@ -198,6 +196,7 @@ func TestSteerEndpoint(t *testing.T) {
 		t.Fatalf("POST /v1/steer known session: got %d, want 200", r.StatusCode)
 	}
 	r.Body.Close()
+	steered := agent.Steered()
 	if len(steered) != 1 || steered[0] != "focus here" {
 		t.Fatalf("expected steer to reach runner with 'focus here', got %v", steered)
 	}
@@ -216,8 +215,11 @@ func TestSteerEndpoint(t *testing.T) {
 
 // recordingSteerAgent is an AgentRunner that records Steer calls and completes
 // its Run immediately, used by TestSteerEndpoint.
+// A mutex guards the steered slice so writes from the httptest handler goroutine
+// and reads from the test goroutine are race-detector clean.
 type recordingSteerAgent struct {
-	record func(string)
+	mu      sync.Mutex
+	steered []string
 }
 
 func (a *recordingSteerAgent) Run(_ context.Context, _ string, onEvent func(acp.AgentEvent)) error {
@@ -226,9 +228,18 @@ func (a *recordingSteerAgent) Run(_ context.Context, _ string, onEvent func(acp.
 }
 
 func (a *recordingSteerAgent) Steer(text string) {
-	if a.record != nil {
-		a.record(text)
-	}
+	a.mu.Lock()
+	a.steered = append(a.steered, text)
+	a.mu.Unlock()
+}
+
+// Steered returns a snapshot of the recorded steer calls.
+func (a *recordingSteerAgent) Steered() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.steered))
+	copy(out, a.steered)
+	return out
 }
 
 // TestPromptWhileActiveSteers verifies the double-POST race guard: when a turn
@@ -289,33 +300,31 @@ func TestPromptWhileActiveSteers(t *testing.T) {
 	if n := agent.runs.Load(); n != 1 {
 		t.Fatalf("Run called %d times, want exactly 1 (second prompt must steer not re-run)", n)
 	}
-	steered := agent.steered.Load().([]string)
+	steered := agent.Steered()
 	if len(steered) != 1 || steered[0] != "second" {
 		t.Fatalf("expected steer 'second', got %v", steered)
 	}
 }
 
 // blockingSteerAgent parks in Run until release is closed.
-// It uses sync/atomic for runCount and a mutex-protected slice for steered
-// texts so the race detector is satisfied when the test goroutine reads them
-// after the run goroutine writes them.
+// It uses atomic.Int32 for the run count and a plain []string guarded by mu
+// for steered texts. The test goroutine reads both only after the done channel
+// is closed, which is the formal happens-before boundary.
 type blockingSteerAgent struct {
 	release chan struct{}
 	entered chan struct{}
 	done    chan struct{}
 	runs    atomic.Int32
 	mu      sync.Mutex
-	steered atomic.Value // holds []string
+	steered []string
 }
 
 func newBlockingSteerAgent(release chan struct{}) *blockingSteerAgent {
-	a := &blockingSteerAgent{
+	return &blockingSteerAgent{
 		release: release,
 		entered: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	a.steered.Store([]string(nil))
-	return a
 }
 
 func (a *blockingSteerAgent) Run(ctx context.Context, _ string, onEvent func(acp.AgentEvent)) error {
@@ -332,7 +341,15 @@ func (a *blockingSteerAgent) Run(ctx context.Context, _ string, onEvent func(acp
 
 func (a *blockingSteerAgent) Steer(text string) {
 	a.mu.Lock()
-	prev, _ := a.steered.Load().([]string)
-	a.steered.Store(append(prev, text))
+	a.steered = append(a.steered, text)
 	a.mu.Unlock()
+}
+
+// Steered returns a snapshot; call only after a.done is closed.
+func (a *blockingSteerAgent) Steered() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.steered))
+	copy(out, a.steered)
+	return out
 }

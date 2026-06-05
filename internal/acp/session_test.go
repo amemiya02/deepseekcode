@@ -3,6 +3,7 @@ package acp_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -124,10 +125,12 @@ func TestSessionManagerSteer(t *testing.T) {
 // mutex protects the sessions map under the -race detector. Neither call must
 // panic or produce a data race even when they interleave at the map level.
 func TestSessionManagerSteerCancelRace(t *testing.T) {
-	// blockingFactory returns a runner whose Run blocks until ctx is cancelled,
-	// giving the test goroutines a live session to race against.
+	// blockingFactory returns a runner whose Run closes entered as soon as it
+	// is called, giving the test a deterministic signal that Run is live before
+	// the concurrent Steer+Cancel are fired.
+	entered := make(chan struct{})
 	blockingFactory := func(string) (acp.AgentRunner, error) {
-		return &blockingSteerCancel{}, nil
+		return &blockingSteerCancel{entered: entered}, nil
 	}
 	sm := acp.NewSessionManager(blockingFactory)
 	id, err := sm.NewSession(context.Background(), "")
@@ -143,8 +146,12 @@ func TestSessionManagerSteerCancelRace(t *testing.T) {
 		_ = sm.Prompt(sm.SessionCtx(id), id, "start", func(acp.AgentEvent) {})
 	}()
 
-	// Give Run a moment to enter the runner.
-	time.Sleep(5 * time.Millisecond)
+	// Wait until Run is actually executing before firing concurrent ops.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run never entered")
+	}
 
 	// Fire Steer and Cancel concurrently from two goroutines — the race detector
 	// flags any unsynchronised access to the sessions map.
@@ -169,9 +176,15 @@ func TestSessionManagerSteerCancelRace(t *testing.T) {
 }
 
 // blockingSteerCancel is an AgentRunner whose Run blocks until ctx is done.
-type blockingSteerCancel struct{}
+// It closes entered on the first call so callers can wait for a deterministic
+// signal that the goroutine is live before firing concurrent operations.
+type blockingSteerCancel struct {
+	entered     chan struct{}
+	enteredOnce sync.Once
+}
 
 func (b *blockingSteerCancel) Run(ctx context.Context, _ string, _ func(acp.AgentEvent)) error {
+	b.enteredOnce.Do(func() { close(b.entered) })
 	<-ctx.Done()
 	return ctx.Err()
 }

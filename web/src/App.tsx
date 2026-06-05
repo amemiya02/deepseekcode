@@ -20,6 +20,7 @@ import { pushToast } from './lib/toasts'
 import { setThemeSettings, useThemeStore } from './lib/theme/store'
 import { useSessionStore } from './lib/sessionStore'
 import { fetchOnboarding, fetchUpdate, type UpdateInfo } from './lib/system'
+import { fetchChanged } from './lib/workspace'
 import { Transcript } from './components/Transcript'
 import { Composer, type ComposerPayload } from './components/Composer'
 import { PermissionModal } from './components/PermissionModal'
@@ -109,7 +110,18 @@ function AppInner() {
 
   // Wave-5 state
   const [workspaceRefreshKey, setWorkspaceRefreshKey] = useState(0)
+  const [hasChanges, setHasChanges] = useState(false)
   const [composerDraft, setComposerDraft] = useState<string | undefined>(undefined)
+
+  // Lift the working-tree change count so the shell can auto-reveal the review
+  // companion (spec §4). Refetched after every turn via workspaceRefreshKey.
+  useEffect(() => {
+    let live = true
+    fetchChanged()
+      .then((r) => { if (live) setHasChanges(r.entries.length > 0) })
+      .catch(() => { if (live) setHasChanges(false) })
+    return () => { live = false }
+  }, [workspaceRefreshKey])
 
   // Wave-4 state
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
@@ -423,7 +435,7 @@ function AppInner() {
           {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
           <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
           <div className={styles.appBody}>
-            <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} />
+            <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
           </div>
           <div data-testid="hero-statusbar">
             <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />

@@ -12,11 +12,26 @@ beforeEach(() => {
 })
 
 describe('App shell composition', () => {
-  it('renders the three workspace zones', () => {
+  it('renders the three workspace zones', async () => {
+    // Stub fetch so /v1/changed returns a non-empty working tree, causing
+    // hasChanges=true and the workspace zone to auto-reveal.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/v1/changed')) {
+          return Promise.resolve({
+            ok: true, status: 200,
+            json: async () => ({ entries: [{ path: 'main.go', status: 'M', deleted: false }] }),
+          } as Response)
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response)
+      }),
+    )
+    vi.stubGlobal('EventSource', vi.fn().mockImplementation(() => ({ close: vi.fn(), addEventListener: vi.fn() })))
     render(<App />)
     expect(screen.getByTestId('zone-sessions')).toBeInTheDocument()
     expect(screen.getByTestId('zone-conversation')).toBeInTheDocument()
-    expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
+    expect(await screen.findByTestId('zone-workspace')).toBeInTheDocument()
   })
 
   it('applies theme tokens to :root via ThemeProvider', () => {
@@ -156,7 +171,8 @@ describe('App workspace zone (SP5)', () => {
 
   it('mounts review-hero and telemetry-toggle inside zone-workspace (no tabs)', async () => {
     render(<App />)
-    const zone = screen.getByTestId('zone-workspace')
+    // Wait for hasChanges to resolve (fetchChanged effect is async)
+    const zone = await screen.findByTestId('zone-workspace')
     // No workspace tabs — the old cockpit/workspace tablist is gone
     expect(within(zone).queryByTestId('ws-tab-cockpit')).toBeNull()
     expect(within(zone).queryByTestId('ws-tab-workspace')).toBeNull()
@@ -229,8 +245,25 @@ describe('App — full shell integration (Wave 0)', () => {
   })
 
   it('workspace zone has review-hero and telemetry-toggle (no tabs)', async () => {
+    // Override fetch for this test so /v1/changed returns entries → hasChanges=true
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/v1/sessions')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ sessions: [] }) } as Response)
+        }
+        if (typeof url === 'string' && url.includes('/v1/changed')) {
+          return Promise.resolve({
+            ok: true, status: 200,
+            json: async () => ({ entries: [{ path: 'main.go', status: 'M', deleted: false }] }),
+          } as Response)
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ entries: [] }) } as Response)
+      }),
+    )
     render(<App />)
-    const zone = screen.getByTestId('zone-workspace')
+    // Wait for hasChanges to resolve (fetchChanged effect is async)
+    const zone = await screen.findByTestId('zone-workspace')
     expect(await within(zone).findByTestId('review-hero')).toBeInTheDocument()
     expect(within(zone).getByTestId('telemetry-toggle')).toBeInTheDocument()
     expect(within(zone).queryByTestId('ws-tab-cockpit')).toBeNull()

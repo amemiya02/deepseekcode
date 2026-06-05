@@ -23,6 +23,7 @@ import { fetchOnboarding, fetchUpdate, type UpdateInfo } from './lib/system'
 import { Transcript } from './components/Transcript'
 import { Composer, type ComposerPayload } from './components/Composer'
 import { PermissionModal } from './components/PermissionModal'
+import { ApprovalGate } from './components/ApprovalGate'
 import { AskCard } from './components/AskCard'
 import { PlanTodoPanel } from './components/PlanTodoPanel'
 import {
@@ -38,6 +39,7 @@ import {
   EFFORT_LEVELS,
 } from './lib/api'
 import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, TurnDoneEvent, PlanUpdateEvent, ModelInfo } from './lib/api'
+import { isEditApproval } from './lib/approval'
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
 import type { AutonomyMode } from './lib/autonomy'
@@ -69,8 +71,9 @@ function AppInner() {
     if (!import.meta.env.DEV) return
     const name = new URLSearchParams(window.location.search).get('fixture')
     if (!name) return
-    import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels, sessionsFixture }) => {
+    import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels, sessionsFixture, permissionFixtures }) => {
       if (fixtures[name]) setItems(fixtures[name])
+      if (permissionFixtures[name]) setPendingPermission(permissionFixtures[name])
       setSlashCommands(demoCommands)
       setModels(demoModels)
       setModel('deepseek-chat')
@@ -371,11 +374,16 @@ function AppInner() {
     </div>
   )
 
+  const editApproval = isEditApproval(pendingPermission)
+
   const conversation = (
     <div data-testid="zone-conversation" className="conversation-zone">
       <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
       <PlanTodoPanel items={planItems} onDismiss={() => setPlanItems([])} />
       {pendingAsk && <AskCard request={pendingAsk} onAnswer={onAskAnswer} onDismiss={onAskDismiss} />}
+      {pendingPermission && editApproval && (
+        <ApprovalGate request={pendingPermission} onDecide={onPermissionDecision} />
+      )}
       <Composer
         streaming={streaming}
         mode={mode}
@@ -392,7 +400,7 @@ function AppInner() {
         onEffortChange={onEffortChange}
       />
       <PermissionModal
-        open={pendingPermission !== null}
+        open={pendingPermission !== null && !editApproval}
         request={pendingPermission ?? EMPTY_PERMISSION}
         onDecide={onPermissionDecision}
       />

@@ -1,6 +1,6 @@
 import type { TranscriptItem } from './transcript'
 import type { SlashCommand } from '../components/SlashMenu'
-import type { ModelInfo, Session } from './api'
+import type { ModelInfo, Session, PermissionRequest } from './api'
 
 export const chatFixture: TranscriptItem[] = [
   { type: 'user', text: 'Refactor the auth module and show me the diff.', pills: ['auth.ts', 'src/'] },
@@ -67,4 +67,11 @@ export function sessionsFixture(now: number): Session[] {
     mk('s6', 'Initial Wails v3 migration', 40 * d, 33),
     mk('s7', 'Repo bootstrap', 95 * d, 2),
   ]
+}
+
+// DEV-only: seed a pending permission so ?fixture=approval renders the inline gate
+// and ?fixture=approval-cmd renders the fallback modal. Tree-shaken from production.
+export const permissionFixtures: Record<string, PermissionRequest> = {
+  approval: { id: 'fx-edit', tool: 'edit_file', args: { path: 'src/parser.ts', old_string: 'function doEverything(src) {\n  /* …38 lines… */\n}', new_string: 'export function parse(src) {\n  return build(tokenize(src))\n}' }, options: [] },
+  'approval-cmd': { id: 'fx-cmd', tool: 'bash', args: { command: 'rm -rf build/' }, options: [] },
 }

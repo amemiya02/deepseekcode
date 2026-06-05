@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildTokens, THEMES, ACCENTS, type Theme, type Mode, type Density } from './tokens'
+import { buildTokens, THEMES, ACCENTS, UI_FONTS, CODE_FONTS, type Theme, type Mode, type Density } from './tokens'
 
 // Every semantic token key from spec §4.2 must be emitted for any combination.
 const REQUIRED_KEYS = [
@@ -38,12 +38,66 @@ describe('buildTokens', () => {
           }
   })
 
-  it('uses the single brand accent #4d6bfe regardless of the chosen accent (spec §3)', () => {
-    const indigo = buildTokens({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'indigo' })
-    const terracotta = buildTokens({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'terracotta' })
-    // The brand has exactly ONE accent; the accent picker no longer recolors the chrome.
-    expect(indigo['--accent']).toBe('#4d6bfe')
-    expect(terracotta['--accent']).toBe('#4d6bfe')
+  it('brand default: indigo accent stays pixel-exact #4d6bfe', () => {
+    const t = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo' })
+    expect(t['--accent']).toBe('#4d6bfe')
+    expect(t['--accent-ink']).toBe('#2b46d4')
+  })
+
+  it('non-brand accent changes the accent token (emerald ≠ brand blue)', () => {
+    const t = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'emerald' })
+    expect(t['--accent']).not.toBe('#4d6bfe')
+    // emerald hue (158) → an oklch accent anchored at that hue (anchored to the
+    // hue position in the oklch(L C H) syntax, not just any substring '158').
+    expect(t['--accent']).toMatch(/oklch\([^)]*\s158[\s/)]/)
+  })
+
+  it('dark mode non-indigo accent: derives the dark accent family (color-mix + reduced chroma)', () => {
+    const t = buildTokens({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'emerald' })
+    // base accent stays the OKLCH base at the emerald hue
+    expect(t['--accent']).toMatch(/oklch\([^)]*\s158[\s/)]/)
+    // dark text variant: reduced chroma (0.15 * 0.9 = 0.135) at lighter L
+    expect(t['--accent-text']).toBe('oklch(0.74 0.135 158)')
+    // weak/mist on dark are color-mix toward the island body, anchored on the base
+    expect(t['--accent-weak']).toBe('color-mix(in oklch, oklch(0.62 0.15 158) 22%, #11141d)')
+    expect(t['--accent-mist']).toBe('color-mix(in oklch, oklch(0.62 0.15 158) 12%, #0b0d13)')
+  })
+
+  it('high-contrast non-indigo accent: brighter focus ring than dark (WCAG-safe on the HC canvas)', () => {
+    const hc = buildTokens({ theme: 'graphite', mode: 'hc', density: 'comfortable', accent: 'emerald' })
+    const dark = buildTokens({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'emerald' })
+    // HC gets a brighter focus ring (higher OKLCH lightness) than plain dark so it
+    // clears the 3:1 minimum against the very dark HC canvas.
+    expect(hc['--focus-ring']).toBe('oklch(0.78 0.15 158)')
+    expect(hc['--focus-ring']).not.toBe(dark['--focus-ring'])
+  })
+
+  it('high-contrast indigo keeps the pixel-exact brand accent but brightens the focus ring', () => {
+    const hc = buildTokens({ theme: 'graphite', mode: 'hc', density: 'comfortable', accent: 'indigo' })
+    // brand accent stays pixel-exact even in HC
+    expect(hc['--accent']).toBe('#4d6bfe')
+    // focus ring is the legible lighter brand blue on the dark HC canvas
+    expect(hc['--focus-ring']).toBe('#7d97ff')
+  })
+
+  it('unknown accent routes to the pixel-exact brand indigo (NOT an oklch approximation)', () => {
+    // An accent id that is not in ACCENTS must fall back to the brand contract
+    // (#4d6bfe), not to ACCENTS[0]'s OKLCH approximation oklch(0.62 0.17 274).
+    const t = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'bogus' as never })
+    expect(t['--accent']).toBe('#4d6bfe')
+    expect(t['--accent-ink']).toBe('#2b46d4')
+  })
+
+  it('fonts resolve from uiFont/codeFont (default = brand fonts)', () => {
+    // sanity: the font maps are exported with brand defaults first
+    expect(UI_FONTS[0].id).toBe('plex')
+    expect(CODE_FONTS[0].id).toBe('jetbrains')
+    const def = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo' })
+    expect(def['--type-sans']).toContain('IBM Plex Sans')
+    expect(def['--type-mono-family']).toContain('JetBrains Mono')
+    const sys = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo', uiFont: 'system', codeFont: 'sf-mono' })
+    expect(sys['--type-sans']).toContain('system-ui')
+    expect(sys['--type-mono-family']).toContain('SF Mono')
   })
 
   it('anchors the brand light palette to the exact spec §3.2 hex', () => {

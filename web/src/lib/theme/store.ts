@@ -6,6 +6,10 @@ export interface ThemeSettings {
   mode: Mode
   density: Density
   accent: Accent
+  /** UI font option id (see UI_FONTS in tokens.ts). 'plex' = brand default. */
+  uiFont: string
+  /** Code font option id (see CODE_FONTS in tokens.ts). 'jetbrains' = brand default. */
+  codeFont: string
 }
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
@@ -15,6 +19,9 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: 'light',
   density: 'comfortable',
   accent: 'indigo',
+  // Brand fonts (IBM Plex Sans / JetBrains Mono) — see UI_FONTS/CODE_FONTS.
+  uiFont: 'plex',
+  codeFont: 'jetbrains',
 }
 
 const KEY = 'dsc.theme'

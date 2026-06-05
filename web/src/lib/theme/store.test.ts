@@ -19,8 +19,34 @@ describe('theme store', () => {
   })
 
   it('persist then load round-trips the chosen settings', () => {
-    persistThemeSettings({ theme: 'lumen', mode: 'light', density: 'compact', accent: 'emerald' })
-    expect(loadThemeSettings()).toEqual({ theme: 'lumen', mode: 'light', density: 'compact', accent: 'emerald' })
+    const s = { theme: 'lumen', mode: 'light', density: 'compact', accent: 'emerald', uiFont: 'system', codeFont: 'sf-mono' } as const
+    persistThemeSettings(s)
+    expect(loadThemeSettings()).toEqual(s)
+  })
+
+  it('defaults include the brand fonts (plex / jetbrains)', () => {
+    expect(DEFAULT_THEME_SETTINGS.uiFont).toBe('plex')
+    expect(DEFAULT_THEME_SETTINGS.codeFont).toBe('jetbrains')
+  })
+
+  it('migrates older stored settings (missing fonts) by spreading defaults first', () => {
+    // A pre-P3.5 user has no uiFont/codeFont in localStorage.
+    localStorage.setItem('dsc.theme', JSON.stringify({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'rose' }))
+    const loaded = loadThemeSettings()
+    expect(loaded.uiFont).toBe('plex')
+    expect(loaded.codeFont).toBe('jetbrains')
+    expect(loaded.accent).toBe('rose') // stored value preserved
+    expect(loaded.mode).toBe('dark')
+  })
+
+  it('setThemeSettings can patch a font without wiping mode/accent', () => {
+    setThemeSettings({ mode: 'dark', accent: 'emerald' })
+    setThemeSettings({ uiFont: 'system' })
+    const s = useThemeStore.getState().settings
+    expect(s.uiFont).toBe('system')
+    expect(s.mode).toBe('dark')
+    expect(s.accent).toBe('emerald')
+    expect(s.codeFont).toBe('jetbrains') // untouched default
   })
 
   it('falls back to defaults when stored JSON is corrupt', () => {

@@ -54,4 +54,15 @@ describe('ThemeProvider', () => {
     expect(darkBg).not.toBe('')
     expect(darkBg).not.toBe(lightBg) // dark palette is materially different
   })
+
+  it('applies the chosen uiFont/codeFont from the store to the type tokens', () => {
+    render(<ThemeProvider><div /></ThemeProvider>)
+    // default = brand fonts
+    expect(document.documentElement.style.getPropertyValue('--type-sans')).toContain('IBM Plex Sans')
+    expect(document.documentElement.style.getPropertyValue('--type-mono-family')).toContain('JetBrains Mono')
+    // switching the font setting flows through buildTokens onto :root
+    act(() => setThemeSettings({ uiFont: 'system', codeFont: 'sf-mono' }))
+    expect(document.documentElement.style.getPropertyValue('--type-sans')).toContain('system-ui')
+    expect(document.documentElement.style.getPropertyValue('--type-mono-family')).toContain('SF Mono')
+  })
 })

@@ -47,6 +47,8 @@ export interface TokenInput {
   mode: Mode
   density: Density
   accent: Accent
+  uiFont?: string
+  codeFont?: string
 }
 
 function spacingScale(density: Density): number {
@@ -60,6 +62,22 @@ function spacingScale(density: Density): number {
 const SANS =
   "'IBM Plex Sans', 'IBM Plex Sans SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif"
 const MONO = "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace"
+
+/** UI font options (id → full font-family stack). 'plex' is the brand default. */
+export const UI_FONTS: { id: string; stack: string }[] = [
+  { id: 'plex', stack: SANS },
+  { id: 'system', stack: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif' },
+  { id: 'inter', stack: `'Inter', ${SANS}` },
+]
+/** Code font options. 'jetbrains' is the brand default. */
+export const CODE_FONTS: { id: string; stack: string }[] = [
+  { id: 'jetbrains', stack: MONO },
+  { id: 'plex-mono', stack: "'IBM Plex Mono', ui-monospace, 'SF Mono', monospace" },
+  { id: 'sf-mono', stack: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace" },
+]
+function resolveFont(opts: { id: string; stack: string }[], id: string | undefined, fallback: string): string {
+  return opts.find((o) => o.id === id)?.stack ?? fallback
+}
 
 /** The single brand accent. One blue, everywhere. */
 const ACCENT = '#4d6bfe'
@@ -93,6 +111,57 @@ const DARK = {
   accentText: '#7d97ff', // lighter accent for legibility on dark
 } as const
 
+// accentScale returns the accent token family for the chosen accent. The brand
+// accent (indigo) stays PIXEL-EXACT (#4d6bfe family — the brand contract); other
+// accents are OKLCH-derived from their ACCENTS def so the picker is genuinely
+// live. Surfaces/neutrals are unaffected — this is an accent-only extension, not
+// a token-generator rewrite.
+//
+// `mode` (not a boolean) is taken so HC is distinct from plain dark: HC shares
+// the dark canvas but needs a BRIGHTER focus ring to clear WCAG 3:1 against the
+// near-black HC bg, so `focusRing` is a separate field from `accent` (the brand
+// accent token stays pixel-exact even in HC; only the ring brightens).
+function accentScale(accent: Accent, mode: Mode) {
+  const isLight = mode === 'light'
+  const isHC = mode === 'hc'
+  // The brand indigo is pixel-exact in every mode. An UNKNOWN accent (not in
+  // ACCENTS) must ALSO route here — falling back to the brand contract (#4d6bfe),
+  // never to ACCENTS[0]'s OKLCH approximation oklch(0.62 0.17 274), which would
+  // render a different value despite the same indigo intent.
+  if (accent === 'indigo' || !ACCENTS.some((x) => x.id === accent)) {
+    return {
+      accent: ACCENT,
+      ink: ACCENT_INK,
+      deep: ACCENT_DEEP,
+      text: isLight ? ACCENT_INK : DARK.accentText,
+      weak: isLight ? ACCENT_WEAK : 'color-mix(in oklch, #4d6bfe 22%, #11141d)',
+      mist: isLight ? ACCENT_MIST : 'color-mix(in oklch, #4d6bfe 12%, #0b0d13)',
+      // HC focus ring = the legible lighter brand blue (#7d97ff) on the dark HC
+      // canvas; light/dark keep the saturated brand blue as the ring.
+      focusRing: isHC ? DARK.accentText : ACCENT,
+      glow: '0 6px 18px -6px rgba(77,107,254,.6)',
+      glowHover: '0 8px 22px -8px rgba(77,107,254,.7)',
+    }
+  }
+  // Non-brand accent: OKLCH-derived. Guaranteed present (the !some() guard above
+  // routes any unknown id to the indigo branch), so `find` cannot miss.
+  const a = ACCENTS.find((x) => x.id === accent)!
+  const base = `oklch(0.62 ${a.c} ${a.h})`
+  return {
+    accent: base,
+    ink: `oklch(0.52 ${a.c} ${a.h})`,
+    deep: `oklch(0.42 ${a.c} ${a.h})`,
+    text: isLight ? `oklch(0.48 ${a.c} ${a.h})` : `oklch(0.74 ${(a.c * 0.9).toFixed(3)} ${a.h})`,
+    weak: isLight ? `oklch(0.96 ${(a.c * 0.18).toFixed(3)} ${a.h})` : `color-mix(in oklch, ${base} 22%, #11141d)`,
+    mist: isLight ? `oklch(0.985 ${(a.c * 0.1).toFixed(3)} ${a.h})` : `color-mix(in oklch, ${base} 12%, #0b0d13)`,
+    // HC: brighter ring (L 0.78) to clear 3:1 against the near-black HC canvas;
+    // light/dark use the base (L 0.62) accent as the ring.
+    focusRing: isHC ? `oklch(0.78 ${a.c} ${a.h})` : base,
+    glow: `0 6px 18px -6px oklch(0.62 ${a.c} ${a.h} / 0.6)`,
+    glowHover: `0 8px 22px -8px oklch(0.62 ${a.c} ${a.h} / 0.7)`,
+  }
+}
+
 export function buildTokens(input: TokenInput): Record<string, string> {
   // The chrome reads a single brand accent (spec §3), so the chosen `accent`
   // and `theme` no longer steer the palette — they remain on TokenInput for the
@@ -100,6 +169,10 @@ export function buildTokens(input: TokenInput): Record<string, string> {
   // selects the brand palette below.
   const isHC = input.mode === 'hc'
   const isLight = input.mode === 'light'
+
+  const ac = accentScale(input.accent, input.mode)
+  const sans = resolveFont(UI_FONTS, input.uiFont, SANS)
+  const mono = resolveFont(CODE_FONTS, input.codeFont, MONO)
 
   const step = spacingScale(input.density)
   const sp = (n: number) => `${step * n}px`
@@ -112,10 +185,6 @@ export function buildTokens(input: TokenInput): Record<string, string> {
   const border = isHC ? '#3a4254' : isLight ? LIGHT.line : DARK.line
   const borderStrong = isHC ? '#5b6478' : isLight ? '#cfd4dc' : '#2a3142'
   const lineSoft = isLight ? LIGHT.lineSoft : DARK.lineSoft
-
-  // Accent text: lighter blue on dark for legibility; brand-ink on light.
-  const accentText = isLight ? ACCENT_INK : DARK.accentText
-  const accentWeak = isLight ? ACCENT_WEAK : 'color-mix(in oklch, #4d6bfe 22%, #11141d)'
 
   return {
     // Surface ladder (§3.2 / §3.3 brand anchors)
@@ -132,7 +201,7 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--border-strong': borderStrong,
     '--border-hair': lineSoft,
     '--line-soft': lineSoft,
-    '--focus-ring': ACCENT,
+    '--focus-ring': ac.focusRing,
     // Panel
     '--panel-pad': sp(4),
     // Glass edge — a 1px top highlight so panels read as lifted, not painted-on.
@@ -152,26 +221,26 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--text-2': p.inkSoft,
     '--text-3': p.inkFaint,
     '--text-on-accent': '#ffffff',
-    // Accent — the ONE brand blue (glow, not gradient)
-    '--accent': ACCENT,
-    '--accent-ink': ACCENT_INK,
-    '--accent-deep': ACCENT_DEEP,
-    '--accent-text': accentText,
-    '--accent-weak': accentWeak,
-    '--accent-mist': isLight ? ACCENT_MIST : 'color-mix(in oklch, #4d6bfe 12%, #0b0d13)',
+    // Accent — brand-indigo default (pixel-exact); other accents OKLCH-derived.
+    '--accent': ac.accent,
+    '--accent-ink': ac.ink,
+    '--accent-deep': ac.deep,
+    '--accent-text': ac.text,
+    '--accent-weak': ac.weak,
+    '--accent-mist': ac.mist,
     // The brand "gradient" is a glow, never a multi-hue ramp.
-    '--glow-accent': '0 6px 18px -6px rgba(77,107,254,.6)',
-    '--glow-accent-hover': '0 8px 22px -8px rgba(77,107,254,.7)',
-    // Telemetry — cockpit signal colors re-pointed to brand (no cyan/amber/violet)
-    '--cache': ACCENT, // cache → brand blue
+    '--glow-accent': ac.glow,
+    '--glow-accent-hover': ac.glowHover,
+    // Telemetry — cockpit signal colors re-pointed to the active accent
+    '--cache': ac.accent, // cache → accent
     '--cost': p.ink, // cost → ink
-    '--route': isLight ? ACCENT_INK : DARK.accentText, // route → brand tint
+    '--route': ac.text, // route → accent tint
     '--ring-track': isLight ? '#e4e7ec' : '#1d2230',
     // Semantic signal colors (true status ONLY — never decoration)
     '--success': '#3ecf8e',
     '--danger': '#e5484d',
     '--warning': '#e7b15b',
-    '--info': ACCENT,
+    '--info': ac.accent,
     '--add-bg': isLight ? '#eaf7f0' : 'color-mix(in oklch, #3ecf8e 18%, #0b0d13)',
     '--add-fg': isLight ? '#1f7a52' : '#7fe3b4',
     '--del-bg': isLight ? '#fdeceb' : 'color-mix(in oklch, #e5484d 18%, #0b0d13)',
@@ -196,14 +265,14 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--island-del-bg': 'color-mix(in oklch, #e5484d 18%, #0b0d13)',
     '--island-del-fg': '#f2a3a1',
     // Type roles: "weight size/line-height tracking" bundled per role.
-    '--type-sans': SANS,
+    '--type-sans': sans,
     '--type-display': '600 28px/34px -0.02em',
     '--type-title': '600 18px/24px -0.01em',
     '--type-body': '400 14px/22px 0',
     '--type-ui': '500 13px/18px 0',
     '--type-label': '600 11px/14px 0.04em',
-    '--type-mono': `400 13px/20px 0 ${MONO}`,
-    '--type-mono-family': MONO,
+    '--type-mono': `400 13px/20px 0 ${mono}`,
+    '--type-mono-family': mono,
     // Spacing (4px grid, compact = 3px)
     '--s-1': sp(1),
     '--s-2': sp(2),

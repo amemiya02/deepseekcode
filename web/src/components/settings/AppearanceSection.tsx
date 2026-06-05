@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { useT } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { setThemeSettings, type ThemeSettings } from '../../lib/theme/store'
-import { type Accent, type Density } from '../../lib/theme/tokens'
+import { ACCENTS, type Accent, type Density } from '../../lib/theme/tokens'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
-const ACCENTS: Accent[] = ['indigo', 'terracotta', 'emerald', 'amber', 'rose', 'cyan', 'violet', 'slate']
+// Single source of truth for the accent ids — the canonical ACCENTS def from
+// tokens.ts (was duplicated here as a local array that could drift).
+const ACCENT_IDS: Accent[] = ACCENTS.map((a) => a.id)
 const DENSITIES: Density[] = ['comfortable', 'compact']
 
 export function AppearanceSection() {
@@ -51,7 +53,7 @@ export function AppearanceSection() {
       <label className={styles.field}>
         {t('settings.accent', 'Accent')}
         <select className={styles.select} value={cfg.accent} onChange={(e) => void patch({ accent: e.target.value })}>
-          {ACCENTS.map((a) => (
+          {ACCENT_IDS.map((a) => (
             <option key={a} value={a}>{a}</option>
           ))}
         </select>

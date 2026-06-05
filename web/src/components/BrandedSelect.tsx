@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useId } from 'react'
+import { useState, useRef, useCallback, useId, useEffect } from 'react'
 import { ChevronsUpDown, Check } from 'lucide-react'
 
 export interface SelectOption { value: string; label: string }
@@ -25,6 +25,8 @@ export function BrandedSelect({
   const current = options.find((o) => o.value === value)
   const currentIndex = options.findIndex((o) => o.value === value)
 
+  const listboxRef = useRef<HTMLDivElement>(null)
+
   const pick = useCallback(
     (v: string) => {
       setOpen(false)
@@ -36,9 +38,17 @@ export function BrandedSelect({
 
   const openMenu = useCallback(() => {
     setOpen(true)
-    // Focus the current item when opening
     setActiveIndex(currentIndex >= 0 ? currentIndex : 0)
   }, [currentIndex])
+
+  // Move focus to the listbox whenever it opens so keyboard events are
+  // received immediately without requiring a second interaction. This runs
+  // after React has committed the listbox DOM node, so listboxRef is valid.
+  useEffect(() => {
+    if (open) {
+      listboxRef.current?.focus()
+    }
+  }, [open])
 
   const closeMenu = useCallback(() => {
     setOpen(false)
@@ -86,9 +96,15 @@ export function BrandedSelect({
           }
           break
         }
-        case 'Escape':
-        case 'Tab': {
+        case 'Escape': {
           e.preventDefault()
+          closeMenu()
+          break
+        }
+        case 'Tab': {
+          // WAI-ARIA Listbox pattern: Tab MUST NOT be prevented — the browser
+          // advances focus to the next focusable element. We close the popup
+          // but let the event propagate so the user is never keyboard-trapped.
           closeMenu()
           break
         }
@@ -96,8 +112,6 @@ export function BrandedSelect({
     },
     [activeIndex, options, pick, closeMenu],
   )
-
-  const listboxRef = useRef<HTMLDivElement>(null)
 
   return (
     <div className="modelsw brandsel">
@@ -128,8 +142,7 @@ export function BrandedSelect({
             aria-activedescendant={activeId}
             tabIndex={-1}
             onKeyDown={handleListboxKeyDown}
-            // Allow the listbox div itself to receive focus for keyboard nav
-            // (trigger sets focus via autoFocus on open)
+            // tabIndex={-1} allows programmatic focus from openMenu()
             // eslint-disable-next-line jsx-a11y/no-noninteractive-element-to-interactive-role
           >
             {options.map((o, i) => {

@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { BrandedSelect } from './BrandedSelect'
 
 const options = [
@@ -137,5 +138,38 @@ describe('keyboard navigation', () => {
     const trigger = screen.getByTestId('sel')
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     expect(screen.getByRole('listbox')).toBeInTheDocument()
+  })
+
+  // --- Real-flow keyboard tests (focus-aware) ---
+
+  it('opening via keyboard moves focus to the listbox', async () => {
+    // userEvent drives real focus and flushes rAF, catching the gap where
+    // openMenu() never called listboxRef.current?.focus().
+    const user = userEvent.setup()
+    render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
+    const trigger = screen.getByTestId('sel')
+    trigger.focus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    expect(document.activeElement).toBe(screen.getByRole('listbox'))
+  })
+
+  it('Tab closes the listbox but does NOT prevent default (no keyboard trap)', () => {
+    // Regression: the old code called e.preventDefault() on Tab which trapped
+    // keyboard users who cannot use a mouse. Tab must close the popup and let
+    // the browser advance focus to the next focusable element.
+    render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
+    fireEvent.click(screen.getByTestId('sel'))
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+
+    const listbox = screen.getByRole('listbox')
+    // fireEvent.keyDown goes through React's synthetic event system and returns
+    // false when preventDefault() was called, true otherwise.
+    const notPrevented = fireEvent.keyDown(listbox, { key: 'Tab' })
+
+    // Listbox must close
+    expect(screen.queryByRole('listbox')).toBeNull()
+    // notPrevented===true means preventDefault() was NOT called — no keyboard trap
+    expect(notPrevented).toBe(true)
   })
 })

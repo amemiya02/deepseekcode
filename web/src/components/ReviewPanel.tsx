@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { ChangedFiles } from './ChangedFiles'
 import { DiffView } from './DiffView'
 import { CodeViewer } from './CodeViewer'
@@ -15,12 +15,33 @@ interface Preview {
   mode: 'diff' | 'file'
 }
 
+const LIST_MIN = 160, LIST_MAX = 420
+
 export function ReviewPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   const [sel, setSel] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
+  const [listW, setListW] = useState(220)
+  const drag = useRef<{ startX: number; startW: number } | null>(null)
   // Monotonic request token: a slow earlier fetch must not overwrite a newer
   // selection's preview (rapid row switches → last-click-wins, not last-resolve).
   const reqRef = useRef(0)
+
+  const onMove = useCallback((e: MouseEvent) => {
+    const d = drag.current
+    if (!d) return
+    const next = Math.min(LIST_MAX, Math.max(LIST_MIN, d.startW + (e.clientX - d.startX)))
+    setListW(next)
+  }, [])
+  const onUp = useCallback(() => {
+    drag.current = null
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }, [onMove])
+  const onDown = (e: React.MouseEvent) => {
+    drag.current = { startX: e.clientX, startW: listW }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   async function open(path: string) {
     const my = ++reqRef.current
@@ -44,10 +65,18 @@ export function ReviewPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   }
 
   return (
-    <div className={styles.review}>
+    <div className={styles.review} style={{ gridTemplateColumns: `${listW}px 6px 1fr` }}>
       <div className={styles.list}>
         <ChangedFiles refreshKey={refreshKey} selected={sel} onOpen={open} />
       </div>
+      <div
+        className={styles.splitter}
+        data-testid="review-splitter"
+        role="separator"
+        aria-orientation="vertical"
+        tabIndex={0}
+        onMouseDown={onDown}
+      />
       <div className={styles.hero} data-testid="review-hero">
         {!preview ? (
           <p className={styles.placeholder} data-testid="review-placeholder">

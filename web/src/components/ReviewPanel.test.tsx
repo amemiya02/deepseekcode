@@ -73,3 +73,14 @@ describe('ReviewPanel', () => {
     await waitFor(() => expect(screen.getByTestId('review-hero')).toBeInTheDocument())
   })
 })
+
+test('ReviewPanel exposes a draggable list|diff splitter', () => {
+  render(<ReviewPanel refreshKey={0} />)
+  const splitter = screen.getByTestId('review-splitter')
+  expect(splitter).toHaveAttribute('role', 'separator')
+  // dragging right widens the list column without throwing
+  fireEvent.mouseDown(splitter, { clientX: 200 })
+  fireEvent.mouseMove(window, { clientX: 260 })
+  fireEvent.mouseUp(window)
+  expect(splitter).toBeInTheDocument()
+})

@@ -85,6 +85,32 @@ func (s *sessionStore) list() []sessionMeta {
 	return out
 }
 
+// deriveTitle makes a short, single-line session title from the first prompt.
+// It trims whitespace, takes the first line, and caps length at ~46 runes on a
+// word boundary so the rail stays tidy. Empty input yields "New session".
+func deriveTitle(prompt string) string {
+	s := strings.TrimSpace(prompt)
+	if s == "" {
+		return "New session"
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	const max = 46
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	// Only word-truncate when the cut falls mid-word (next rune is not a space).
+	r := runes[:max]
+	if runes[max] != ' ' {
+		if j := strings.LastIndexByte(string(r), ' '); j > 0 {
+			return strings.TrimRight(string(r[:j]), " ")
+		}
+	}
+	return string(r)
+}
+
 // handleSessions implements GET /v1/sessions (list) and POST /v1/sessions (create).
 func (h *Handler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

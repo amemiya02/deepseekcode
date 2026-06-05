@@ -235,6 +235,25 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	runCtx := h.sm.SessionCtx(sessionID)
 
+	// Register/refresh UI metadata so the session rail reflects sessions started
+	// by a bare prompt (previously only POST /v1/sessions registered meta, so a
+	// prompt-created session never appeared in GET /v1/sessions).
+	nowMs := time.Now().UnixMilli()
+	if _, ok := h.sessions.get(sessionID); !ok {
+		h.sessions.put(&sessionMeta{
+			ID: sessionID, Title: deriveTitle(req.Prompt), Turns: 1,
+			CreatedAt: nowMs, UpdatedAt: nowMs,
+		})
+	} else {
+		h.sessions.update(sessionID, func(m *sessionMeta) {
+			m.Turns++
+			m.UpdatedAt = nowMs
+			if m.Title == "" || m.Title == m.ID {
+				m.Title = deriveTitle(req.Prompt)
+			}
+		})
+	}
+
 	requestID := fmt.Sprintf("req-%d", h.reqSeq.Add(1))
 	prompt := req.Prompt
 	sid := sessionID

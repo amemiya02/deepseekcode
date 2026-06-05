@@ -4,17 +4,20 @@ import { useRef, useState } from 'react'
 import { Trash2, Pencil, Check, X } from 'lucide-react'
 import { t } from '../lib/i18n'
 import type { Session } from '../lib/api'
+import { formatRelativeTime } from '../lib/format'
 import styles from './SessionItem.module.css'
 
 export function SessionItem({
   session,
   active = false,
+  now = Date.now(),
   onSelect,
   onDelete,
   onRename,
 }: {
   session: Session
   active?: boolean
+  now?: number
   onSelect?: (id: string) => void
   onDelete?: (id: string) => void
   onRename?: (id: string, title: string) => void
@@ -22,11 +25,6 @@ export function SessionItem({
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-
-  const turnLabel =
-    session.turns === 1
-      ? t('session.turnOne', '{n} turn', { n: session.turns })
-      : t('session.turnOther', '{n} turns', { n: session.turns })
 
   function startRename(e: React.MouseEvent | React.KeyboardEvent) {
     e.stopPropagation()
@@ -98,7 +96,7 @@ export function SessionItem({
       onClick={() => onSelect?.(session.id)}
     >
       <span className={styles.title}>{session.title}</span>
-      <span className={styles.meta}>{turnLabel}</span>
+      <span className={styles.meta} data-testid="session-time">{formatRelativeTime(session.updated_at, now)}</span>
       <span
         className={styles.rename}
         data-testid="session-rename"

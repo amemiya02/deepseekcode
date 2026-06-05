@@ -27,10 +27,18 @@
   transition: height var(--dur-fast) var(--ease-standard);
 }
 .item:hover { background: var(--elevated); color: var(--text); }
-.active { background: color-mix(in oklch, var(--accent) 14%, var(--surface)); color: var(--text); }
+.active { background: color-mix(in oklch, var(--accent) 12%, var(--surface)); color: var(--text); }
 .active::before { height: 58%; box-shadow: var(--glow-accent); }
 .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.meta { color: var(--text-3); font: var(--type-label); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.meta {
+  color: var(--text-3);
+  font: var(--type-label);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+.item:hover .meta,
+.item:focus-within .meta { opacity: 0; }
 .del {
   background: none;
   border: none;

@@ -176,16 +176,7 @@ button { font-family: inherit; }
 .island .hljs-attribute, .island .hljs-variable, .island .hljs-template-variable { color: #d9a35f; }
 .island .hljs-tag { color: var(--island-ink-2); }
 
-/* (d) Code cards + brand highlight theme */
-.codecard { border: 1px solid var(--border-hair); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-1); overflow: hidden; margin: var(--s-2) 0; }
-.codecard__bar { display: flex; align-items: center; justify-content: space-between; padding: 4px var(--s-2); border-bottom: 1px solid var(--border-hair); background: var(--elevated); }
-.codecard__lang { font: var(--type-label); color: var(--text-3); text-transform: lowercase; }
-.codecard__copy { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--text-2); font: var(--type-label); cursor: pointer; padding: 2px 4px; border-radius: var(--r-sm); }
-.codecard__copy:hover { color: var(--accent); background: var(--accent-weak); }
-.codecard__body { margin: 0; padding: var(--s-2); overflow-x: auto; font: var(--type-mono); background: transparent; }
-.codecard__body code.hljs { background: transparent; padding: 0; color: var(--text); }
-
-/* Brand-tuned highlight theme — light by default */
+/* (d) Brand highlight theme — light defaults; .island .hljs-* overrides above win inside islands */
 .markdown-body .hljs-comment, .markdown-body .hljs-quote { color: #8a93a3; font-style: italic; }
 .markdown-body .hljs-keyword, .markdown-body .hljs-selector-tag, .markdown-body .hljs-built_in, .markdown-body .hljs-literal, .markdown-body .hljs-type { color: #8a3ffc; }
 .markdown-body .hljs-string, .markdown-body .hljs-attr, .markdown-body .hljs-meta-string { color: #1f7a52; }
@@ -193,11 +184,6 @@ button { font-family: inherit; }
 .markdown-body .hljs-title, .markdown-body .hljs-section, .markdown-body .hljs-name { color: #4d6bfe; }
 .markdown-body .hljs-attribute, .markdown-body .hljs-variable, .markdown-body .hljs-template-variable { color: #9a5b00; }
 .markdown-body .hljs-tag { color: var(--text-2); }
-[data-mode='dark'] .markdown-body .hljs-comment, [data-mode='dark'] .markdown-body .hljs-quote { color: #6b7488; }
-[data-mode='dark'] .markdown-body .hljs-keyword, [data-mode='dark'] .markdown-body .hljs-built_in, [data-mode='dark'] .markdown-body .hljs-literal, [data-mode='dark'] .markdown-body .hljs-type { color: #c2a8ff; }
-[data-mode='dark'] .markdown-body .hljs-string, [data-mode='dark'] .markdown-body .hljs-attr { color: #7fe3b4; }
-[data-mode='dark'] .markdown-body .hljs-number, [data-mode='dark'] .markdown-body .hljs-symbol { color: #f2a3a1; }
-[data-mode='dark'] .markdown-body .hljs-title, [data-mode='dark'] .markdown-body .hljs-name { color: #8aa0ff; }
 
 /* (e) Inline code chip */
 .markdown-body code.md-code { font: var(--type-mono); background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: 0 4px; }

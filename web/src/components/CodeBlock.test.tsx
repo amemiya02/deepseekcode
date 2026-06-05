@@ -21,4 +21,13 @@ describe('CodeBlock', () => {
     fireEvent.click(screen.getByTestId('codecard-copy'))
     expect(writeText).toHaveBeenCalledWith('hello()')
   })
+
+  it('renders inside a CodeIsland', () => {
+    const { container } = render(
+      <CodeBlock className="language-ts">const x = 1</CodeBlock>,
+    )
+    expect(container.querySelector('.island')).not.toBeNull()
+    expect(screen.getByTestId('codecard-lang')).toHaveTextContent('ts')
+    expect(screen.getByTestId('codecard-copy')).toBeInTheDocument()
+  })
 })

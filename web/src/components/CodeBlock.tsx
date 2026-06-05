@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { CodeIsland } from './CodeIsland'
 
 function langOf(className?: string): string {
   const m = /language-([\w-]+)/.exec(className ?? '')
@@ -27,15 +28,16 @@ export function CodeBlock({ className, children }: { className?: string; childre
     } catch { /* no-op: clipboard may be unavailable */ }
   }
   return (
-    <div className="codecard">
-      <div className="codecard__bar">
-        <span className="codecard__lang" data-testid="codecard-lang">{lang}</span>
-        <button className="codecard__copy" data-testid="codecard-copy" onClick={copy} type="button">
+    <CodeIsland
+      label={<span className="codecard__lang" data-testid="codecard-lang">{lang}</span>}
+      actions={
+        <button className="island__copy" data-testid="codecard-copy" onClick={copy} type="button">
           {copied ? <Check size={13} /> : <Copy size={13} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
-      </div>
-      <pre className="codecard__body"><code className={`hljs ${className ?? ''}`}>{children}</code></pre>
-    </div>
+      }
+    >
+      <pre className="island__pre"><code className={`hljs ${className ?? ''}`}>{children}</code></pre>
+    </CodeIsland>
   )
 }

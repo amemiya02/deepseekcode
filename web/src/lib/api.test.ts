@@ -90,8 +90,36 @@ describe('GatewayClient — Contract 2 SSE schema', () => {
 
 import {
   listSessions, createSession, getSession, renameSession, deleteSession,
-  getTimeline, fetchCacheLedger, fetchBalance,
+  getTimeline, fetchCacheLedger, fetchBalance, fetchModelState, EFFORT_LEVELS,
 } from './api'
+
+describe('fetchModelState', () => {
+  it('maps {models,active,effort} payload to the full state shape', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ models: ['a', 'b'], active: 'a', effort: 'high' }),
+    }) as unknown as typeof fetch
+    const state = await fetchModelState()
+    expect(state.models).toEqual([{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }])
+    expect(state.active).toBe('a')
+    expect(state.effort).toBe('high')
+  })
+
+  it('tolerates a bare array response (forward-compat)', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [{ id: 'x', label: 'X' }],
+    }) as unknown as typeof fetch
+    const state = await fetchModelState()
+    expect(state.models).toEqual([{ id: 'x', label: 'X' }])
+    expect(state.active).toBe('')
+    expect(state.effort).toBe('medium')
+  })
+
+  it('EFFORT_LEVELS contains low, medium, high', () => {
+    expect([...EFFORT_LEVELS]).toEqual(['low', 'medium', 'high'])
+  })
+})
 
 describe('listSessions', () => {
   it('GETs /v1/sessions and returns the sessions array', async () => {

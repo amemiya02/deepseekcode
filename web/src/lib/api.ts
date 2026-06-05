@@ -206,6 +206,23 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   return ids.map((id) => ({ id, label: id }))
 }
 
+export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
+
+// GET /v1/models → {models:string[], active, effort}. Returns the full state
+// (fetchModels above intentionally returns only the list for the picker popover).
+export async function fetchModelState(): Promise<{ models: ModelInfo[]; active: string; effort: string }> {
+  const res = await fetch('/v1/models')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = (await res.json()) as unknown
+  if (Array.isArray(data)) return { models: data as ModelInfo[], active: '', effort: 'medium' }
+  const d = data as { models?: string[]; active?: string; effort?: string }
+  return {
+    models: (d.models ?? []).map((id) => ({ id, label: id })),
+    active: d.active ?? '',
+    effort: d.effort ?? 'medium',
+  }
+}
+
 export class GatewayClient {
   private es: EventSource | null = null
 

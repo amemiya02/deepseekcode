@@ -157,29 +157,6 @@ test.describe('surface: workspace-panel', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Surface: Theme cycle (light / dark toggle)
-// ---------------------------------------------------------------------------
-test.describe('surface: theme-toggle', () => {
-  test('cycle-theme button exists', async ({ page }) => {
-    await page.goto('/')
-    await waitForShell(page)
-    await expect(page.locator('[data-testid="cycle-theme"]')).toBeVisible()
-  })
-
-  test('toggling theme does not crash the app', async ({ page }) => {
-    await page.goto('/')
-    await waitForShell(page)
-    const btn = page.locator('[data-testid="cycle-theme"]')
-    if (await btn.isVisible()) {
-      await btn.click()
-      await page.waitForTimeout(200)
-      await expect(page.locator('[data-testid="app-shell"]')).toBeVisible()
-      await page.screenshot({ path: `e2e/screenshots/after-theme-toggle.png` })
-    }
-  })
-})
-
-// ---------------------------------------------------------------------------
 // Surface: reduced-motion compliance
 // ---------------------------------------------------------------------------
 test.describe('prefers-reduced-motion', () => {

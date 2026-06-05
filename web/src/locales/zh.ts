@@ -103,7 +103,7 @@ export const zhCN: Record<string, string> = {
   'review.pick': '选择一个变更文件以查看其差异。',
   'telemetry.cache': '缓存',
   'duet.ok': '已由 Pro 校验',
-  'duet.blocked': 'Pro 提出修改',
+  'duet.blocked': 'Pro 提出异议',
   'approval.aria': '编辑审批',
   'approval.once': '接受',
   'approval.more': '更多审批选项',

@@ -105,7 +105,7 @@ export const en: Record<string, string> = {
   'review.pick': 'Select a changed file to review its diff.',
   'telemetry.cache': 'cache',
   'duet.ok': 'Validated by Pro',
-  'duet.blocked': 'Pro proposed changes',
+  'duet.blocked': 'Pro raised a concern',
   'approval.aria': 'edit approval',
   'approval.once': 'Accept',
   'approval.more': 'More approval options',

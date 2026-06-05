@@ -238,6 +238,10 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	prompt := req.Prompt
 	sid := sessionID
 
+	// Start a fresh replay buffer for this turn so a /v1/events client that
+	// connects after the run goroutine starts still receives the whole turn.
+	h.hub.resetTurn(sid)
+
 	go func() {
 		// Per-run live-signal accumulators (one prompt = one goroutine).
 		var (
@@ -335,7 +339,7 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, unsub := h.hub.subscribe(sessionID, r.Context())
+	sub, backlog, unsub := h.hub.subscribe(sessionID, r.Context())
 	defer unsub()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -344,12 +348,21 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// Replay any frames already emitted for the current turn (the SPA opens this
+	// stream only after POST /v1/prompt returns; a fast turn can finish first).
+	for _, ev := range backlog {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data)
+		flusher.Flush()
+		if ev.name == "turn_done" {
+			return
+		}
+	}
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case ev := <-sub.ch:
-			// SSE framing: event: <name>\ndata: <payload>\n\n
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data)
 			flusher.Flush()
 			if ev.name == "turn_done" {

@@ -22,6 +22,11 @@ type subscriber struct {
 	ctx context.Context
 }
 
+// maxTurnBuffer bounds the per-session replay buffer. A turn rarely exceeds a
+// few hundred frames; when it does, the OLDEST frames are dropped but the tail
+// (including turn_done) is always retained.
+const maxTurnBuffer = 512
+
 // hub is a minimal per-session SSE fan-out. It mirrors the broadcast
 // discipline of acp.HTTPGateway (buffered channels, non-blocking sends that
 // drop on a stalled client) but speaks the SPA's named-event vocabulary rather
@@ -29,19 +34,34 @@ type subscriber struct {
 type hub struct {
 	mu      sync.Mutex
 	clients map[string][]*subscriber // sessionID -> subscribers
+	buffers map[string][]sseEvent    // sessionID -> current-turn frames (for replay)
 }
 
 func newHub() *hub {
-	return &hub{clients: make(map[string][]*subscriber)}
+	return &hub{
+		clients: make(map[string][]*subscriber),
+		buffers: make(map[string][]sseEvent),
+	}
 }
 
-// subscribe registers a subscriber for sessionID. The returned unsubscribe
-// function removes it. ctx is the request context; broadcast skips a client
-// whose ctx is done.
-func (h *hub) subscribe(sessionID string, ctx context.Context) (*subscriber, func()) {
+// resetTurn clears the replay buffer for sessionID. Called at the start of each
+// prompt so a late subscriber replays only the CURRENT turn.
+func (h *hub) resetTurn(sessionID string) {
+	h.mu.Lock()
+	delete(h.buffers, sessionID)
+	h.mu.Unlock()
+}
+
+// subscribe registers a subscriber and atomically snapshots the current-turn
+// backlog under the same lock, so every frame is delivered exactly once: frames
+// already buffered are returned as backlog; frames broadcast after this call go
+// to the channel (the subscriber is in the client list before the lock drops).
+func (h *hub) subscribe(sessionID string, ctx context.Context) (*subscriber, []sseEvent, func()) {
 	sub := &subscriber{ch: make(chan sseEvent, 64), ctx: ctx}
 	h.mu.Lock()
 	h.clients[sessionID] = append(h.clients[sessionID], sub)
+	backlog := make([]sseEvent, len(h.buffers[sessionID]))
+	copy(backlog, h.buffers[sessionID])
 	h.mu.Unlock()
 
 	unsub := func() {
@@ -58,14 +78,16 @@ func (h *hub) subscribe(sessionID string, ctx context.Context) (*subscriber, fun
 		}
 		h.mu.Unlock()
 	}
-	return sub, unsub
+	return sub, backlog, unsub
 }
 
-// broadcast delivers ev to every current subscriber of sessionID. Sends are
-// non-blocking: a subscriber whose 64-slot buffer is full has the frame dropped
-// rather than stalling the agent goroutine for every other client.
+// broadcast appends ev to the current-turn buffer (for late subscribers) and
+// delivers it to every connected subscriber. Both happen so a frame is never
+// both buffered-but-also-live for the same subscriber (subscribe snapshots the
+// buffer and joins the client list under one lock).
 func (h *hub) broadcast(sessionID string, ev sseEvent) {
 	h.mu.Lock()
+	h.buffers[sessionID] = appendBounded(h.buffers[sessionID], ev)
 	clients := make([]*subscriber, len(h.clients[sessionID]))
 	copy(clients, h.clients[sessionID])
 	h.mu.Unlock()
@@ -76,6 +98,15 @@ func (h *hub) broadcast(sessionID string, ev sseEvent) {
 		default:
 		}
 	}
+}
+
+// appendBounded appends ev, dropping the oldest frame when the cap is exceeded.
+func appendBounded(buf []sseEvent, ev sseEvent) []sseEvent {
+	buf = append(buf, ev)
+	if len(buf) > maxTurnBuffer {
+		buf = buf[len(buf)-maxTurnBuffer:]
+	}
+	return buf
 }
 
 // mapAgentEvent translates an acp.AgentEvent into a named SSE frame using the

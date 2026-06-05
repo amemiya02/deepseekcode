@@ -38,30 +38,32 @@ export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[];
           </div>
         </div>
       )}
-      {items.map((item, i) => {
-        switch (item.type) {
-          case 'user':
-            return (
-              <UserMessage
-                key={i}
-                text={item.text}
-                pills={item.pills}
-                messageIndex={i}
-                onRewind={rewindHandlers?.onRewind}
-                onFork={rewindHandlers?.onFork}
-                onSummarize={rewindHandlers?.onSummarize}
-              />
-            )
-          case 'assistant':
-            return <AssistantMessage key={i} text={item.text} streaming={item.streaming} />
-          case 'thinking':
-            return <ThinkingBlock key={i} text={item.text} />
-          case 'tool':
-            return <ToolCard key={item.id} item={item} />
-          case 'routing':
-            return <RoutingActivity key={i} from={item.from} to={item.to} reason={item.reason} />
-        }
-      })}
+      <div className="transcript__lane">
+        {items.map((item, i) => {
+          switch (item.type) {
+            case 'user':
+              return (
+                <UserMessage
+                  key={i}
+                  text={item.text}
+                  pills={item.pills}
+                  messageIndex={i}
+                  onRewind={rewindHandlers?.onRewind}
+                  onFork={rewindHandlers?.onFork}
+                  onSummarize={rewindHandlers?.onSummarize}
+                />
+              )
+            case 'assistant':
+              return <AssistantMessage key={i} text={item.text} streaming={item.streaming} />
+            case 'thinking':
+              return <ThinkingBlock key={i} text={item.text} startedAt={item.startedAt} endedAt={item.endedAt} />
+            case 'tool':
+              return <ToolCard key={item.id} item={item} />
+            case 'routing':
+              return <RoutingActivity key={i} from={item.from} to={item.to} reason={item.reason} />
+          }
+        })}
+      </div>
     </div>
   )
 }

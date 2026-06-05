@@ -28,19 +28,9 @@ button { font-family: inherit; }
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-/* Markdown */
-.markdown-body { font: var(--type-body); color: var(--text); line-height: 1.6; }
-.markdown-body pre { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--s-2); overflow-x: auto; }
-.markdown-body code.md-code { font: var(--type-mono); }
+/* Markdown + ThinkingBlock — superseded by SP2 rules in the Messages block above */
 .markdown-body table { border-collapse: collapse; }
-.markdown-body th, .markdown-body td { border: 1px solid var(--border); padding: 4px 8px; }
-
-/* ThinkingBlock */
-.thinking { border-left: 2px solid var(--border); padding-left: var(--s-2); margin: var(--s-2) 0; }
-.thinking__toggle { background: none; border: none; color: var(--text-3); font: var(--type-label); cursor: pointer; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
-.thinking__chevron { transition: transform var(--dur-fast) var(--ease-standard); }
-.thinking__chevron--open { transform: rotate(90deg); }
-.thinking__body { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-2); font: var(--type-mono); opacity: 0.85; }
+.markdown-body pre { overflow-x: auto; }
 
 /* ToolCard */
 .tool { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--card); margin: var(--s-1) 0; overflow: hidden; }
@@ -85,16 +75,83 @@ button { font-family: inherit; }
 .fold__toggle { width: 100%; text-align: left; background: var(--surface); border: none; color: var(--text-2); padding: 4px var(--s-2); cursor: pointer; font: var(--type-label); }
 .fold__body { margin: 0; padding: var(--s-2); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 320px; overflow: auto; }
 
-/* Messages */
-.msg--user { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; }
-.msg--assistant { padding: var(--s-2) var(--s-3); margin: var(--s-2) 0; }
-.msg__label { font: var(--type-label); color: var(--text-3); text-transform: uppercase; margin-bottom: 4px; }
-.msg__label--assistant { color: var(--accent); }
-.msg__pills { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+/* Messages — SP2 turn layout */
+/* (a) Lane */
+.transcript__lane { width: 100%; max-width: var(--measure); margin-inline: auto; display: flex; flex-direction: column; gap: var(--turn-gap); }
+
+/* (b) Turn layout (avatar + main) */
+.msg { display: grid; grid-template-columns: var(--avatar-size) 1fr; gap: var(--s-2); align-items: start; }
+.msg__avatar { width: var(--avatar-size); height: var(--avatar-size); border-radius: var(--r-sm); display: grid; place-items: center; flex: none; }
+.msg__avatar--assistant { background: var(--accent-mist); border: 1px solid var(--border-hair); color: var(--accent); }
+.msg__avatar--user { background: var(--surface); border: 1px solid var(--border-hair); }
+.msg__avatar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.msg__main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.msg__head { display: flex; align-items: center; gap: var(--s-2); min-height: 18px; }
+.msg__name { font: var(--type-ui); color: var(--text-2); font-weight: 600; }
+.msg__name--assistant { color: var(--accent); letter-spacing: 0; }
+.msg__rewind-trigger { background: none; border: none; color: var(--text-3); cursor: pointer; padding: 0 2px; line-height: 1; opacity: 0; transition: opacity var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
+.msg:hover .msg__rewind-trigger, .msg__rewind-trigger:focus-visible { opacity: 1; }
+.msg__rewind-trigger:hover { color: var(--accent); }
+
+/* (c) Assistant prose & user contained bubble */
+.msg--assistant .msg__body { color: var(--text); font: var(--type-body); }
+.msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
+.msg__bubble { align-self: flex-start; max-width: 100%; background: var(--accent-weak); border: 1px solid var(--border-hair); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); box-shadow: var(--shadow-1); }
+.msg__text { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
+.msg__pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .pill { background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0 6px; font: var(--type-label); }
-.msg__text, .msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
 .cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* (d) Code cards + brand highlight theme */
+.codecard { border: 1px solid var(--border-hair); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-1); overflow: hidden; margin: var(--s-2) 0; }
+.codecard__bar { display: flex; align-items: center; justify-content: space-between; padding: 4px var(--s-2); border-bottom: 1px solid var(--border-hair); background: var(--elevated); }
+.codecard__lang { font: var(--type-label); color: var(--text-3); text-transform: lowercase; }
+.codecard__copy { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--text-2); font: var(--type-label); cursor: pointer; padding: 2px 4px; border-radius: var(--r-sm); }
+.codecard__copy:hover { color: var(--accent); background: var(--accent-weak); }
+.codecard__body { margin: 0; padding: var(--s-2); overflow-x: auto; font: var(--type-mono); background: transparent; }
+.codecard__body code.hljs { background: transparent; padding: 0; color: var(--text); }
+
+/* Brand-tuned highlight theme — light by default */
+.markdown-body .hljs-comment, .markdown-body .hljs-quote { color: #8a93a3; font-style: italic; }
+.markdown-body .hljs-keyword, .markdown-body .hljs-selector-tag, .markdown-body .hljs-built_in, .markdown-body .hljs-literal, .markdown-body .hljs-type { color: #8a3ffc; }
+.markdown-body .hljs-string, .markdown-body .hljs-attr, .markdown-body .hljs-meta-string { color: #1f7a52; }
+.markdown-body .hljs-number, .markdown-body .hljs-symbol, .markdown-body .hljs-bullet { color: #b4322f; }
+.markdown-body .hljs-title, .markdown-body .hljs-section, .markdown-body .hljs-name { color: #4d6bfe; }
+.markdown-body .hljs-attribute, .markdown-body .hljs-variable, .markdown-body .hljs-template-variable { color: #9a5b00; }
+.markdown-body .hljs-tag { color: var(--text-2); }
+[data-mode='dark'] .markdown-body .hljs-comment, [data-mode='dark'] .markdown-body .hljs-quote { color: #6b7488; }
+[data-mode='dark'] .markdown-body .hljs-keyword, [data-mode='dark'] .markdown-body .hljs-built_in, [data-mode='dark'] .markdown-body .hljs-literal, [data-mode='dark'] .markdown-body .hljs-type { color: #c2a8ff; }
+[data-mode='dark'] .markdown-body .hljs-string, [data-mode='dark'] .markdown-body .hljs-attr { color: #7fe3b4; }
+[data-mode='dark'] .markdown-body .hljs-number, [data-mode='dark'] .markdown-body .hljs-symbol { color: #f2a3a1; }
+[data-mode='dark'] .markdown-body .hljs-title, [data-mode='dark'] .markdown-body .hljs-name { color: #8aa0ff; }
+
+/* (e) Inline code chip */
+.markdown-body code.md-code { font: var(--type-mono); background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: 0 4px; }
+
+/* (f) Thinking pill */
+.thinking { margin: 0; }
+.thinking__toggle { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-hair); border-radius: 999px; color: var(--text-3); font: var(--type-label); cursor: pointer; padding: 2px 10px; }
+.thinking--live .thinking__toggle { color: var(--accent); }
+.thinking--live .thinking__toggle::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: blink 1s step-end infinite; }
+.thinking__chevron { transition: transform var(--dur-fast) var(--ease-standard); }
+.thinking__chevron--open { transform: rotate(90deg); }
+.thinking__body { margin: 6px 0 0; white-space: pre-wrap; color: var(--text-2); font: var(--type-mono); background: var(--surface); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: var(--s-2); opacity: 0.92; }
+
+/* (g) Markdown prose polish */
+.markdown-body { font: var(--type-body); color: var(--text); line-height: 1.65; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: var(--s-3) 0 var(--s-1); line-height: 1.3; color: var(--text); }
+.markdown-body h1 { font: var(--type-title); font-size: 20px; }
+.markdown-body h2 { font: var(--type-title); }
+.markdown-body h3 { font-weight: 600; font-size: 15px; }
+.markdown-body p { margin: var(--s-1) 0; }
+.markdown-body ul, .markdown-body ol { margin: var(--s-1) 0; padding-left: 1.4em; }
+.markdown-body li { margin: 2px 0; }
+.markdown-body blockquote { margin: var(--s-2) 0; padding: 2px var(--s-3); border-left: 3px solid var(--accent); color: var(--text-2); }
+.markdown-body a { color: var(--accent); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body hr { border: none; border-top: 1px solid var(--border-hair); margin: var(--s-3) 0; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--border-hair); padding: 4px 8px; }
 
 /* Conversation zone — a full-height column so the transcript fills the space and the
    composer (with the pinned plan/ask cards) stays at the bottom, like every agent UI. */
@@ -183,18 +240,7 @@ button { font-family: inherit; }
 .msg__stream, .tool__body, .modelsw__item,
 .routing, .fold__body, .context-pill { font-variant-numeric: tabular-nums; }
 
-/* Transcript breathing room + readable measure. */
-.transcript { gap: var(--s-1); }
-.msg__text, .msg__stream { max-width: 78ch; }
-
-/* User message — a soft accent-tinted bubble that reads as "you" (no gradient). */
-.msg--user {
-  background: var(--accent-weak);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-1);
-  border-radius: var(--r-lg);
-}
-.msg__label--assistant { letter-spacing: 0.06em; }
+/* (brand polish — msg__label rules removed; SP2 lane + bubble handle layout) */
 
 /* Tool / diff / fold cards lift off the white canvas. */
 .tool, .diffview, .fold {

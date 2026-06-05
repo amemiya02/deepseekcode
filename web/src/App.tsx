@@ -455,7 +455,7 @@ function AppInner() {
         </div>
         <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
         <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-<OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
+        <OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
         <Toasts />
       </ErrorBoundary>
     </ThemeProvider>

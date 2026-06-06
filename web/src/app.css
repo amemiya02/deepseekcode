@@ -115,7 +115,7 @@ button { font-family: inherit; }
 .msg--user .msg__avatar { display: none; }
 .msg--user .msg__main { align-items: flex-end; }
 .msg--user .msg__head { flex-direction: row-reverse; }
-.msg--user .msg__bubble { align-self: flex-end; max-width: min(100%, 36rem); }
+.msg--user .msg__bubble { align-self: flex-end; max-width: min(100%, 36rem); border-top-right-radius: var(--r-sm); }
 .msg--user .msg__pills { justify-content: flex-end; }
 .cursor { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); vertical-align: text-bottom; animation: blink 1s step-end infinite; margin-left: 2px; }
 @keyframes blink { 50% { opacity: 0; } }

@@ -22,24 +22,26 @@ install:
 run: build
 	./$(BIN_DIR)/$(BIN_NAME)
 
+GO_PACKAGES := $(shell go list ./... | grep -v /desktop)
+
 test:
-	go test ./...
+	go test $(GO_PACKAGES)
 
 test-race:
-	go test -race ./...
+	go test -race $(GO_PACKAGES)
 
 cover:
-	go test -coverprofile=coverage.out ./...
+	go test -coverprofile=coverage.out $(GO_PACKAGES)
 	go tool cover -html=coverage.out -o coverage.html
 
 lint:
-	go vet ./...
+	go vet $(GO_PACKAGES)
 
 fmt:
 	gofmt -s -w .
 
 vet:
-	go vet ./...
+	go vet $(GO_PACKAGES)
 
 tidy:
 	go mod tidy

@@ -60,6 +60,7 @@ export const zhCN: Record<string, string> = {
   'settings.editor': '编辑器与差异',
   'settings.context': '上下文与记忆',
   'settings.extensions': '扩展',
+  'settings.extensionsSub': '技能、钩子和记忆提供者。',
   'settings.network': '网络 / 代理',
   'settings.sessions': '会话与存储',
   'settings.language': '语言',

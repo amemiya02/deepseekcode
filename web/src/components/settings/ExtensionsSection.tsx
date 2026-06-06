@@ -1,7 +1,9 @@
 // Adapted from deepseek-reasonix (MIT) — CapabilitiesPanel.tsx + MemoryPanel.tsx (tabbed reload-on-switch panels).
 import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
+import { IconExtensions, IconServer, IconActivity, IconDatabase } from '../../lib/icons'
 import { StateView } from '../StateViews'
+import parentStyles from './sections.module.css'
 import styles from './ExtensionsSection.module.css'
 
 interface ExtItem {
@@ -11,9 +13,9 @@ interface ExtItem {
 }
 
 const TABS = [
-  { id: 'skills', path: '/v1/skills', labelKey: 'settings.skills', fallback: 'Skills' },
-  { id: 'hooks', path: '/v1/hooks', labelKey: 'settings.hooks', fallback: 'Hooks' },
-  { id: 'memory', path: '/v1/memory', labelKey: 'settings.memory', fallback: 'Memory' },
+  { id: 'skills', path: '/v1/skills', labelKey: 'settings.skills', fallback: 'Skills', icon: IconExtensions },
+  { id: 'hooks', path: '/v1/hooks', labelKey: 'settings.hooks', fallback: 'Hooks', icon: IconActivity },
+  { id: 'memory', path: '/v1/memory', labelKey: 'settings.memory', fallback: 'Memory', icon: IconDatabase },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -23,7 +25,7 @@ export function ExtensionsSection() {
   const [items, setItems] = useState<ExtItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Read-only enumeration of the real subsystems via /v1/{mcp,skills,hooks,memory}
+  // Read-only enumeration of the real subsystems via /v1/{skills,hooks,memory}
   // (internal/gateway/extensions.go), each returning 200 {"items":[{id,name,enabled}]}.
   // These endpoints never 404 and return 200 {"items":[]} when nothing is
   // configured — so an unreachable/empty subsystem falls through to the honest
@@ -35,8 +37,6 @@ export function ExtensionsSection() {
     try {
       const res = await fetch(tab.path, { headers: { Accept: 'application/json' } })
       if (!res.ok) {
-        // Defensive: a non-200 (e.g. a stale gateway without the route) is
-        // rendered as the empty state, not a low-level error banner.
         setItems([])
         return
       }
@@ -55,9 +55,15 @@ export function ExtensionsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
+  const activeTab = TABS.find((t) => t.id === active)!
+
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.extensions', 'Extensions')}</h2>
+      <div className={parentStyles.header}>
+        <h2 className={parentStyles.h2}>{t('settings.extensions', 'Extensions')}</h2>
+        <p className={parentStyles.sub}>{t('settings.extensionsSub', 'Skills, hooks, and memory providers.')}</p>
+      </div>
+
       <div className={styles.tabs} role="tablist">
         {TABS.map((tab) => (
           <button
@@ -78,14 +84,24 @@ export function ExtensionsSection() {
         <StateView kind="empty" title={t('settings.extensionsEmpty', 'Nothing configured yet.')} />
       ) : (
         <ul className={styles.list}>
-          {items.map((it) => (
-            <li key={it.id}>
-              <span className={styles.name}>{it.name}</span>
-              <span className={it.enabled ? `${styles.badge} ${styles.on}` : styles.badge}>
-                {it.enabled ? t('settings.enabled', 'enabled') : t('settings.disabled', 'disabled')}
-              </span>
-            </li>
-          ))}
+          {items.map((it) => {
+            const TabIcon = activeTab.icon
+            return (
+              <li key={it.id} className={styles.item}>
+                <div className={styles.itemIcon}>
+                  <TabIcon size={16} />
+                </div>
+                <div className={styles.itemBody}>
+                  <div className={styles.itemName}>{it.name}</div>
+                  <div className={styles.itemId}>{it.id}</div>
+                </div>
+                <span className={`${styles.status} ${it.enabled ? styles.statusOn : styles.statusOff}`}>
+                  <span className={`${styles.dot} ${it.enabled ? styles.dotOn : styles.dotOff}`} />
+                  {it.enabled ? t('settings.enabled', 'enabled') : t('settings.disabled', 'disabled')}
+                </span>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

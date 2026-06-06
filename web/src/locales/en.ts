@@ -62,6 +62,7 @@ export const en: Record<string, string> = {
   'settings.editor': 'Editor & Diff',
   'settings.context': 'Context & Memory',
   'settings.extensions': 'Extensions',
+  'settings.extensionsSub': 'Skills, hooks, and memory providers.',
   'settings.network': 'Network / Proxy',
   'settings.sessions': 'Sessions & Storage',
   'settings.language': 'Language',

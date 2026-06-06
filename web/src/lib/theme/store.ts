@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { Theme, Mode, Density, Accent } from './tokens'
 
+export type TranscriptVerbosity = 'normal' | 'verbose' | 'summary'
+
 export interface ThemeSettings {
   theme: Theme
   mode: Mode
@@ -10,6 +12,8 @@ export interface ThemeSettings {
   uiFont: string
   /** Code font option id (see CODE_FONTS in tokens.ts). 'jetbrains' = brand default. */
   codeFont: string
+  /** Transcript render verbosity (client-only UI preference). */
+  transcriptVerbosity: TranscriptVerbosity
 }
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
@@ -22,6 +26,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   // Brand fonts (IBM Plex Sans / JetBrains Mono) — see UI_FONTS/CODE_FONTS.
   uiFont: 'plex',
   codeFont: 'jetbrains',
+  transcriptVerbosity: 'normal',
 }
 
 const KEY = 'dsc.theme'

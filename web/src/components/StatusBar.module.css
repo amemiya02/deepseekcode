@@ -39,3 +39,12 @@
 .ctxDanger { color: var(--danger); }
 .add { color: var(--add-fg); }
 .del { color: var(--del-fg); }
+.ctxRing {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: conic-gradient(var(--cache) var(--p, 0%), var(--border) 0);
+}
+.ctxWarn .ctxRing { background: conic-gradient(var(--warning) var(--p, 0%), var(--border) 0); }
+.ctxDanger .ctxRing { background: conic-gradient(var(--danger) var(--p, 0%), var(--border) 0); }

@@ -53,6 +53,12 @@ export function StatusBar({
       <span className={styles.seg} title={t('status.effort', 'Effort')}>{effort}</span>
 
       <span className={`${styles.seg} ${ctxClass}`} data-testid="ctx-pct" title={t('status.context', 'Context used')}>
+        <span
+          className={styles.ctxRing}
+          data-testid="ctx-ring"
+          style={{ ['--p' as string]: `${Math.round(ctxPct * 100)}%` }}
+          aria-hidden="true"
+        />
         {t('status.ctx', 'ctx')} {formatPct(ctxPct)}
       </span>
 

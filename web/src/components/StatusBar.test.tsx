@@ -81,6 +81,13 @@ describe('StatusBar', () => {
     })
   })
 
+  it('renders a ctx-pressure ring reflecting the percentage', () => {
+    render(<StatusBar ctxPct={0.42} />)
+    const ring = screen.getByTestId('ctx-ring')
+    expect(ring).toBeInTheDocument()
+    expect(ring.style.getPropertyValue('--p')).toBe('42%')
+  })
+
   describe('±lines segment', () => {
     it('hides diff-lines segment when both linesAdded and linesRemoved are 0', () => {
       render(<StatusBar {...base} linesAdded={0} linesRemoved={0} />)

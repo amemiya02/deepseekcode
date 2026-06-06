@@ -101,7 +101,7 @@ button { font-family: inherit; }
 .msg__rewind-trigger:hover { color: var(--accent); }
 
 /* (c) Assistant prose & user contained bubble */
-.msg--assistant .msg__body { color: var(--text); font: var(--type-body); line-height: 1.65; }
+.msg--assistant .msg__body { color: var(--text); font: var(--type-body); line-height: 1.7; }
 .msg__stream { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }
 .msg__bubble { align-self: flex-start; max-width: 100%; background: var(--accent-weak); border: 1px solid var(--border-hair); border-radius: var(--r-md); padding: var(--s-2) var(--s-3); box-shadow: var(--shadow-1); }
 .msg__text { color: var(--text); font: var(--type-body); white-space: pre-wrap; word-break: break-word; }

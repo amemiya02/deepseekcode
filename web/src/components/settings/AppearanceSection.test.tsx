@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { LocaleProvider } from '../../lib/i18n'
+import { LocaleProvider, setLocale } from '../../lib/i18n'
 import { AppearanceSection } from './AppearanceSection'
 import * as system from '../../lib/system'
 import * as store from '../../lib/theme/store'
@@ -8,8 +8,8 @@ import * as store from '../../lib/theme/store'
 afterEach(() => vi.restoreAllMocks())
 
 const baseCfg: system.ConfigDTO = {
-  theme: 'graphite', accent: 'indigo', density: 'comfortable', language: 'en',
-  transcriptVerbosity: 'normal', model: 'deepseek-v4', reasoningEffort: 'high',
+  accent: 'indigo', density: 'comfortable', language: 'en',
+  model: 'deepseek-v4', reasoningEffort: 'high',
   baseUrl: '', autoRoute: false, escalationModel: '', duetEnabled: false,
   sandboxEnabled: false, sandboxNetwork: false, autoReasoning: false, autoClarify: false,
   proxyMode: 'auto', proxyScheme: 'http', proxyUrl: '', noProxy: '',
@@ -27,7 +27,19 @@ async function pickOption(testid: string, optionText: string) {
 
 describe('AppearanceSection', () => {
   beforeEach(() => {
+    localStorage.clear()
+    setLocale('en')
     vi.spyOn(system, 'fetchConfig').mockResolvedValue({ ...baseCfg })
+  })
+
+  it('renders language as BrandedSelect and flips locale + saves on change', async () => {
+    const save = vi.spyOn(system, 'saveConfig').mockResolvedValue({ ...baseCfg, language: 'zh' })
+    render(<LocaleProvider><AppearanceSection /></LocaleProvider>)
+    const trigger = await screen.findByTestId('appearance-language')
+    expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('option', { name: '中文' }))
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ language: 'zh' })))
   })
 
   it('renders accent picker using BrandedSelect (not a native select)', async () => {

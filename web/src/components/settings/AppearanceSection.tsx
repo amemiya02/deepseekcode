@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useT } from '../../lib/i18n'
+import { useT, useLocale, type Locale } from '../../lib/i18n'
 import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
 import { setThemeSettings, useThemeStore, type ThemeSettings } from '../../lib/theme/store'
 import { ACCENTS, UI_FONTS, CODE_FONTS, type Accent, type Density, type Mode } from '../../lib/theme/tokens'
@@ -12,8 +12,15 @@ import styles from './sections.module.css'
 const DENSITIES: Density[] = ['comfortable', 'compact']
 const MODES: Mode[] = ['light', 'dark', 'hc']
 
+function configLangToLocale(lang: string): Locale {
+  if (lang === 'zh') return 'zh-CN'
+  if (lang === 'auto') return navigator.language.startsWith('zh') ? 'zh-CN' : 'en'
+  return 'en'
+}
+
 export function AppearanceSection() {
   const t = useT()
+  const { setLocale } = useLocale()
   const [cfg, setCfg] = useState<ConfigDTO | null>(null)
   const [error, setError] = useState('')
 
@@ -41,6 +48,7 @@ export function AppearanceSection() {
     if (p.accent !== undefined) visual.accent = p.accent as Accent
     if (p.density !== undefined) visual.density = p.density as Density
     if (Object.keys(visual).length > 0) setThemeSettings(visual)
+    if (p.language !== undefined) setLocale(configLangToLocale(p.language))
     try {
       setCfg(await saveConfig(p))
     } catch (e) {
@@ -54,6 +62,22 @@ export function AppearanceSection() {
   return (
     <div>
       <h2 className={styles.h2}>{t('settings.appearance', 'Appearance')}</h2>
+
+      {/* Language — round-trips to Go config */}
+      <label className={styles.field}>
+        {t('settings.language', 'Language')}
+        <BrandedSelect
+          value={cfg.language}
+          options={[
+            { value: 'en', label: 'English' },
+            { value: 'zh', label: '中文' },
+            { value: 'auto', label: t('settings.languageAuto', 'Auto (system)') },
+          ]}
+          onChange={(v) => void patch({ language: v })}
+          ariaLabel={t('settings.language', 'Language')}
+          testid="appearance-language"
+        />
+      </label>
 
       {/* Mode — localStorage only, never through ConfigDTO */}
       <label className={styles.field}>

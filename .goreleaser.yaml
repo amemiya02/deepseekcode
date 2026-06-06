@@ -1,6 +1,9 @@
 version: 2
 project_name: deepseekcode
 
+release:
+  replace_existing_assets: true
+
 before:
   hooks:
     - go mod tidy

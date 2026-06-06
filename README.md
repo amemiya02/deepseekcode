@@ -15,53 +15,29 @@ SQLite-backed sessions, and a conservative permission model.
 
 ## Why dsc (DeepSeek specialization)
 
-- **Provable prefix-cache stability** -- a single canonical serializer feeds
-  both the wire bytes and the cache fingerprint; they cannot diverge by
-  construction, and `dsc trace inspect` shows `prefixes==1` to prove a stable
-  run ([docs/prefix-cache.md](docs/prefix-cache.md)).
-- **Real, signal-driven Flash→Pro routing** -- opt-in via `--auto-route`
-  (escalates on ambiguity / repeated repair), not just a prompt instruction;
+> **Measured, not claimed.** In a reproducible 12-turn session on
+> `deepseek-v4-flash`, dsc holds a **94.7% prefix cache-hit rate** vs **0%** for
+> a cache-naive agent — **4.5× cheaper**, every figure read from DeepSeek's own
+> `prompt_cache_hit_tokens`. Reproduce: `make demo-cache` (live) or
+> `make demo-cache-offline` (no API key). Evidence: [bench/](bench/README.md).
+
+- **Provable prefix-cache stability** — a single canonical serializer feeds both
+  the wire bytes and the cache fingerprint, so they cannot diverge by
+  construction; `dsc trace inspect` shows `prefixes==1` to prove a stable run
+  ([docs/prefix-cache.md](docs/prefix-cache.md)).
+- **Real, signal-driven Flash→Pro routing** — opt-in via `--auto-route`
+  (escalates on ambiguity / repeated repair), not just a prompt instruction; an
   always-on Duet pro-validator fires on destructive tool calls
   ([docs/duet.md](docs/duet.md)).
-- **Real OS sandbox** -- sandbox-exec (macOS) / Landlock (Linux) with a real
-  PTY, not just path containment
-  ([docs/SANDBOX.md](docs/SANDBOX.md)).
-- **Auto reasoning-effort** -- per-turn thinking on/off via multi-language
-  keyword detection plus `low/medium/high/max` effort, dialed down
-  automatically on simple tasks.
+- **Real OS sandbox** — sandbox-exec (macOS) / Landlock (Linux) with a real PTY,
+  not just path containment ([docs/SANDBOX.md](docs/SANDBOX.md)).
+- **Auto reasoning-effort** — per-turn thinking on/off via multi-language
+  keyword detection plus `low/medium/high/max` effort, dialed down automatically
+  on simple tasks.
 
-## DeepSeek V4 Agent Story
-
-DeepSeekCode is purpose-built for DeepSeek V4 models with verifiable
-advantages over generic coding agents:
-
-> **Measured, not claimed.** In a reproducible 12-turn session on
-> `deepseek-v4-flash`, deepseekcode holds a **94.7% prefix cache-hit rate** vs
-> **0%** for a cache-naive agent — **4.5× cheaper**, every figure read from
-> DeepSeek's own `prompt_cache_hit_tokens`. Run it yourself: `make demo-cache`
-> (live) or `make demo-cache-offline` (no API key). Methodology:
-> [bench/cache-demo](bench/cache-demo/).
-
-- **Provable prefix-cache stability** — a single canonical serializer
-  guarantees the wire bytes and cache fingerprint cannot diverge; verify with
-  `dsc trace inspect` ([docs/prefix-cache.md](docs/prefix-cache.md)).
-- **Selective Pro validation** — destructive tool calls get a second
-  `deepseek-v4-pro` judgment, not every turn; keep costs low with a safety net
-  where it matters ([docs/duet.md](docs/duet.md)).
-- **1M context workflows** — large-repo reading and long-history sessions
-  without aggressive compaction; 1M context is an enabler, not a replacement
-  for tools and retrieval.
-- **Tool-call repair pipeline** — automatic recovery from truncated JSON,
-  scavenged calls in reasoning text, and storm-guard suppression of repeated
-  failed calls.
-
-Full story with local verification commands:
-[docs/deepseek-v4-agent-story.md](docs/deepseek-v4-agent-story.md)
-
-Benchmark evidence:
-[bench/README.md](bench/README.md)
-
-Tool-use benchmark (tau-bench-lite, 8 tasks): dsc is at parity on cost-per-solved (~$0.00038) with a strong DeepSeek-native flash baseline — we report parity and do not claim a capability win on easy tool-use tasks (a routing advantage needs a harder task set to surface). See [bench/taubench](bench/taubench/).
+On tool-use (tau-bench-lite, 8 tasks) dsc is at **parity** on cost-per-solved
+(~$0.00038) with a strong DeepSeek-native flash baseline — reported honestly,
+with no capability claim on easy tasks ([bench/taubench](bench/taubench/)).
 
 ## Features
 
@@ -186,10 +162,10 @@ See [docs/config.md](docs/config.md) and
 
 | Variable | Default | Description |
 |---|---|---|
-| `DEEPSEEKCODE_API_KEY` | *(required)* | DeepSeek API key |
+| `DEEPSEEK_API_KEY` | *(required)* | DeepSeek API key |
 | `DEEPSEEKCODE_BASE_URL` | `https://api.deepseek.com` | API base URL; set to a mirror for China-mainland access |
 | `DEEPSEEKCODE_PROXY` | *(none)* | Explicit HTTP/HTTPS proxy URL; overrides `HTTPS_PROXY`/`HTTP_PROXY` |
-| `DEEPSEEKCODE_LANG` | auto-detected | UI locale override (`zh-CN`, `en`); falls back to `LANG` env var |
+| `DEEPSEEKCODE_LANG` | auto-detected | UI locale override (`zh-CN`, `en`); falls back to `LANG` |
 
 ## Documentation
 
@@ -202,9 +178,8 @@ See [docs/config.md](docs/config.md) and
 - [Skills](docs/skills.md)
 - [MCP](docs/mcp.md)
 - [LSP](docs/lsp.md)
-- [Reasoning tape](docs/tape.md)
+- [Pricing](docs/pricing.md)
 - [Model compatibility](docs/MODEL_COMPATIBILITY.md)
-- [DeepSeek V4 Agent Story](docs/deepseek-v4-agent-story.md)
 
 ## Development
 

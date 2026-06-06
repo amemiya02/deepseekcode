@@ -135,6 +135,10 @@ test.describe('surface: status-bar', () => {
 // ---------------------------------------------------------------------------
 test.describe('surface: workspace-panel', () => {
   test('workspace zone renders', async ({ page, colorScheme }) => {
+    // Mock /v1/changed so the workspace zone is revealed (hasChanges=true).
+    await page.route('**/v1/changed', (r) =>
+      r.fulfill({ json: { entries: [{ path: 'src/App.tsx', status: 'M' }] } })
+    )
     await page.goto('/')
     await waitForShell(page)
     const zone = page.locator('[data-testid="zone-workspace"]')

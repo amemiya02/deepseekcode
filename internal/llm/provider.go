@@ -43,8 +43,32 @@ func NewProvider(name string, cfg ProviderConfig) (Provider, error) {
 		return newDeepSeekProvider(cfg)
 	case "openai-compat":
 		return newOpenAICompatProvider(cfg)
+	case "anthropic":
+		return newAnthropicProvider(cfg)
+	case "openai":
+		return newOpenAINativeProvider(cfg)
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", name)
+	}
+}
+
+// ProviderCapabilities returns the static capability descriptor for the named
+// provider without constructing a full Provider instance (no credentials, no
+// HTTP client, no timeouts). All Capabilities() implementations are pure value
+// returns that do not touch provider fields, so this is safe to call at boot
+// before any config is available. Returns an error for unknown providers.
+func ProviderCapabilities(name string) (Capabilities, error) {
+	switch name {
+	case "", "deepseek":
+		return (DeepSeekProvider{}).Capabilities(), nil
+	case "openai-compat":
+		return (OpenAICompatProvider{}).Capabilities(), nil
+	case "anthropic":
+		return (&AnthropicProvider{}).Capabilities(), nil
+	case "openai":
+		return (&OpenAINativeProvider{}).Capabilities(), nil
+	default:
+		return Capabilities{}, fmt.Errorf("unknown provider: %s", name)
 	}
 }
 

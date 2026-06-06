@@ -1,0 +1,49 @@
+.viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.path {
+  font-family: var(--type-mono);
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+.reveal {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: var(--r-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.notice {
+  color: var(--text-3);
+  padding: 8px;
+  font-size: 0.85rem;
+}
+.warn {
+  color: var(--warning);
+}
+.editor {
+  flex: 1;
+  min-height: 0;
+}
+.fallback {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--type-mono);
+  color: var(--text);
+}

@@ -51,3 +51,51 @@ func TestLoopDetection(t *testing.T) {
 		t.Errorf("varied args should not trigger loop detection")
 	}
 }
+
+func TestStopReasonString(t *testing.T) {
+	if s := StopVerifiedDone.String(); s != "verified_done" {
+		t.Errorf("StopVerifiedDone.String() = %q, want %q", s, "verified_done")
+	}
+}
+
+func TestMaxStepsDoesNotFireEarly(t *testing.T) {
+	cond := MaxSteps(3)
+	for n := 0; n < 3; n++ {
+		steps := make([]StepRecord, n)
+		stop, _ := cond(steps)
+		if stop {
+			t.Fatalf("MaxSteps(3) fired at len=%d, want to fire at len>=3", n)
+		}
+	}
+	steps := make([]StepRecord, 3)
+	stop, reason := cond(steps)
+	if !stop {
+		t.Fatal("MaxSteps(3) should fire at len=3")
+	}
+	if reason != StopMaxSteps {
+		t.Fatalf("reason = %v, want StopMaxSteps", reason)
+	}
+}
+
+func TestLoopDetectionDoesNotFireBeforeThreshold(t *testing.T) {
+	cond := LoopDetection(5, 3)
+	makeStep := func(name, args string) StepRecord {
+		return StepRecord{ToolCalls: []llm.ToolCall{{Function: llm.ToolCallFunc{Name: name, Arguments: args}}}}
+	}
+	steps := []StepRecord{
+		makeStep("edit", `{"file":"a"}`),
+		makeStep("edit", `{"file":"a"}`),
+	}
+	stop, _ := cond(steps)
+	if stop {
+		t.Fatal("LoopDetection should not fire at 2 repeats (threshold=3)")
+	}
+	steps = append(steps, makeStep("edit", `{"file":"a"}`))
+	stop, reason := cond(steps)
+	if !stop {
+		t.Fatal("LoopDetection should fire at 3 repeats")
+	}
+	if reason != StopLoopDetected {
+		t.Fatalf("reason = %v, want StopLoopDetected", reason)
+	}
+}

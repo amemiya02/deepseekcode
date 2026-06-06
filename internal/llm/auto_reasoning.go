@@ -1,6 +1,31 @@
 package llm
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+// trivialMaxRunes bounds a "trivial" message — a short greeting or acknowledgement
+// ("你好", "hi", "thanks", "好的") that carries no task. At or below this rune count,
+// and with no high-effort keyword, a turn should NOT force thinking: a non-reasoning
+// turn comes back with reasoning_content ≈ the answer, which renders a redundant
+// "Thought for <1s" block holding a duplicate of the reply. Kept small so a short
+// real instruction ("read a file") stays above it and still thinks.
+const trivialMaxRunes = 8
+
+// IsTrivialMessage reports whether userText is a short greeting/ack that should not
+// force thinking. A high-effort keyword (debug/error/调试/报错…) always makes a
+// message non-trivial, regardless of length, so "报错" still thinks.
+func IsTrivialMessage(userText string) bool {
+	trimmed := strings.TrimSpace(userText)
+	lower := strings.ToLower(trimmed)
+	for _, kw := range highEffortKeywords {
+		if strings.Contains(lower, kw) {
+			return false
+		}
+	}
+	return utf8.RuneCountInString(trimmed) <= trivialMaxRunes
+}
 
 // highEffortKeywords: hitting any of these forces thinking ON.
 // Copied verbatim from CodeWhale (Rust) §3.1.

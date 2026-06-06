@@ -18,6 +18,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/commands"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
@@ -862,9 +863,7 @@ func (a *App) View() tea.View {
 			"  j/k scroll · ^U/^D page · G/gg jump · q close pager",
 		)
 	default:
-		hint = a.theme.Hint.Render(
-			"  ⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help",
-		)
+		hint = a.theme.Hint.Render("  " + i18n.T("app.input.hint"))
 	}
 
 	// Splice the completions popup (G1/§4.4) directly above the input box so it

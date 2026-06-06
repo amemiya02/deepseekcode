@@ -182,6 +182,15 @@ default_model = "gpt-4o"
 See [docs/config.md](docs/config.md) and
 [docs/PROVIDERS.md](docs/PROVIDERS.md) for the full reference.
 
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEEPSEEKCODE_API_KEY` | *(required)* | DeepSeek API key |
+| `DEEPSEEKCODE_BASE_URL` | `https://api.deepseek.com` | API base URL; set to a mirror for China-mainland access |
+| `DEEPSEEKCODE_PROXY` | *(none)* | Explicit HTTP/HTTPS proxy URL; overrides `HTTPS_PROXY`/`HTTP_PROXY` |
+| `DEEPSEEKCODE_LANG` | auto-detected | UI locale override (`zh-CN`, `en`); falls back to `LANG` env var |
+
 ## Documentation
 
 - [Configuration](docs/config.md)

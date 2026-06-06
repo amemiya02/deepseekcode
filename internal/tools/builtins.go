@@ -1,6 +1,9 @@
 package tools
 
-import "github.com/amemiya02/deepseekcode/internal/sandbox"
+import (
+	"github.com/amemiya02/deepseekcode/internal/memory"
+	"github.com/amemiya02/deepseekcode/internal/sandbox"
+)
 
 // RegisterBuiltins installs the v0.1 core built-in tools into a fresh
 // Registry. Tools are added in alphabetical order out of habit; the
@@ -37,4 +40,14 @@ func RegisterBuiltinsWithSandbox(r *Registry, maxReadBytes, maxWriteBytes int64,
 	r.Register(GitShow{})
 	r.Register(GitBlame{})
 	r.Register(GitLog{})
+}
+
+// RegisterMemoryTools installs the remember/recall/forget tools backed by
+// the given Store. This is a separate helper so callers that manage their own
+// memory store (e.g. the agent session) have a single, discoverable
+// registration point.
+func RegisterMemoryTools(r *Registry, store memory.Store) {
+	r.Register(NewRememberTool(store))
+	r.Register(NewRecallTool(store))
+	r.Register(NewForgetTool(store))
 }

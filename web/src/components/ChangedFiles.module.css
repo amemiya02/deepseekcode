@@ -1,0 +1,101 @@
+.changed {
+  overflow: auto;
+  height: 100%;
+  padding: 4px;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  border-radius: 4px;
+  color: var(--text);
+  transition: background 0.1s;
+}
+.row:hover {
+  background: var(--elevated, rgba(0,0,0,0.06));
+}
+.row[aria-current='true'] {
+  background: color-mix(in oklch, var(--accent, #4d6bfe) 12%, var(--surface, #fff));
+  border-left: 2px solid var(--accent, #4d6bfe);
+  padding-left: 4px;
+}
+.status {
+  flex-shrink: 0;
+  width: 1.4em;
+  text-align: center;
+  font-family: var(--type-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 2px;
+  color: var(--text-3, #888);
+}
+.status[data-code='M'] {
+  color: var(--accent, #4d6bfe);
+}
+.status[data-code='A'] {
+  color: var(--success, #22c55e);
+}
+.status[data-code='D'] {
+  color: var(--danger, #ef4444);
+}
+.status[data-code='R'] {
+  color: var(--text-2, #555);
+}
+.icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3, #888);
+}
+.dir {
+  color: var(--text-3, #888);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.name {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.deleted {
+  color: var(--danger);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.empty,
+.error {
+  color: var(--text-3);
+  padding: 8px;
+  font-size: 0.85rem;
+}
+.error {
+  color: var(--danger);
+}
+.skeleton { display: flex; flex-direction: column; gap: 4px; padding: var(--s-2, 8px); }
+.skelRow {
+  height: 22px;
+  border-radius: var(--r-sm, 6px);
+  background: linear-gradient(90deg, var(--border) 25%, color-mix(in oklch, var(--border) 50%, var(--surface)) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: changedShimmer 1.4s ease-in-out infinite;
+}
+@keyframes changedShimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skelRow { animation: none; } }

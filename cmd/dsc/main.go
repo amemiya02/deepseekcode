@@ -29,13 +29,18 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
+	"github.com/amemiya02/deepseekcode/internal/codegraph"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/doctor"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/memory"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
+	"github.com/amemiya02/deepseekcode/internal/onboarding"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
 	sandboxpkg "github.com/amemiya02/deepseekcode/internal/sandbox"
@@ -49,6 +54,7 @@ import (
 )
 
 func main() {
+	i18n.ReloadLocale() // honour DEEPSEEKCODE_LANG / LANG from process env
 	if len(os.Args) > 1 && os.Args[1] == "__sandbox_run" {
 		if err := sandboxpkg.RunSandboxedChild(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "dsc:", err)
@@ -146,19 +152,27 @@ func applyRoutingConfig(a *agent.Agent, cfg config.Config) {
 }
 
 func run() error {
-	// Subcommand: dsc init. Creates DEEPSEEK.md and .deepseek/config.toml.
+	// Subcommand: dsc init. Runs interactive or non-interactive onboarding.
 	if len(os.Args) > 1 && os.Args[1] == "init" {
-		if err := runInit(); err != nil {
-			return err
+		ctx := context.Background()
+		cfg, loadErr := config.Load()
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "dsc init: warning: config load: %v\n", loadErr)
+		}
+		if err := onboarding.Run(ctx, cfg, os.Args[2:], os.Stdin, os.Stdout, nil); err != nil {
+			fmt.Fprintln(os.Stderr, "dsc init:", err)
+			os.Exit(1)
 		}
 		return nil
 	}
 
-	// Subcommand: dsc doctor. Doctor prints its own report; exit(1) on
-	// failure so main doesn't print "dsc: doctor failed" on top.
+	// Subcommand: dsc doctor. Doctor prints its own report and returns a
+	// non-nil error when any check fails, so we exit(1) to be CI-scriptable.
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		ctx := context.Background()
 		cfg, loadErr := config.Load()
-		if err := runDoctor(cfg, loadErr); err != nil {
+		if err := doctor.Run(ctx, cfg, os.Stdout, loadErr); err != nil {
+			fmt.Fprintln(os.Stderr, "dsc doctor:", err)
 			os.Exit(1)
 		}
 		return nil
@@ -176,6 +190,18 @@ func run() error {
 		return runTrace(os.Args[2:])
 	}
 
+	// Subcommand: dsc cache explain TRACE.jsonl. Renders a per-turn cache
+	// ledger with eviction classification from an agent JSONL trace.
+	if len(os.Args) > 1 && os.Args[1] == "cache" {
+		return runCache(os.Args[2:])
+	}
+
+	// Subcommand: dsc serve --acp / --http :PORT. Starts an ACP stdio or
+	// HTTP+SSE gateway backed by the production agent factory.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		return runServe(os.Args[2:])
+	}
+
 	// Subcommand: dsc agent list|show|new|validate. Manage .deepseek/agent/*.md definitions.
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		cwd, err := os.Getwd()
@@ -190,6 +216,13 @@ func run() error {
 		return nil
 	}
 
+	// Subcommand: dsc compact. Forces an immediate compaction of the last
+	// session's message list and writes the compacted session back to disk.
+	// Exits after reporting whether compaction occurred.
+	if len(os.Args) > 1 && os.Args[1] == "compact" {
+		return runCompactCmd(os.Args[2:])
+	}
+
 	var (
 		showVersion     bool
 		yolo            bool
@@ -201,6 +234,7 @@ func run() error {
 		newSession      bool
 		continueSes     bool
 		resumeSes       string
+		resumeAt        string
 		prompt          string
 		debug           bool
 		traceJSONL      string
@@ -218,12 +252,14 @@ func run() error {
 	flag.BoolVar(&newSession, "new", false, "force new session, even if a recent one exists")
 	flag.BoolVar(&continueSes, "c", false, "continue last session in cwd")
 	flag.StringVar(&resumeSes, "r", "", "resume session by ID (empty opens picker)")
+	flag.StringVar(&resumeAt, "resume-at", "", "resume session from named checkpoint or step index")
 	flag.StringVar(&prompt, "p", "", "one-shot: send PROMPT to the model, print result, exit")
 	flag.BoolVar(&debug, "debug", false, "enable structured logging to .deepseek/log/")
 	flag.StringVar(&traceJSONL, "trace-jsonl", "", "one-shot: write epoch/usage/compaction/drift trace as JSONL to PATH (used by the benchmark harness)")
 	flag.BoolVar(&autoRoute, "auto-route", false, "enable per-turn Flash-first cost-aware routing (escalates hard turns to the pro tier)")
 	flag.BoolVar(&autoClarify, "auto-clarify", false, "ask one clarifying question on a vague prompt before spending a turn")
 	flag.StringVar(&escalationModel, "escalation-model", "", "pro-tier model --auto-route escalates to (default deepseek-v4-pro when --auto-route is set)")
+	verifyCmd := flag.String("verify-cmd", "", "shell command to run after each mutating step (e.g. \"go build ./...\")")
 	flag.Parse()
 
 	// Env fallback so the benchmark harness can request a trace without
@@ -250,6 +286,24 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// First-run onboarding gate: if no API key is configured, prompt the user
+	// before attempting any agent call. NeedsOnboarding returns (true, nil)
+	// when the key is simply absent; real I/O errors are surfaced as warnings
+	// but do not block startup (the provider call will fail with a clear error).
+	if needs, _ := onboarding.NeedsOnboarding(cfg); needs {
+		onbCtx := context.Background()
+		if err := onboarding.Run(onbCtx, cfg, nil, os.Stdin, os.Stdout, nil); err != nil {
+			fmt.Fprintln(os.Stderr, "onboarding failed:", err)
+			os.Exit(1)
+		}
+		// Reload config after onboarding writes it.
+		cfg, err = config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "reload config:", err)
+			os.Exit(1)
+		}
 	}
 
 	if model != "" {
@@ -302,11 +356,15 @@ func run() error {
 	logging.Setup(debug, logMode, cwd)
 	slog.Debug("dsc starting", "model", model, "debug", debug, "tui", tuiMode)
 
-	if !tuiMode {
-		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL})
+	if resumeAt != "" && tuiMode {
+		return fmt.Errorf("--resume-at requires -p (one-shot mode)")
 	}
 
-	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction}, newSession, continueSes, resumeSes)
+	if !tuiMode {
+		return runOneShot(cfg, prompt, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, traceJSONL: traceJSONL, resumeAt: resumeAt, verifyCmd: *verifyCmd})
+	}
+
+	return runTUI(cfg, cwd, modeFlags{yolo: yolo, readOnly: readOnly, askAll: askAll, disablePrefixEpoch: disablePrefixEpoch, disableSemanticCompaction: disableSemanticCompaction, verifyCmd: *verifyCmd}, newSession, continueSes, resumeSes)
 }
 
 // runTUI launches the Bubble Tea TUI. Persistence (session store +
@@ -326,12 +384,13 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg := tools.New()
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
+	initCodegraph(reg, cwd)
 
 	// MCP servers: connect, bridge tools into the registry.
 	mcpReg := mcp.NewRegistry()
 	defer mcpReg.Shutdown()
 	var mcpNotices []string
-	for name, srv := range cfg.MCPServers {
+	for name, srv := range cfg.ActiveMCPServers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
 		switch srv.Transport {
@@ -411,6 +470,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 	applyRoutingConfig(a, cfg)
+	applyVerifyCmd(a, mf.verifyCmd)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
@@ -437,61 +497,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		a.Skills = skillStore
 	}
 
-	// Hooks: assemble configs from TOML, then add the Duet builtin
-	// when enabled. Only create a Runner if there is work for it.
-	var hookConfigs []hooks.HookConfig
-	for _, hi := range cfg.Hooks {
-		hc := hooks.HookConfig{
-			Event:   hooks.HookEvent(hi.Event),
-			Type:    hooks.HookType(hi.Type),
-			Command: hi.Command,
-			Name:    hi.Name,
-		}
-		if hc.Type == "" {
-			hc.Type = hooks.TypeSubprocess
-		}
-		if !validHookEvent(hc.Event) {
-			slog.Warn("skipping hook with unknown event", "event", hi.Event)
-			continue
-		}
-		if hi.Timeout > 0 {
-			hc.Timeout = time.Duration(hi.Timeout) * time.Second
-		}
-		hookConfigs = append(hookConfigs, hc)
-	}
-
-	if cfg.Duet.Enabled {
-		hasDuetPreTool := false
-		for _, hc := range hookConfigs {
-			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
-				hasDuetPreTool = true
-				break
-			}
-		}
-		if !hasDuetPreTool {
-			hookConfigs = append(hookConfigs, hooks.HookConfig{
-				Event: hooks.EventPreToolUse,
-				Type:  hooks.TypeBuiltin,
-				Name:  "duet",
-			})
-		}
-	}
-
-	if len(hookConfigs) > 0 {
-		hookRunner := hooks.NewRunner()
-		if cfg.Duet.Enabled {
-			hookRunner.Register("duet", hooks.NewDuetHook(
-				rt.Provider,
-				cfg.Duet.ExtraDestructive,
-				cwd,
-				cfg.Permissions.SecretPathPatterns,
-				func() string { return a.Model },
-				func() []byte { return a.Transcript() },
-			))
-		}
-		hookRunner.Configure(hookConfigs)
-		a.HookRunner = hookRunner
-	}
+	// Hooks: assemble and wire all configured hooks + builtins.
+	a.HookRunner = buildHookRunner(cfg, cwd, rt, func() string { return a.Model }, func() []byte { return a.Transcript() })
 
 	// Route retry notices through agent.EmitInfo so they appear as
 	// chat items instead of stderr writes that would corrupt the TUI.
@@ -663,8 +670,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		Locks:    wtLocks,
 	}
 	a.Spawner = spawner
-	reg.Register(tools.NewSubagentTool(spawner))
-	reg.Register(tools.NewWorktreeTool(wtMgr))
+	registerSpawnerTools(reg, spawner, wtMgr)
 
 	// Fetch account balance (non-blocking on failure). Only meaningful
 	// for DeepSeek providers; other providers skip silently.
@@ -789,6 +795,25 @@ type modeFlags struct {
 	disablePrefixEpoch        bool
 	disableSemanticCompaction bool
 	traceJSONL                string // one-shot trace sink path; "" disables
+	resumeAt                  string // --resume-at checkpoint name or step index; "" disables
+	verifyCmd                 string // --verify-cmd shell command; "" disables
+}
+
+// applyVerifyCmd sets agent.Verify when cmd is non-empty.
+// When cmd is empty, Verify is left untouched (nil by default).
+func applyVerifyCmd(a *agent.Agent, cmd string) {
+	if cmd != "" {
+		a.Verify = &agent.VerifyHook{Cmd: cmd}
+	}
+}
+
+// applyResumeAtTruncation trims a.Messages to messageCount when messageCount
+// is within the current slice bounds. It is the single authoritative
+// implementation of the truncation step that follows BranchAt in runOneShot.
+func applyResumeAtTruncation(a *agent.Agent, messageCount int) {
+	if messageCount <= len(a.Messages) {
+		a.Messages = a.Messages[:messageCount]
+	}
 }
 
 type providerRuntime struct {
@@ -835,7 +860,22 @@ func providerFromConfig(cfg config.Config) (providerRuntime, error) {
 	if cfg.LegacyAPIUsed {
 		notices = append(notices, "`[api]` is deprecated; use `[providers.deepseek]`")
 	}
-	return providerRuntime{Provider: prov, Client: prov.BaseClient(), Model: model, Notices: notices}, nil
+	// Wire proxy-aware transport directly onto the provider's internal client so
+	// that every code path — Stream(), ValidatePro(), GetUserBalance() — routes
+	// through DEEPSEEKCODE_PROXY / HTTPS_PROXY / HTTP_PROXY without exception.
+	// WithProxyTransport() mutates the client in-place and returns it, so there
+	// is no second allocation and no fragile field-copy list to maintain.
+	client := prov.BaseClient().WithProxyTransport()
+	// Config-resolved values (TOML file / keychain) override whatever the
+	// provider constructor defaulted; env-var fallbacks already live inside
+	// ProxyTransport() and need no explicit copy here.
+	if apiKey != "" {
+		client.APIKey = apiKey
+	}
+	if pcfg.BaseURL != "" {
+		client.BaseURL = pcfg.BaseURL
+	}
+	return providerRuntime{Provider: prov, Client: client, Model: model, Notices: notices}, nil
 }
 
 func sandboxFromConfig(cfg config.Config) (sandboxpkg.Sandbox, sandboxpkg.Profile) {
@@ -873,13 +913,14 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	cwd, _ := os.Getwd()
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
+	initCodegraph(reg, cwd)
 
 	// MCP servers: connect and bridge tools so one-shot runs match the TUI's
 	// tool surface — and so MCP schema discovery feeds the prefix epoch
 	// (mcp_schema_hash). Notices go to stderr; one-shot output is on stdout.
 	mcpReg := mcp.NewRegistry()
 	defer mcpReg.Shutdown()
-	for name, srv := range cfg.MCPServers {
+	for name, srv := range cfg.ActiveMCPServers() {
 		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var cerr error
 		switch srv.Transport {
@@ -949,6 +990,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	a.PromptBuilder = newPromptBuilder(cwd, skillStore)
 	registerSkillRead(reg, skillStore)
 	applyRoutingConfig(a, cfg)
+	applyVerifyCmd(a, mf.verifyCmd)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
@@ -988,8 +1030,25 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		Locks:    wtLocks,
 	}
 	a.Spawner = spawner
-	reg.Register(tools.NewSubagentTool(spawner))
-	reg.Register(tools.NewWorktreeTool(wtMgr))
+	registerSpawnerTools(reg, spawner, wtMgr)
+
+	// Hooks: assemble and wire all configured hooks + builtins.
+	a.HookRunner = buildHookRunner(cfg, cwd, rt, func() string { return a.Model }, func() []byte { return a.Transcript() })
+
+	// --resume-at: resolve the named checkpoint or step index, then truncate
+	// the in-memory transcript to the boundary so the resumed session starts
+	// from the right position. Full exec-fork into the new worktree is out of
+	// scope; the flag wires the boundary-resolution and truncation path.
+	if mf.resumeAt != "" {
+		res, err := a.BranchAt(ctx, mf.resumeAt, wtMgr)
+		if err != nil {
+			return fmt.Errorf("--resume-at: %w", err)
+		}
+		if res.WorktreePath != "" {
+			fmt.Fprintf(os.Stderr, "branching to %s (step %d)\n", res.WorktreePath, res.StepIdx)
+		}
+		applyResumeAtTruncation(a, res.MessageCount)
+	}
 
 	// Optional JSONL trace sink (benchmark harness). Attached before Run so
 	// it captures the first epoch event; flushed by waiting on its handle
@@ -1218,6 +1277,32 @@ func consumeAgentEvents(a *agent.Agent, model string) {
 	}
 }
 
+// initCodegraph creates a codegraph Index for the given cwd, performs an
+// initial Rebuild to populate it, and registers the five codegraph tools into
+// reg. The Rebuild is best-effort: if it fails (e.g. on a non-Go project or
+// an unreadable directory), a warning is logged and the tools are still
+// registered against the empty index so the tool surface is stable.
+// Both runTUI and runOneShot call this so the live agent always has the
+// codegraph tools reachable.
+func initCodegraph(reg *tools.Registry, cwd string) {
+	cgIdx := codegraph.NewIndex("github.com/amemiya02/deepseekcode")
+	if err := cgIdx.Rebuild(cwd); err != nil {
+		slog.Warn("codegraph: initial rebuild failed (tools still available)", "err", err)
+	}
+	tools.RegisterCodegraphTools(reg, cgIdx)
+}
+
+// registerSpawnerTools is the single authoritative place that registers the
+// spawner-related tools (task, spawn_batch, worktree) on a production
+// registry. Both runTUI and runOneShot call this so the registration surface
+// stays in sync and is exercised by the integration test in
+// spawn_batch_registration_test.go without duplicating the wiring logic.
+func registerSpawnerTools(reg *tools.Registry, spawner *agent.LoopSpawner, wtMgr *worktree.Manager) {
+	reg.Register(tools.NewSubagentTool(spawner))
+	reg.Register(tools.NewSpawnBatchTool(spawner, 4))
+	reg.Register(tools.NewWorktreeTool(wtMgr))
+}
+
 // registerSkillRead installs the skill_read lazy-body dispatcher as a core
 // tool whenever the canonical skill store is non-empty, so the model can
 // always load the full body of any skill it sees listed in the ## Skills
@@ -1370,5 +1455,161 @@ func severityString(s int) string {
 		return "hint"
 	default:
 		return "unknown"
+	}
+}
+
+// runCompactCmd implements `dsc compact`. It loads the most-recent session for
+// the current working directory, replays its messages into a temporary Agent,
+// forces a compaction, and persists the result. Exits with a clear message
+// whether compaction occurred or the transcript was too short.
+func runCompactCmd(_ []string) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	rt, err := providerFromConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	cwd, _ := os.Getwd()
+	reg := tools.New()
+	pol := permissions.New(permissions.ModeAskAll, cwd, nil, nil, nil)
+	a := agent.New(rt.Client, reg, pol, rt.Model)
+	defer a.Close()
+	a.DisableSemanticCompaction = true // compact command uses deterministic path only
+
+	store, err := session.Open("")
+	if err != nil {
+		return fmt.Errorf("opening session store: %w", err)
+	}
+	sess, err := store.MostRecentInProject(ctx, cwd)
+	if err != nil {
+		return fmt.Errorf("no session found for current directory: %w", err)
+	}
+
+	msgs, err := store.Replay(ctx, sess.ID)
+	if err != nil {
+		return fmt.Errorf("replaying session: %w", err)
+	}
+	for _, m := range msgs {
+		a.Messages = append(a.Messages, llm.Message{Role: m.Role, Blocks: m.Blocks})
+	}
+
+	snaps := snapshots.New(".deepseek/snapshots")
+	a.Persister = session.NewPersister(store, snaps, sess.ID)
+
+	return agent.RunCompact(ctx, a, os.Stdout)
+}
+
+// buildHookRunner assembles a *hooks.Runner from the TOML config list, adds
+// the Duet builtin when enabled, and conditionally adds memory-capture
+// HookConfigs only when the store is available. This is the single
+// authoritative implementation shared by runTUI and runOneShot — extracting
+// it eliminates the verbatim copy-paste that existed before and prevents
+// the two paths from drifting apart.
+//
+// modelFn / transcriptFn are closures so the duet hook reads the live
+// values from the agent rather than a snapshot taken at wiring time.
+func buildHookRunner(
+	cfg config.Config,
+	cwd string,
+	rt providerRuntime,
+	modelFn func() string,
+	transcriptFn func() []byte,
+) *hooks.Runner {
+	var hookConfigs []hooks.HookConfig
+	for _, hi := range cfg.Hooks {
+		hc := hooks.HookConfig{
+			Event:   hooks.HookEvent(hi.Event),
+			Type:    hooks.HookType(hi.Type),
+			Command: hi.Command,
+			Name:    hi.Name,
+		}
+		if hc.Type == "" {
+			hc.Type = hooks.TypeSubprocess
+		}
+		if !validHookEvent(hc.Event) {
+			slog.Warn("skipping hook with unknown event", "event", hi.Event)
+			continue
+		}
+		if hi.Timeout > 0 {
+			hc.Timeout = time.Duration(hi.Timeout) * time.Second
+		}
+		hookConfigs = append(hookConfigs, hc)
+	}
+
+	if cfg.Duet.Enabled {
+		hasDuetPreTool := false
+		for _, hc := range hookConfigs {
+			if hc.Name == "duet" && hc.Event == hooks.EventPreToolUse {
+				hasDuetPreTool = true
+				break
+			}
+		}
+		if !hasDuetPreTool {
+			hookConfigs = append(hookConfigs, hooks.HookConfig{
+				Event: hooks.EventPreToolUse,
+				Type:  hooks.TypeBuiltin,
+				Name:  "duet",
+			})
+		}
+	}
+
+	// Auto-capture: only append memory-capture HookConfigs when the store is
+	// available. Appending them unconditionally would mean the Runner always has
+	// a config referencing a builtin that was never Register'd, which causes a
+	// fail-open hook error on every tool call.
+	runner := hooks.NewRunner()
+	if cfg.Duet.Enabled {
+		runner.Register("duet", hooks.NewDuetHook(
+			rt.Provider,
+			cfg.Duet.ExtraDestructive,
+			cwd,
+			cfg.Permissions.SecretPathPatterns,
+			modelFn,
+			transcriptFn,
+		))
+	}
+	if mc := openMemoryCaptureBuiltin(cwd); mc != nil {
+		runner.Register("memory-capture", mc)
+		hookConfigs = append(hookConfigs,
+			hooks.HookConfig{Event: hooks.EventPostToolUse, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+			hooks.HookConfig{Event: hooks.EventSessionEnd, Type: hooks.TypeBuiltin, Name: "memory-capture"},
+		)
+	}
+
+	runner.Configure(hookConfigs)
+	return runner
+}
+
+// openMemoryCaptureBuiltin opens the per-project JSONL memory store and
+// returns a BuiltinHook that wraps MemoryCapture.Handle. Returns nil when
+// the store cannot be opened (best-effort: a missing store must not break
+// the agent loop).
+func openMemoryCaptureBuiltin(cwd string) hooks.BuiltinHook {
+	storeDir := filepath.Join(cwd, ".deepseek")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		slog.Warn("memory-capture: cannot create store directory", "path", storeDir, "err", err)
+	}
+	storePath := filepath.Join(cwd, ".deepseek", "memory.jsonl")
+	ms, err := memory.NewJSONLStore(storePath)
+	if err != nil {
+		slog.Warn("memory-capture: store unavailable", "path", storePath, "err", err)
+		return nil
+	}
+	mc := hooks.NewMemoryCapture(ms)
+	return func(ctx context.Context, in hooks.HookInput) (hooks.HookOutput, error) {
+		if hErr := mc.Handle(ctx, in); hErr != nil {
+			slog.Warn("memory-capture: handle error", "event", in.Event, "err", hErr)
+		}
+		return hooks.HookOutput{Decision: "continue"}, nil
 	}
 }

@@ -1,0 +1,50 @@
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-3);
+  height: 30px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  /* JetBrains Mono for all telemetry figures (spec §3.5 + Phase 2) */
+  font-family: var(--type-mono-family);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+.dot[data-status='idle'] { background: var(--text-3); }
+.dot[data-status='streaming'] {
+  background: var(--accent);
+  animation: statusPulse 1.6s var(--ease-standard) infinite;
+}
+.dot[data-status='waiting'] { background: var(--warning); }
+.dot[data-status='error'] { background: var(--danger); }
+@keyframes statusPulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.seg { display: inline-flex; align-items: center; gap: var(--s-1); white-space: nowrap; }
+/* Model is the headline label — ink, heavier weight */
+.model { color: var(--text); font-weight: 600; font-family: var(--type-mono-family); }
+/* Cache figures in brand blue (spec §3.6 / Phase 2 "cache → brand") */
+.cache { color: var(--cache); }
+.warn { color: var(--danger); }
+.retry { color: var(--warning); }
+.spacer { flex: 1; }
+.ctxWarn { color: var(--warning); }
+.ctxDanger { color: var(--danger); }
+.add { color: var(--add-fg); }
+.del { color: var(--del-fg); }
+.ctxRing {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: conic-gradient(var(--cache) var(--p, 0%), var(--border) 0);
+}
+.ctxWarn .ctxRing { background: conic-gradient(var(--warning) var(--p, 0%), var(--border) 0); }
+.ctxDanger .ctxRing { background: conic-gradient(var(--danger) var(--p, 0%), var(--border) 0); }

@@ -78,6 +78,18 @@ type Agent struct {
 	// goroutine, read from the agent goroutine, hence atomic.
 	stopRequested atomic.Bool
 
+	// steerQueue holds mid-turn user instructions injected via Steer while a
+	// Run is in flight. Drained at step boundaries (drainSteer) and appended to
+	// Messages as user messages, redirecting the turn without aborting it.
+	// Mirrors the stopRequested cross-goroutine pattern: written from the UI
+	// goroutine, read/drained from the agent goroutine, guarded by steerMu.
+	steerMu    sync.Mutex
+	steerQueue []string
+
+	// checkpoints is the named-checkpoint index for this session.
+	// Reset at the start of each Run so branch/resume works on the live step list.
+	checkpoints *CheckpointIndex
+
 	// Persister, if non-nil, receives session and snapshot bookkeeping
 	// alongside the in-memory Messages list. nil = ephemeral session
 	// (the -p one-shot mode runs this way).
@@ -241,6 +253,19 @@ type Agent struct {
 	// next turn, following the same pattern as injectLoopBreakNudge.
 	PostEditDiagnostics func(ctx context.Context, paths []string) string
 
+	// Verify, when non-nil, runs a shell command after each step that
+	// includes mutating tool calls. When the command exits non-zero, the
+	// synthesized feedback is injected as a synthetic user message so the
+	// model can fix the reported errors on its next turn.
+	//
+	// Verify is also consulted at model-stop time (when the model emits no
+	// tool calls): if the hook passes, the stop reason is promoted from
+	// StopModelDone to StopVerifiedDone; if it fails, the feedback is
+	// injected into a.Messages before returning so the caller (or a
+	// re-entered loop) has context about the failure. This is the single
+	// wiring point for verification — do not set a separate VerifyCmd field.
+	Verify *VerifyHook
+
 	// MCPRegistry is the MCP tool registry. nil = no MCP servers.
 	// Its SchemaHash feeds the epoch's mcp_schema_hash, so startup MCP
 	// discovery is part of the frozen prefix and mid-session schema
@@ -339,6 +364,8 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 		a.ThinkingMode = m
 	}
 
+	a.checkpoints = newCheckpointIndex()
+
 	// loopDetection is a method (it reads a.loopFloor), so StopWhen is wired
 	// after the literal rather than inside it.
 	a.StopWhen = []StopCondition{
@@ -376,6 +403,17 @@ func (a *Agent) Events() <-chan Event { return a.eventsCompat }
 // (TUI/CLI) should continue using Events() for backward compatibility.
 func (a *Agent) Bus() *Bus { return a.bus }
 
+// ToolIsReadOnly reports whether the named tool declares itself read-only via
+// the tools.ReadOnlyHint interface. Returns false for unknown tools.
+func (a *Agent) ToolIsReadOnly(name string) bool {
+	if t, ok := a.Tools.Get(name); ok {
+		if ro, ok := t.(tools.ReadOnlyHint); ok {
+			return ro.IsReadOnly()
+		}
+	}
+	return false
+}
+
 // EmitInfo pushes an out-of-band notice onto the event stream. Used by
 // adjacent components (e.g. llm.Client.OnRetry) that don't otherwise
 // hold the event channel but want to surface user-visible status.
@@ -409,6 +447,53 @@ func (a *Agent) RequestStop() {
 	a.stopRequested.Store(true)
 }
 
+// Steer queues a user instruction to be injected at the next step boundary of
+// the in-flight Run, redirecting the turn without aborting it. Safe to call
+// from a goroutine other than the one driving Run. Empty text is ignored.
+func (a *Agent) Steer(text string) {
+	if text == "" {
+		return
+	}
+	a.steerMu.Lock()
+	a.steerQueue = append(a.steerQueue, text)
+	a.steerMu.Unlock()
+}
+
+// drainSteer pops every queued steer instruction and appends each as a user
+// message (mirroring injectLoopBreakNudge's append+persist), returning whether
+// anything was drained. Called only from the agent goroutine at a step
+// boundary, where appending a user message keeps tool_call/tool_result pairing
+// valid.
+//
+// ctx should be the live step context (or the loop context before stepCtx is
+// created) so that a slow Persister call is cancelled when the step tears down,
+// rather than leaking into context.Background().
+func (a *Agent) drainSteer(ctx context.Context) bool {
+	a.steerMu.Lock()
+	pending := a.steerQueue
+	a.steerQueue = nil
+	a.steerMu.Unlock()
+	if len(pending) == 0 {
+		return false
+	}
+	for _, text := range pending {
+		blocks := []llm.ContentBlock{llm.TextBlock{Text: text}}
+		a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: blocks})
+		if a.Persister != nil {
+			_, _ = a.Persister.AppendUserMessage(ctx, blocks)
+		}
+	}
+	return true
+}
+
+// RecordCheckpoint implements tools.CheckpointRecorder. It associates name
+// with the current step count so /branch and --resume-at can find it.
+func (a *Agent) RecordCheckpoint(name string) int {
+	step := len(a.steps)
+	a.checkpoints.Record(name, step)
+	return step
+}
+
 // Run drives the loop until a stop condition fires or context cancels.
 // Returns the StopReason and any infrastructure error.
 //
@@ -424,9 +509,13 @@ func (a *Agent) Run(ctx context.Context, userPrompt string) (reason StopReason, 
 	// Clear any stop request from a previous run so a stale ctrl+c can't
 	// mislabel this run's termination.
 	a.stopRequested.Store(false)
+	a.steerMu.Lock()
+	a.steerQueue = nil
+	a.steerMu.Unlock()
 	// Each Run gets its own single loop-break nudge and a fresh detection floor.
 	a.loopNudged = false
 	a.loopFloor = 0
+	a.checkpoints = newCheckpointIndex()
 
 	defer func() {
 		a.bus.Publish(EventDone{Reason: reason, Err: err})
@@ -507,6 +596,12 @@ agentLoop:
 		default:
 		}
 
+		// Drain any mid-turn steering queued since the last iteration so the
+		// upcoming step sees the user's new instruction. Pass the loop-level
+		// ctx (not stepCtx, which hasn't been created yet) so the persister
+		// call is bounded by the session lifetime, not Background().
+		a.drainSteer(ctx)
+
 		// Per-step deadline covers BOTH the model turn and tool execution.
 		// stepCancel is always non-nil so we can defer it unconditionally.
 		stepCtx, stepCancel := stepContext(ctx, a.StepTimeout)
@@ -585,9 +680,38 @@ agentLoop:
 		}
 
 		if !hasTools {
+			// Mid-turn steering: if the user injected a new instruction while
+			// this (final) step ran, append it and keep the turn alive instead
+			// of ending. Without this, a steer landing during the last step
+			// would be stranded in the queue when the loop returns.
+			// Pass stepCtx so the persister call is cancelled if the step tears down.
+			if a.drainSteer(stepCtx) {
+				stepCancel()
+				a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
+				continue agentLoop
+			}
+			// Promote StopModelDone to StopVerifiedDone when a verify hook is
+			// configured and the final check passes. On failure, inject the
+			// feedback into a.Messages before returning so the caller (or a
+			// re-entered loop) has context about why the tree is dirty.
+			reason := StopModelDone
+			if a.Verify != nil && a.Verify.Cmd != "" {
+				if fb, ok := a.Verify.Run(stepCtx); ok {
+					reason = StopVerifiedDone
+				} else {
+					msg := []llm.ContentBlock{llm.TextBlock{Text: fb}}
+					a.Messages = append(a.Messages, llm.Message{
+						Role:   "user",
+						Blocks: msg,
+					})
+					if a.Persister != nil {
+						_, _ = a.Persister.AppendUserMessage(stepCtx, msg)
+					}
+				}
+			}
 			stepCancel()
-			a.bus.Publish(EventStepFinish{Reason: StopModelDone, Usage: step.Usage, Model: step.Model})
-			return StopModelDone, nil
+			a.bus.Publish(EventStepFinish{Reason: reason, Usage: step.Usage, Model: step.Model})
+			return reason, nil
 		}
 
 		// Tool execution shares the per-step deadline so a stuck tool
@@ -596,6 +720,7 @@ agentLoop:
 		// block for the model to react to, so there is no abort branch here.
 		a.runToolCalls(stepCtx, step.ToolCalls)
 		a.maybeFeedPostEditDiagnostics(stepCtx, step.ToolCalls)
+		a.maybeRunVerifyHook(stepCtx, step.ToolCalls)
 		stepCancel()
 		a.bus.Publish(EventStepFinish{Reason: StopUnknown, Usage: step.Usage, Model: step.Model})
 
@@ -616,6 +741,28 @@ func (a *Agent) ForceCompact(ctx context.Context) {
 	defer func() { a.CompactionCfg = saved }()
 	a.CompactionCfg.AutoCompactInputTokens = 1
 	a.maybeCompact(ctx)
+}
+
+// Compact forces an immediate compaction (honoring the preserve count) and
+// reports whether a compaction was performed. It is the exported companion to
+// ForceCompact, intended for CLI paths such as `dsc --compact` and for
+// testing: callers that need to distinguish "nothing to compact" from a real
+// compaction can inspect the bool; errors surface as a non-nil second return.
+//
+// Internally it borrows ForceCompact's threshold-lowering trick, but wraps a
+// snapshot of the message-list length so it can report whether the list
+// actually shrank.
+func (a *Agent) Compact(ctx context.Context) (compacted bool, err error) {
+	before := len(a.Messages)
+	// Catch any panic from the internal path and convert to an error so
+	// CLI callers get a clean failure rather than a crash.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("compaction panic: %v", r)
+		}
+	}()
+	a.ForceCompact(ctx)
+	return len(a.Messages) != before, nil
 }
 
 // compactForOverflow runs a forced compaction for context-overflow recovery.
@@ -1308,6 +1455,7 @@ func (a *Agent) streamWithReissue(ctx context.Context, req llm.Request) (streamR
 		}
 		if isReissuableStreamErr(sr.err) && attempt < maxStreamReissues {
 			a.bus.Publish(EventInfo{Text: fmt.Sprintf("stream stalled (%v); re-issuing turn", sr.err)})
+			a.bus.Publish(EventRetry{Attempt: attempt + 1, Max: maxStreamReissues})
 			continue
 		}
 		// Give up. Persist the partial assistant turn (reasoning + visible text
@@ -1675,6 +1823,44 @@ func (a *Agent) maybeFeedPostEditDiagnostics(ctx context.Context, calls []llm.To
 	}
 }
 
+// maybeRunVerifyHook runs the configured VerifyHook after steps that include
+// mutating tool calls. When the hook reports a failure, the feedback is
+// injected as a synthetic user message so the model can fix reported errors on
+// its next turn. No-op when Verify is nil, Cmd is empty, or the step had no
+// mutating tool calls.
+func (a *Agent) maybeRunVerifyHook(ctx context.Context, calls []llm.ToolCall) {
+	if a.Verify == nil || a.Verify.Cmd == "" {
+		return
+	}
+	// Only run after steps that include at least one mutating tool call.
+	hasMutating := false
+	for _, call := range calls {
+		tool, ok := a.Tools.Get(call.Function.Name)
+		if !ok {
+			continue
+		}
+		if ro, ok := tool.(tools.ReadOnlyHint); ok && ro.IsReadOnly() {
+			continue
+		}
+		hasMutating = true
+		break
+	}
+	if !hasMutating {
+		return
+	}
+
+	feedback, passed := a.Verify.Run(ctx)
+	if passed {
+		return
+	}
+
+	msg := []llm.ContentBlock{llm.TextBlock{Text: feedback}}
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: msg})
+	if a.Persister != nil {
+		_, _ = a.Persister.AppendUserMessage(ctx, msg)
+	}
+}
+
 // runToolCalls dispatches all tool calls from one step, respecting
 // permissions and the Duet validator. Calls without dependencies (i.e.
 // all of them — we don't model deps) run in parallel.
@@ -2024,12 +2210,21 @@ func (a *Agent) selectTurnThinking(userText string, repairErrorsLastTurn int) bo
 	case "off":
 		return false
 	case "adaptive":
-		return a.turnsSeen == 0 || repairErrorsLastTurn > 0
+		// A repair turn always thinks to recover. Otherwise the first turn primes
+		// reasoning — but not for a trivial greeting/ack, where the model returns
+		// reasoning_content ≈ the answer (a redundant "Thought for <1s" block over
+		// a duplicate of the reply).
+		if repairErrorsLastTurn > 0 {
+			return true
+		}
+		return a.turnsSeen == 0 && !llm.IsTrivialMessage(userText)
 	default:
 		if a.AutoReasoning {
 			return llm.SelectThinking(a.IsSubagent, userText, a.Thinking)
 		}
-		return a.Thinking
+		// Legacy default-on honors a.Thinking, but never forces it for a trivial
+		// greeting/ack — same redundant-thinking-block reason as above.
+		return a.Thinking && !llm.IsTrivialMessage(userText)
 	}
 }
 

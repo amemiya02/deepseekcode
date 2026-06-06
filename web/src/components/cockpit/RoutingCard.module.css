@@ -1,0 +1,41 @@
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  box-shadow: var(--shadow-1);
+}
+.title {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.title::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--route);
+  box-shadow: 0 0 8px var(--route);
+}
+.empty { margin: 0; color: var(--text-3); font: var(--type-label); }
+.hops { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.hop { display: flex; align-items: center; gap: var(--s-2); color: var(--text-3); font: var(--type-label); }
+.node {
+  color: var(--route);
+  font: var(--type-mono);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--route) 15%, transparent);
+  border: 1px solid color-mix(in oklch, var(--route) 35%, var(--border));
+}
+.reason { color: var(--text-3); margin-left: auto; }

@@ -1,0 +1,36 @@
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  box-shadow: var(--shadow-1);
+}
+.title {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.title::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cost);
+  box-shadow: 0 0 8px var(--cost);
+}
+.rows { margin: 0; display: flex; flex-direction: column; gap: var(--s-1); }
+.row { display: flex; justify-content: space-between; align-items: baseline; }
+.row dt { color: var(--text-3); font: var(--type-label); }
+.row dd { margin: 0; color: var(--text); font: var(--type-mono); font-variant-numeric: tabular-nums; }
+/* "this turn" is the headline figure — ink + brand accent per spec Phase 2. */
+.row:first-child { padding-bottom: var(--s-1); margin-bottom: var(--s-1); border-bottom: 1px solid var(--border); }
+.row:first-child dt { color: var(--text-2); }
+.row:first-child dd { color: var(--text); font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }

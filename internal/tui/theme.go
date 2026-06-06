@@ -544,6 +544,11 @@ func NebulaTheme() Theme { return buildTheme("nebula", nebulaPalette, nebulaDiff
 // AuroraTheme returns the aurora theme — cool teal & green lean.
 func AuroraTheme() Theme { return buildTheme("aurora", auroraPalette, auroraDiff) }
 
+// DefaultTheme returns the default dark theme (DeepSeek Ocean). It is the
+// package-level convenience constructor used by components that do not have
+// a Theme threaded in (e.g. CacheDoctorPanel in non-interactive rendering).
+func DefaultTheme() Theme { return DarkTheme() }
+
 // themeOption is one row in the /theme picker (mirrors modelOption).
 type themeOption struct {
 	ID    string // canonical id == Theme.Name: dark|light|midnight|nebula|aurora

@@ -1,0 +1,11 @@
+.head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--s-3, 12px); }
+.h2 { font: var(--type-title); color: var(--text); margin: 0; }
+.button { padding: var(--s-1, 4px) var(--s-3, 12px); background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--r-sm, 4px); cursor: pointer; font: var(--type-ui); }
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: grid; grid-template-columns: 14px 160px 1fr; align-items: center; gap: var(--s-2, 8px); padding: var(--s-2, 8px) 0; border-bottom: 1px solid var(--border); }
+.dot { width: 10px; height: 10px; border-radius: 50%; }
+.ok { background: var(--success); }
+.bad { background: var(--danger); }
+.name { color: var(--text); font: var(--type-ui); }
+.detail { color: var(--text-3); font: var(--type-label); }

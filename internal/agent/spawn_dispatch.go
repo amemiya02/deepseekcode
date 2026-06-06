@@ -55,9 +55,14 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 	if len(req.Tools) > 0 {
 		names = intersect(names, req.Tools)
 	}
-	// Remove "task" to prevent recursive spawning, unless def explicitly lists it.
+	// Remove "task" and "spawn_batch" to prevent unbounded recursive spawning,
+	// unless the def explicitly lists them. Both are re-registered below with a
+	// depth+1 LoopSpawner so the child gets depth-guarded versions.
 	if !contains(def.Tools, "task") {
 		names = remove(names, "task")
+	}
+	if !contains(def.Tools, "spawn_batch") {
+		names = remove(names, "spawn_batch")
 	}
 
 	// Plan mode: narrow whitelist to read-only tools and use ModePlan.
@@ -138,8 +143,12 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 		s.Parent.EmitInfo("agent def default_agent=" + def.DefaultAgent + " is parsed but not yet applied at spawn")
 	}
 
-	// If the child registry has the "task" tool, bind it with depth+1.
-	if _, ok := subReg.Get("task"); ok {
+	// Re-register "task" and "spawn_batch" with a depth+1 LoopSpawner so that
+	// recursive calls by the child agent respect MaxDepth. Both tools were
+	// stripped from the whitelist above; re-registering them here (when the
+	// parent had them) gives the child depth-guarded versions rather than
+	// leaving the tools absent entirely.
+	if _, ok := s.Parent.Tools.Get("task"); ok {
 		childSpawner := &LoopSpawner{
 			Client:   s.Client,
 			Parent:   s.Parent,
@@ -148,6 +157,16 @@ func (s *LoopSpawner) Spawn(ctx context.Context, req tools.SpawnRequest) (tools.
 			depth:    s.depth + 1,
 		}
 		subReg.Register(tools.NewSubagentTool(childSpawner))
+	}
+	if _, ok := s.Parent.Tools.Get("spawn_batch"); ok {
+		batchSpawner := &LoopSpawner{
+			Client:   s.Client,
+			Parent:   s.Parent,
+			Defs:     s.Defs,
+			MaxDepth: maxD,
+			depth:    s.depth + 1,
+		}
+		subReg.Register(tools.NewSpawnBatchTool(batchSpawner, 4))
 	}
 
 	// When the parent is emitting a JSONL trace (benchmark harness), tee this

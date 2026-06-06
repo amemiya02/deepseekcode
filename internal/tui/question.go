@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -139,7 +140,7 @@ func (q *QuestionFlow) Render(t Theme, width int) string {
 	lines = append(lines, "")
 
 	if len(qu.Options) == 0 {
-		lines = append(lines, t.Hint.Render("  (no options — press Enter to skip)"))
+		lines = append(lines, t.Hint.Render("  "+i18n.T("question.confirm")))
 	} else {
 		for i, opt := range qu.Options {
 			prefix := "  "
@@ -163,11 +164,19 @@ func (q *QuestionFlow) Render(t Theme, width int) string {
 		}
 	}
 
-	multiHint := ""
-	if qu.Multiple {
-		multiHint = " · space toggle"
+	var hint string
+	if len(qu.Options) == 0 {
+		// Free-text input: the confirm line already added above suffices;
+		// show the generic "type and press ⏎" hint here too so the hint
+		// line is always present (no layout shift when toggling modes).
+		hint = t.Hint.Render("  " + i18n.T("question.input.hint"))
+	} else {
+		multiHint := ""
+		if qu.Multiple {
+			multiHint = " · space toggle"
+		}
+		hint = t.Hint.Render("  " + i18n.T("question.nav.hint", multiHint))
 	}
-	hint := t.Hint.Render(fmt.Sprintf("  ↑↓ move%s · ⏎ confirm · esc cancel", multiHint))
 	lines = append(lines, "", hint)
 
 	body := strings.Join(lines, "\n")

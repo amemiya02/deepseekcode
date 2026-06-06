@@ -3,12 +3,35 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
+
+// StatusLabel returns the i18n-translated label for a named status phase.
+// Valid keys: "thinking", "streaming", "idle", "error", "compacting".
+// Unknown keys fall through to the raw key via i18n.T.
+func StatusLabel(phase string) string {
+	switch phase {
+	case "thinking":
+		return i18n.T("status.thinking")
+	case "streaming":
+		return i18n.T("status.streaming")
+	case "idle":
+		return i18n.T("status.idle")
+	case "error":
+		return i18n.T("status.error")
+	case "compacting":
+		return i18n.T("status.compacting")
+	default:
+		return phase
+	}
+}
 
 // HUDData holds the data for rendering the status HUD.
 type HUDData struct {
 	Model           string
 	Effort          string
+	Phase           string // agent phase: "thinking", "streaming", "idle", "error", "compacting"
 	ContextTokens   int
 	ContextLimit    int
 	CacheHitRatio   float64
@@ -39,6 +62,11 @@ func RenderHUD(data HUDData, width int) string {
 			model += " " + data.Effort
 		}
 		parts = append(parts, model)
+	}
+
+	// Agent phase (thinking, streaming, idle, error, compacting)
+	if data.Phase != "" {
+		parts = append(parts, StatusLabel(data.Phase))
 	}
 
 	// Cache ratio (only when hit+miss token data exists). The persistent

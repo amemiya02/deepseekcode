@@ -27,13 +27,13 @@ jobs:
         run: go mod download
 
       - name: vet
-        run: go vet ./...
+        run: go vet $(go list ./... | grep -v /desktop)
 
       - name: build
-        run: go build ./...
+        run: go build $(go list ./... | grep -v /desktop)
 
       - name: test
-        run: go test ./... -count=1
+        run: go test $(go list ./... | grep -v /desktop) -count=1
 
   cross-build:
     name: cross-compile binaries

@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 )
 
@@ -134,10 +135,10 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 
 	const btnW = 20
 	btns := []struct{ key, label string }{
-		{"Y", "allow once"},
-		{"S", "session"},
-		{"A", "always"},
-		{"N", "deny"},
+		{"Y", i18n.T("permission.granted")},
+		{"S", i18n.T("permission.session")},
+		{"A", i18n.T("permission.always")},
+		{"N", i18n.T("permission.denied")},
 	}
 	renderBtn := func(idx int) string {
 		b := btns[idx]

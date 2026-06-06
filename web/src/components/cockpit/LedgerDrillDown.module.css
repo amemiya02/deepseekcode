@@ -1,0 +1,18 @@
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.title { margin: 0; font: var(--type-label); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.muted { margin: 0; color: var(--text-3); font: var(--type-label); }
+.error { margin: 0; color: var(--danger); font: var(--type-label); }
+.ledger { border-collapse: collapse; width: 100%; font: var(--type-mono); }
+.ledger th { text-align: right; color: var(--text-3); font: var(--type-label); padding: var(--s-1); border-bottom: 1px solid var(--border); }
+.ledger th:first-child { text-align: left; }
+.ledger td { text-align: right; color: var(--text-2); padding: var(--s-1); border-bottom: 1px solid var(--border); }
+.ledger td:first-child { text-align: left; }
+.evicted td { color: var(--danger); }

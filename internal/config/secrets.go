@@ -12,6 +12,12 @@ import (
 
 var ErrSecretsPermsTooOpen = errors.New("secrets file is not 0600; refusing to load (chmod 600 the file)")
 
+// ErrNoAPIKey is returned by ResolveSecret / ResolveSecretWithSource when no
+// API key can be found (no explicit key, the env var is unset, and the secrets
+// file does not contain an entry for the provider). It is distinct from I/O
+// errors such as bad file permissions or a TOML parse failure.
+var ErrNoAPIKey = errors.New("no api key found for provider")
+
 type SecretSource string
 
 const (
@@ -100,5 +106,5 @@ func missingSecretError(p ProviderConfigTOML, path string) error {
 	if env == "" {
 		env = "<provider env_var>"
 	}
-	return fmt.Errorf("no api key found for provider %s (set %s env var or add to %s)", p.Type, env, path)
+	return fmt.Errorf("%w: provider %s (set %s env var or add to %s)", ErrNoAPIKey, p.Type, env, path)
 }

@@ -44,6 +44,7 @@ const (
 	StopContextCancel            // ctx.Err()
 	StopUserRequested            // explicit cancellation from TUI
 	StopStepTimeout              // per-step deadline exceeded (non-success)
+	StopVerifiedDone             // model done AND verify command passed
 )
 
 func (r StopReason) String() string {
@@ -60,6 +61,8 @@ func (r StopReason) String() string {
 		return "user_requested"
 	case StopStepTimeout:
 		return "step_timeout"
+	case StopVerifiedDone:
+		return "verified_done"
 	}
 	return "unknown"
 }
@@ -69,7 +72,7 @@ func (r StopReason) String() string {
 // timeout, a loop or step-cap halt, or an unknown/error exit — is a
 // non-success termination and must not be rendered or recorded as "done".
 func (r StopReason) IsSuccess() bool {
-	return r == StopModelDone
+	return r == StopModelDone || r == StopVerifiedDone
 }
 
 // StopCondition examines recent history and returns (true, reason) when

@@ -1,0 +1,11 @@
+.overlay { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; z-index: 60; }
+.card { width: min(440px, 92vw); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg, 12px); padding: var(--s-6, 24px); }
+.h2 { font: var(--type-title); color: var(--text); margin: 0 0 var(--s-4, 16px); }
+.field { display: flex; flex-direction: column; gap: var(--s-1, 4px); margin-bottom: var(--s-3, 12px); color: var(--text-2); font: var(--type-ui); }
+.input { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm, 4px); padding: var(--s-1, 4px); font: var(--type-mono); }
+.choices { display: flex; gap: var(--s-2, 8px); margin-bottom: var(--s-4, 16px); }
+.choice { flex: 1; padding: var(--s-2, 8px); background: var(--card); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--r-sm, 4px); cursor: pointer; font: var(--type-ui); }
+.sel { border-color: var(--accent); color: var(--text); background: var(--accent-weak); }
+.button { padding: var(--s-1, 4px) var(--s-3, 12px); background: var(--accent); color: var(--text-on-accent); border: none; border-radius: var(--r-sm, 4px); cursor: pointer; font: var(--type-ui); }
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
+.err { color: var(--danger); font: var(--type-body); }

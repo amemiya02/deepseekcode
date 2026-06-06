@@ -168,6 +168,15 @@ default_model = "gpt-4o"
 完整说明见 [docs/config.md](docs/config.md) 和
 [docs/PROVIDERS.md](docs/PROVIDERS.md)。
 
+## 环境变量
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `DEEPSEEKCODE_API_KEY` | *(必填)* | DeepSeek API 密钥 |
+| `DEEPSEEKCODE_BASE_URL` | `https://api.deepseek.com` | API 基础 URL；中国大陆用户可设为镜像地址以提升访问速度 |
+| `DEEPSEEKCODE_PROXY` | *(无)* | 显式 HTTP/HTTPS 代理 URL；优先于 `HTTPS_PROXY`/`HTTP_PROXY` |
+| `DEEPSEEKCODE_LANG` | 自动检测 | UI 语言覆盖（`zh-CN`、`en`）；回退到 `LANG` 环境变量 |
+
 ## 文档
 
 - [配置](docs/config.md)

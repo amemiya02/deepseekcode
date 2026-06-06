@@ -122,6 +122,75 @@ func TestRenderSkillDirectoryEmpty(t *testing.T) {
 	}
 }
 
+func TestInjectRecalled(t *testing.T) {
+	boundary := DynamicContextBoundary
+
+	cases := []struct {
+		name          string
+		systemPrompt  string
+		recalled      string
+		wantPrefix    string // text that must appear before boundary in result
+		wantInDynamic string // text that must appear after boundary in result
+		// wantPreserved is pre-existing trailing dynamic content that must SURVIVE
+		// injection. A regression to a naive append (systemPrompt[:after]+recalled,
+		// dropping systemPrompt[after:]) would silently delete it.
+		wantPreserved string
+	}{
+		{
+			name:          "boundary present, recalled inserted after boundary",
+			systemPrompt:  "Static base." + boundary + "Existing dynamic.",
+			recalled:      "recalled fact",
+			wantPrefix:    "Static base.",
+			wantInDynamic: "recalled fact",
+			wantPreserved: "Existing dynamic.",
+		},
+		{
+			name:          "boundary absent, boundary appended then recalled",
+			systemPrompt:  "Static base only.",
+			recalled:      "recalled fact",
+			wantPrefix:    "Static base only.",
+			wantInDynamic: "recalled fact",
+		},
+		{
+			name:          "empty recalled string leaves prompt structurally intact",
+			systemPrompt:  "Static base." + boundary + "Existing dynamic.",
+			recalled:      "",
+			wantPrefix:    "Static base.",
+			wantInDynamic: "Existing dynamic.",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := InjectRecalled(tc.systemPrompt, tc.recalled)
+
+			idx := strings.Index(result, boundary)
+			if idx < 0 {
+				t.Fatalf("boundary not found in result: %q", result)
+			}
+			frozenPart := result[:idx]
+			dynamicPart := result[idx:]
+
+			if tc.wantPrefix != "" && !strings.Contains(frozenPart, tc.wantPrefix) {
+				t.Errorf("frozen prefix %q does not contain %q", frozenPart, tc.wantPrefix)
+			}
+			if tc.recalled != "" && strings.Contains(frozenPart, tc.recalled) {
+				t.Errorf("recalled text %q leaked into frozen prefix %q", tc.recalled, frozenPart)
+			}
+			if tc.wantInDynamic != "" && !strings.Contains(dynamicPart, tc.wantInDynamic) {
+				t.Errorf("dynamic section %q does not contain %q", dynamicPart, tc.wantInDynamic)
+			}
+			// Pre-existing trailing content after the boundary must be preserved.
+			// This catches a regression to a naive append that drops
+			// systemPrompt[after:].
+			if tc.wantPreserved != "" && !strings.Contains(dynamicPart, tc.wantPreserved) {
+				t.Errorf("pre-existing trailing content %q was dropped from result %q",
+					tc.wantPreserved, result)
+			}
+		})
+	}
+}
+
 func TestRenderSkillDirectoryVerbatim(t *testing.T) {
 	dir := "pdf | edit PDFs | direct | abc123abc123 | read_file\ngit | git ops | subagent | def456def456 | bash"
 	got := renderSkillDirectory(dir)

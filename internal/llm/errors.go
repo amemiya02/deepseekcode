@@ -3,6 +3,7 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -40,6 +41,21 @@ func IsTransient(err error) bool {
 		return false
 	}
 	return a.Status == 429 || a.Status >= 500
+}
+
+// isNetworkError reports whether err is a low-level network failure (connection
+// refused, DNS failure, TLS handshake error, etc.) as opposed to an HTTP-level
+// error. These are always transient in a mirror-retry scenario: the mirror is
+// simply unreachable, and the next mirror should be tried.
+func isNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// A *url.Error from the http client already wraps net.OpError-level
+	// failures (connection refused, DNS, TLS handshake), so matching it is
+	// sufficient; a separate *net.OpError branch is dead in this path.
+	var urlErr *url.Error
+	return errors.As(err, &urlErr)
 }
 
 // IsContextOverflow reports whether err is a provider rejection for exceeding

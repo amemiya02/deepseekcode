@@ -29,6 +29,7 @@ type Config struct {
 	MCPServers  map[string]MCPServerConfig    `toml:"mcp_servers"`
 	Web         WebConfig                     `toml:"web"`
 	Sandbox     SandboxConfig                 `toml:"sandbox"`
+	Network     NetworkConfig                 `toml:"network"`
 	Active      ActiveConfig                  `toml:"active"`
 	Providers   map[string]ProviderConfigTOML `toml:"providers"`
 	UI          UIConfig                      `toml:"ui"`
@@ -53,6 +54,14 @@ type UIConfig struct {
 	// Language overrides the UI message language for API errors. "" or "auto"
 	// inspects LC_ALL/LC_MESSAGES/LANG; "en" forces English; "zh" forces Chinese.
 	Language string `toml:"language"`
+	// Accent is the colour accent token (e.g. "indigo", "terracotta") used by
+	// the desktop SPA's ThemeProvider. Persisted so the Appearance section
+	// round-trips correctly. Empty means "use the theme default".
+	Accent string `toml:"accent"`
+	// Density is the layout density token ("comfortable" | "compact") used by
+	// the desktop SPA. Persisted so the Appearance section round-trips.
+	// Empty means "use the theme default".
+	Density string `toml:"density"`
 }
 
 // WebConfig configures web fetch and search tools.
@@ -139,6 +148,24 @@ type PermissionsConfig struct {
 	AllowBash          []string    `toml:"allow_bash"`
 	SecretPathPatterns []string    `toml:"secret_path_patterns"`
 	Rules              RulesConfig `toml:"rules"`
+	// Default is the autonomy/permission level selected during onboarding.
+	// Accepted values: "ask", "auto", "full". Empty means "ask" (safest).
+	Default string `toml:"default"`
+}
+
+// NetworkConfig controls outbound proxy settings for the gateway HTTP client.
+type NetworkConfig struct {
+	// ProxyMode selects the proxy strategy: "auto" (platform default),
+	// "env" (HTTPS_PROXY / NO_PROXY env vars), "custom" (explicit URL below),
+	// "off" (bypass all proxies). Empty → "auto".
+	ProxyMode string `toml:"proxy_mode"`
+	// ProxyScheme is the scheme for the custom proxy: "http", "https",
+	// "socks5", or "socks5h". Only used when ProxyMode == "custom".
+	ProxyScheme string `toml:"proxy_scheme"`
+	// ProxyURL is the host:port (no scheme) of the custom proxy.
+	ProxyURL string `toml:"proxy_url"`
+	// NoProxy is the comma-separated no-proxy list used when ProxyMode == "custom".
+	NoProxy string `toml:"no_proxy"`
 }
 
 type RulesConfig struct {
@@ -180,6 +207,20 @@ type MCPServerConfig struct {
 	TimeoutSeconds int               `toml:"timeout_seconds"`
 	EnabledTools   []string          `toml:"enabled_tools"`  // allowlist: only these tools exposed
 	DisabledTools  []string          `toml:"disabled_tools"` // blocklist: these tools hidden
+	Disabled       bool              `toml:"disabled,omitempty"` // configured but not connected
+}
+
+// ActiveMCPServers returns the subset of MCPServers that are not Disabled, so the
+// runtime bridge and doctor connect only enabled servers. The result is a new map.
+func (c Config) ActiveMCPServers() map[string]MCPServerConfig {
+	out := make(map[string]MCPServerConfig, len(c.MCPServers))
+	for name, srv := range c.MCPServers {
+		if srv.Disabled {
+			continue
+		}
+		out[name] = srv
+	}
+	return out
 }
 
 // Load reads user + project config and overlays them onto defaults.
@@ -349,6 +390,25 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	if len(ov.Permissions.Rules.Ask) > 0 {
 		base.Permissions.Rules.Ask = ov.Permissions.Rules.Ask
 	}
+	if ov.Permissions.Default != "" {
+		base.Permissions.Default = ov.Permissions.Default
+	}
+
+	// Network / proxy: copy non-empty values so users can clear fields by
+	// setting an explicit empty in project config if needed. NoProxy may
+	// legitimately be empty, so we always overlay it when the key is defined.
+	if ov.Network.ProxyMode != "" {
+		base.Network.ProxyMode = ov.Network.ProxyMode
+	}
+	if ov.Network.ProxyScheme != "" {
+		base.Network.ProxyScheme = ov.Network.ProxyScheme
+	}
+	if ov.Network.ProxyURL != "" {
+		base.Network.ProxyURL = ov.Network.ProxyURL
+	}
+	if meta.IsDefined("network", "no_proxy") {
+		base.Network.NoProxy = ov.Network.NoProxy
+	}
 
 	if ov.Sessions.TTLDays != 0 {
 		base.Sessions.TTLDays = ov.Sessions.TTLDays
@@ -393,6 +453,18 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	}
 	if meta.IsDefined("sandbox", "allow_network") {
 		base.Sandbox.AllowNetwork = ov.Sandbox.AllowNetwork
+	}
+
+	// UI string fields: copy when the overlay explicitly sets them so that a
+	// process restart (or second GET /v1/config) round-trips saved values.
+	if ov.UI.Language != "" {
+		base.UI.Language = ov.UI.Language
+	}
+	if ov.UI.Accent != "" {
+		base.UI.Accent = ov.UI.Accent
+	}
+	if ov.UI.Density != "" {
+		base.UI.Density = ov.UI.Density
 	}
 
 	// UI: TransparentBackground defaults to false, so only flip when the

@@ -1,0 +1,32 @@
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  min-width: 240px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font: inherit;
+}
+.item:hover {
+  background: var(--accent-weak);
+}
+.disclaimer {
+  margin: 4px 4px 2px;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  line-height: 1.3;
+}

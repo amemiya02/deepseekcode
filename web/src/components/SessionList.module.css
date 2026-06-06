@@ -1,0 +1,11 @@
+.list { display: flex; flex-direction: column; gap: var(--s-4); }
+.group { display: flex; flex-direction: column; gap: 2px; }
+.groupLabel {
+  margin: 0;
+  padding: var(--s-1) var(--s-2);
+  font: var(--type-label);
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.empty { color: var(--text-3); padding: var(--s-2); font: var(--type-ui); }

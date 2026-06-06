@@ -1,0 +1,55 @@
+# Minimal Wails v3 Taskfile for the DeepSeekCode desktop wrapper.
+#
+# This is a hand-authored task file (not the full generated one): it drives the
+# documented `wails3` commands directly. Run `wails3 task <name>` or `task
+# <name>` (go-task) from the desktop/ directory. A full generated Taskfile +
+# build/ asset tree can be produced later with `wails3 init`/`wails3 update
+# build-assets` once the wails3 CLI is installed.
+#
+# Prereq: the embedded SPA must be built first (`make web` from the repo root
+# populates ../webapp/dist, which the Go app embeds via webapp.DistFS()).
+version: '3'
+
+vars:
+  APP_NAME: dsc-desktop
+  BIN_DIR: bin
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  # Build the embedded SPA (delegates to the repo root Makefile `web` target).
+  web:
+    dir: ..
+    cmds:
+      - make web
+
+  # Stage the tracked v3 project config into the (gitignored) build/ tree that
+  # wails3 reads from.
+  config:
+    cmds:
+      - mkdir -p build
+      - cp wails.config.yml build/config.yml
+
+  # Build the desktop binary with the SPA embedded (-tags withwebapp).
+  build:
+    deps: [config, web]
+    cmds:
+      - wails3 build -tags withwebapp
+
+  # Run the development build with live reload.
+  dev:
+    cmds:
+      - wails3 dev
+
+  # Run the most recently built binary.
+  run:
+    cmds:
+      - ./{{.BIN_DIR}}/{{.APP_NAME}}
+
+  # Package the app into a distributable bundle.
+  package:
+    deps: [web]
+    cmds:
+      - wails3 package -tags withwebapp

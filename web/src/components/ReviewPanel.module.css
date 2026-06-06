@@ -1,0 +1,42 @@
+.review {
+  display: grid;
+  /* grid-template-columns set inline (listW px) so the seam is draggable */
+  height: 100%;
+  overflow: hidden;
+}
+
+.list {
+  overflow-y: auto;
+  /* border-right removed — the splitter is the seam now */
+}
+
+.splitter {
+  cursor: col-resize;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+.splitter::before {
+  content: '';
+  width: 1px;
+  height: 100%;
+  background: var(--border);
+}
+.splitter:hover, .splitter:focus-visible { background: var(--accent-weak); outline: none; }
+.splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
+
+.hero {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.placeholder {
+  margin: auto;
+  padding: 2rem;
+  color: var(--text-3, #888);
+  text-align: center;
+  font-size: var(--type-label, 0.8rem);
+}

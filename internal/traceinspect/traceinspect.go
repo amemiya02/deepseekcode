@@ -97,11 +97,15 @@ func InspectFile(path string) (Report, error) {
 
 	rep := Report{Path: path}
 	epochs := map[string]*EpochSummary{}
-	seenEpochs := map[string]bool{}   // first prefix.snapshot per epoch = expected miss
-	uniqueHashes := map[string]bool{} // distinct static_prefix_hash values
-	reasonCounts := map[string]int{}  // prefix.snapshot Reason counts
-	repairKinds := map[string]int{}   // repair Kind counts
-	repairTools := map[string]int{}   // repair Tool counts
+	seenEpochs := map[string]bool{}      // first prefix.snapshot per epoch = expected miss
+	seenUsageEpochs := map[string]bool{} // first usage record per epoch = expected-miss turn
+	uniqueHashes := map[string]bool{}    // distinct static_prefix_hash values
+	reasonCounts := map[string]int{}     // prefix.snapshot Reason counts
+	repairKinds := map[string]int{}      // repair Kind counts
+	repairTools := map[string]int{}      // repair Tool counts
+	// Tokens from the expected-miss first turn of each epoch. Excluded from
+	// CacheHitRate so that a normal cold-start does not penalise the gate.
+	var warmHitTokens, warmMissTokens int
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
@@ -146,11 +150,21 @@ func InspectFile(path string) (Report, error) {
 			}
 		case "usage":
 			rep.TotalUsageTurns++
+			isFirstTurn := !seenUsageEpochs[r.EpochID]
+			if r.EpochID != "" {
+				seenUsageEpochs[r.EpochID] = true
+			}
 			if r.CacheHitTokens != nil {
 				rep.CacheHitTokens += *r.CacheHitTokens
+				if !isFirstTurn {
+					warmHitTokens += *r.CacheHitTokens
+				}
 			}
 			if r.CacheMissTokens != nil {
 				rep.CacheMissTokens += *r.CacheMissTokens
+				if !isFirstTurn {
+					warmMissTokens += *r.CacheMissTokens
+				}
 			}
 			if r.OutputTokens != nil {
 				rep.OutputTokens += *r.OutputTokens
@@ -203,6 +217,15 @@ func InspectFile(path string) (Report, error) {
 
 	rep.UniquePrefixHashes = len(uniqueHashes)
 
+	// CacheHitRate is computed over warm turns only (turns 2+ of each epoch),
+	// excluding the expected cold-start first turn. This matches the semantic
+	// intent of the regression gate: the first turn of an epoch is always a
+	// cache miss by design and should not penalise the hit-rate threshold.
+	warmTotal := warmHitTokens + warmMissTokens
+	if warmTotal > 0 {
+		rep.CacheHitRate = float64(warmHitTokens) / float64(warmTotal)
+	}
+
 	// Aggregate prefix reasons sorted by descending count, then ascending reason.
 	for reason, count := range reasonCounts {
 		rep.PrefixReasons = append(rep.PrefixReasons, PrefixReasonSummary{Reason: reason, Count: count})
@@ -236,10 +259,6 @@ func InspectFile(path string) (Report, error) {
 		return rep.RepairTools[i].Name < rep.RepairTools[j].Name
 	})
 
-	totalInput := rep.CacheHitTokens + rep.CacheMissTokens
-	if totalInput > 0 {
-		rep.CacheHitRate = float64(rep.CacheHitTokens) / float64(totalInput)
-	}
 	for _, e := range epochs {
 		if e.Role == "subagent" {
 			rep.SubagentEpochs++

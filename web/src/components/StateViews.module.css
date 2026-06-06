@@ -1,0 +1,32 @@
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2, 8px);
+  padding: var(--s-6, 24px);
+  color: var(--text-2);
+  text-align: center;
+}
+.spinner {
+  color: var(--accent);
+  animation: spin var(--dur-slow, 0.8s) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+.title { color: var(--text); font: var(--type-title); margin: 0; }
+.hint { color: var(--text-3); font: var(--type-body); margin: 0; }
+.error { color: var(--danger); }
+.error .msg { color: var(--danger); font: var(--type-body); margin: 0; }
+.retry {
+  margin-top: var(--s-2, 8px);
+  padding: var(--s-1, 4px) var(--s-3, 12px);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--r-sm, 4px);
+  cursor: pointer;
+  font: var(--type-ui);
+}
+@keyframes spin { to { transform: rotate(360deg); } }

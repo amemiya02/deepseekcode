@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tracked, hand-maintained Info.plist for the self-contained macOS .app packager
+  (desktop/package-darwin.sh, driven by `make desktop`). It deliberately does NOT
+  live under desktop/build/ (that tree is gitignored and only exists after the
+  wails3 CLI regenerates it), so a fresh checkout can package the app with just
+  Go + stock macOS tools. Keep the identifiers in sync with desktop/wails.config.yml.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>CFBundleExecutable</key>
+		<string>DeepSeekCode</string>
+		<key>CFBundleName</key>
+		<string>DeepSeekCode</string>
+		<key>CFBundleDisplayName</key>
+		<string>DeepSeekCode</string>
+		<key>CFBundleIdentifier</key>
+		<string>com.amemiya02.deepseekcode</string>
+		<key>CFBundleIconFile</key>
+		<string>icon</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+		<string>0.0.1</string>
+		<key>CFBundleVersion</key>
+		<string>0.0.1</string>
+		<key>CFBundleGetInfoString</key>
+		<string>DeepSeekCode — agentic coding, local-first.</string>
+		<key>NSHumanReadableCopyright</key>
+		<string>(c) 2026, amemiya02</string>
+		<key>LSApplicationCategoryType</key>
+		<string>public.app-category.developer-tools</string>
+		<key>LSMinimumSystemVersion</key>
+		<string>12.0.0</string>
+		<key>NSHighResolutionCapable</key>
+		<true/>
+		<key>LSUIElement</key>
+		<false/>
+		<!--
+		  The desktop shell runs the gateway in-process on 127.0.0.1 and the
+		  embedded SPA calls it over http://127.0.0.1:<port>/v1. Allow loopback
+		  HTTP without weakening App Transport Security for the public internet.
+		-->
+		<key>NSAppTransportSecurity</key>
+		<dict>
+			<key>NSAllowsLocalNetworking</key>
+			<true/>
+		</dict>
+	</dict>
+</plist>

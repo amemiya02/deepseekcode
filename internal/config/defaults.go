@@ -53,6 +53,7 @@ func Default() Config {
 			ExtraDestructive:   nil,
 		},
 		Permissions: PermissionsConfig{
+			Default: "ask",
 			AllowBash: []string{
 				"git status *",
 				"git log *",
@@ -83,6 +84,15 @@ func Default() Config {
 			AllowReadPaths:  []string{"/usr", "/System", "/Library"},
 			AllowWritePaths: nil,
 			AllowNetwork:    false,
+		},
+		UI: UIConfig{
+			Accent:   "indigo",
+			Density:  "comfortable",
+			Language: "auto",
+		},
+		Network: NetworkConfig{
+			ProxyMode:   "auto",
+			ProxyScheme: "http",
 		},
 		Active: ActiveConfig{Provider: "deepseek"},
 		Providers: map[string]ProviderConfigTOML{

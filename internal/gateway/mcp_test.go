@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 )
 
 // withFakeMCPIO installs an in-memory raw store + a load seam, returning cleanup.
@@ -121,5 +122,23 @@ func TestMCPToggleDisables(t *testing.T) {
 	servers := (*raw)["mcp_servers"].(map[string]any)
 	if servers["cg"].(map[string]any)["disabled"] != true {
 		t.Fatalf("not toggled: %#v", *raw)
+	}
+}
+
+func TestMCPStatusOverlayWhenRegistryWired(t *testing.T) {
+	_, cleanup := withFakeMCPIO(t, map[string]config.MCPServerConfig{"cg": {Command: "codegraph"}})
+	defer cleanup()
+	reg := mcp.NewRegistry() // no live connection; Snapshots() returns []
+	h := NewHandler(nil, "", WithMCPRegistry(reg))
+	req := httptest.NewRequest(http.MethodGet, "/v1/mcp", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body struct{ Items []mcpItem `json:"items"` }
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Items) != 1 || body.Items[0].Status == "connected" {
+		t.Fatalf("items = %#v", body.Items)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 )
 
 func TestServeBadFlagReturnsError(t *testing.T) {
@@ -56,7 +57,7 @@ func TestServeACPExitsOnEOF(t *testing.T) {
 // the gateway WITHOUT a bearer token, so GET / must NOT return 401.
 func TestServeLoopbackNoAuth(t *testing.T) {
 	sm := acp.NewSessionManager(acp.RealAgentFactory)
-	handler, token := buildServeHandler(sm, "127.0.0.1:8080")
+	handler, token := buildServeHandler(sm, "127.0.0.1:8080", mcp.NewRegistry())
 	if token != "" {
 		t.Fatalf("loopback bind must not generate a token, got %q", token)
 	}
@@ -83,7 +84,7 @@ func TestServeLoopbackNoAuth(t *testing.T) {
 // and with the correct token returns 200.
 func TestServeRemoteRequiresToken(t *testing.T) {
 	sm := acp.NewSessionManager(acp.RealAgentFactory)
-	handler, token := buildServeHandler(sm, "192.168.1.5:8080")
+	handler, token := buildServeHandler(sm, "192.168.1.5:8080", mcp.NewRegistry())
 	if token == "" {
 		t.Fatal("non-loopback bind must generate a bearer token")
 	}

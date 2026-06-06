@@ -17,6 +17,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
 	"github.com/amemiya02/deepseekcode/internal/gateway"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 )
@@ -65,7 +66,9 @@ func runServe(args []string) error {
 	// loopback bind (the default) it is served WITHOUT a bearer token so a local
 	// browser works out of the box; on a non-loopback bind the token is required
 	// and printed.
-	handler, token := buildServeHandler(sm, bindAddr)
+	mcpReg := mcp.NewRegistry()
+	defer mcpReg.Shutdown()
+	handler, token := buildServeHandler(sm, bindAddr, mcpReg)
 	if token != "" {
 		fmt.Fprintf(os.Stderr, "dsc serve: WARNING binding to non-loopback address %s — the agent gateway is reachable from the network\n", bindAddr)
 		fmt.Fprintf(os.Stderr, "Gateway auth token: %s\n", token)
@@ -146,7 +149,7 @@ func hostOf(addr string) string {
 // bearer-token middleware and returns the generated token so the caller can
 // print it. Factored out of runServe so the auth decision is unit-testable
 // without binding a socket or driving a signal.
-func buildServeHandler(sm *acp.SessionManager, bindAddr string) (http.Handler, string) {
+func buildServeHandler(sm *acp.SessionManager, bindAddr string, mcpReg *mcp.Registry) (http.Handler, string) {
 	// Wire the same capabilities the in-process desktop gateway (DefaultHandler)
 	// gets, so `dsc serve` is not a degraded shell: the process working dir as the
 	// workspace root (makes /v1/files, /v1/file and /v1/add-to-chat work instead of
@@ -158,6 +161,7 @@ func buildServeHandler(sm *acp.SessionManager, bindAddr string) (http.Handler, s
 	opts := []gateway.Option{
 		gateway.WithWorkspaceRoot(wd),
 		gateway.WithSnapshots(snapshots.New("")),
+		gateway.WithMCPRegistry(mcpReg),
 	}
 	if store, err := session.Open(""); err != nil {
 		fmt.Fprintf(os.Stderr, "dsc serve: session store unavailable (%v) — checkpoint/rewind disabled\n", err)

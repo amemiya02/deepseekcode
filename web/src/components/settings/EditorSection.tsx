@@ -1,64 +1,57 @@
-import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
-import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
+import { useThemeStore, setThemeSettings, type TranscriptVerbosity } from '../../lib/theme/store'
+import { useConfig } from '../../lib/useConfig'
+import { BrandedSelect } from '../BrandedSelect'
+import { Switch } from '../Switch'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
+const VERBOSITY: TranscriptVerbosity[] = ['normal', 'verbose', 'summary']
+
 export function EditorSection() {
-  const [cfg, setCfg] = useState<ConfigDTO | null>(null)
-  const [error, setError] = useState('')
-
-  async function load() {
-    setError('')
-    setCfg(null)
-    try {
-      setCfg(await fetchConfig())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function patch(p: Partial<ConfigDTO>) {
-    setCfg((prev) => (prev ? { ...prev, ...p } : prev))
-    try {
-      setCfg(await saveConfig(p))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  if (error) return <StateView kind="error" message={error} onRetry={load} />
-  if (!cfg) return <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
+  const verbosity = useThemeStore((s) => s.settings.transcriptVerbosity)
+  const { cfg, error, patch, clearError } = useConfig()
 
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.editor', 'Editor & Diff')}</h2>
-      <label className={styles.field}>
-        {t('settings.transcriptVerbosity', 'Transcript verbosity')}
-        <select
-          className={styles.select}
-          value={cfg.transcriptVerbosity}
-          onChange={(e) => void patch({ transcriptVerbosity: e.target.value as ConfigDTO['transcriptVerbosity'] })}
-        >
-          <option value="normal">{t('settings.verbosityNormal', 'Normal')}</option>
-          <option value="verbose">{t('settings.verbosityVerbose', 'Verbose')}</option>
-          <option value="summary">{t('settings.verbositySummary', 'Summary')}</option>
-        </select>
-      </label>
-      <label className={styles.toggle}>
-        <input
-          type="checkbox"
-          checked={cfg.transparentBackground}
-          onChange={(e) => void patch({ transparentBackground: e.target.checked })}
-        />
-        {t('settings.transparentBackground', 'Transparent panel backgrounds')}
-      </label>
-      <p className={styles.note}>
-        {t('settings.transparentNote', 'Removes filled backgrounds from tool-result and diff panels, leaving only left-bars and separators for a flatter look.')}
-      </p>
+      <div className={styles.header}>
+        <h2 className={styles.h2}>{t('settings.editor', 'Editor & Diff')}</h2>
+        <p className={styles.sub}>{t('settings.editorSub', 'Transcript rendering and diff panel appearance.')}</p>
+      </div>
+      {error && (
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} aria-label={t('settings.dismiss', 'Dismiss')}>×</button>
+        </div>
+      )}
+      {!cfg ? (
+        <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
+      ) : (
+        <div className={styles.group}>
+          <label className={styles.field}>
+            {t('settings.transcriptVerbosity', 'Transcript verbosity')}
+            <BrandedSelect
+              value={verbosity}
+              options={VERBOSITY.map((v) => ({ value: v, label: t(`settings.verbosity${v[0].toUpperCase()}${v.slice(1)}`, v) }))}
+              onChange={(v) => setThemeSettings({ transcriptVerbosity: v as TranscriptVerbosity })}
+              ariaLabel={t('settings.transcriptVerbosity', 'Transcript verbosity')}
+              testid="editor-verbosity"
+            />
+          </label>
+          <div className={styles.row}>
+            <div className={styles.rowText}>
+              <div className={styles.rowLabel}>{t('settings.transparentBackground', 'Transparent panel backgrounds')}</div>
+              <div className={styles.rowDesc}>{t('settings.transparentNote', 'Removes filled backgrounds from tool-result and diff panels.')}</div>
+            </div>
+            <Switch
+              checked={cfg.transparentBackground}
+              onChange={(v) => void patch({ transparentBackground: v })}
+              label={t('settings.transparentBackground', 'Transparent panel backgrounds')}
+              testid="editor-transparent"
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

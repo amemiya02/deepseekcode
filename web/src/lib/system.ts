@@ -5,11 +5,9 @@
 // — keep them in lockstep.
 
 export interface ConfigDTO {
-  theme: string
   accent: string
   density: string
   language: string
-  transcriptVerbosity: 'normal' | 'verbose' | 'summary'
   model: string
   reasoningEffort: string
   baseUrl: string

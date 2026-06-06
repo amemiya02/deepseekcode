@@ -61,83 +61,96 @@ export function AppearanceSection() {
 
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.appearance', 'Appearance')}</h2>
+      <div className={styles.header}>
+        <h2 className={styles.h2}>{t('settings.appearance', 'Appearance')}</h2>
+        <p className={styles.sub}>{t('settings.appearanceSub', 'Theme, accent colour, density, and fonts.')}</p>
+      </div>
+      {error && (
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button onClick={() => { setError(''); void load() }} aria-label={t('settings.dismiss', 'Dismiss')}>×</button>
+        </div>
+      )}
 
-      {/* Language — round-trips to Go config */}
-      <label className={styles.field}>
-        {t('settings.language', 'Language')}
-        <BrandedSelect
-          value={cfg.language}
-          options={[
-            { value: 'en', label: 'English' },
-            { value: 'zh', label: '中文' },
-            { value: 'auto', label: t('settings.languageAuto', 'Auto (system)') },
-          ]}
-          onChange={(v) => void patch({ language: v })}
-          ariaLabel={t('settings.language', 'Language')}
-          testid="appearance-language"
-        />
-      </label>
+      <div className={styles.group}>
+        {/* Language — round-trips to Go config */}
+        <label className={styles.field}>
+          {t('settings.language', 'Language')}
+          <BrandedSelect
+            value={cfg.language}
+            options={[
+              { value: 'en', label: 'English' },
+              { value: 'zh', label: '中文' },
+              { value: 'auto', label: t('settings.languageAuto', 'Auto (system)') },
+            ]}
+            onChange={(v) => void patch({ language: v })}
+            ariaLabel={t('settings.language', 'Language')}
+            testid="appearance-language"
+          />
+        </label>
 
-      {/* Mode — localStorage only, never through ConfigDTO */}
-      <label className={styles.field}>
-        {t('settings.mode', 'Appearance mode')}
-        <BrandedSelect
-          value={mode}
-          options={MODES.map((m) => ({ value: m, label: t(`mode.${m}`, m) }))}
-          onChange={(m) => setThemeSettings({ mode: m as Mode })}
-          ariaLabel={t('settings.mode', 'Appearance mode')}
-          testid="appearance-mode"
-        />
-      </label>
+        {/* Mode — localStorage only, never through ConfigDTO */}
+        <label className={styles.field}>
+          {t('settings.mode', 'Appearance mode')}
+          <BrandedSelect
+            value={mode}
+            options={MODES.map((m) => ({ value: m, label: t(`mode.${m}`, m) }))}
+            onChange={(m) => setThemeSettings({ mode: m as Mode })}
+            ariaLabel={t('settings.mode', 'Appearance mode')}
+            testid="appearance-mode"
+          />
+        </label>
 
-      {/* Accent — round-trips to Go config */}
-      <label className={styles.field}>
-        {t('settings.accent', 'Accent')}
-        <BrandedSelect
-          value={cfg.accent}
-          options={ACCENTS.map((a) => ({ value: a.id, label: t(`accent.${a.id}`, a.id) }))}
-          onChange={(v) => void patch({ accent: v })}
-          ariaLabel={t('settings.accent', 'Accent')}
-          testid="appearance-accent"
-        />
-      </label>
+        {/* Accent — round-trips to Go config */}
+        <label className={styles.field}>
+          {t('settings.accent', 'Accent')}
+          <BrandedSelect
+            value={cfg.accent}
+            options={ACCENTS.map((a) => ({ value: a.id, label: t(`accent.${a.id}`, a.id) }))}
+            onChange={(v) => void patch({ accent: v })}
+            ariaLabel={t('settings.accent', 'Accent')}
+            testid="appearance-accent"
+          />
+        </label>
 
-      {/* Density — round-trips to Go config */}
-      <label className={styles.field}>
-        {t('settings.density', 'Density')}
-        <BrandedSelect
-          value={cfg.density}
-          options={DENSITIES.map((d) => ({ value: d, label: t(`density.${d}`, d) }))}
-          onChange={(v) => void patch({ density: v })}
-          ariaLabel={t('settings.density', 'Density')}
-          testid="appearance-density"
-        />
-      </label>
+        {/* Density — round-trips to Go config */}
+        <label className={styles.field}>
+          {t('settings.density', 'Density')}
+          <BrandedSelect
+            value={cfg.density}
+            options={DENSITIES.map((d) => ({ value: d, label: t(`density.${d}`, d) }))}
+            onChange={(v) => void patch({ density: v })}
+            ariaLabel={t('settings.density', 'Density')}
+            testid="appearance-density"
+          />
+        </label>
+      </div>
 
-      {/* UI font — localStorage only */}
-      <label className={styles.field}>
-        {t('settings.fontUi', 'UI font')}
-        <BrandedSelect
-          value={uiFont}
-          options={UI_FONTS.map((f) => ({ value: f.id, label: t(`font.${f.id}`, f.id) }))}
-          onChange={(v) => setThemeSettings({ uiFont: v })}
-          ariaLabel={t('settings.fontUi', 'UI font')}
-          testid="appearance-uifont"
-        />
-      </label>
+      <div className={styles.group}>
+        {/* UI font — localStorage only */}
+        <label className={styles.field}>
+          {t('settings.fontUi', 'UI font')}
+          <BrandedSelect
+            value={uiFont}
+            options={UI_FONTS.map((f) => ({ value: f.id, label: t(`font.${f.id}`, f.id) }))}
+            onChange={(v) => setThemeSettings({ uiFont: v })}
+            ariaLabel={t('settings.fontUi', 'UI font')}
+            testid="appearance-uifont"
+          />
+        </label>
 
-      {/* Code font — localStorage only */}
-      <label className={styles.field}>
-        {t('settings.fontCode', 'Code font')}
-        <BrandedSelect
-          value={codeFont}
-          options={CODE_FONTS.map((f) => ({ value: f.id, label: t(`font.${f.id}`, f.id) }))}
-          onChange={(v) => setThemeSettings({ codeFont: v })}
-          ariaLabel={t('settings.fontCode', 'Code font')}
-          testid="appearance-codefont"
-        />
-      </label>
+        {/* Code font — localStorage only */}
+        <label className={styles.field}>
+          {t('settings.fontCode', 'Code font')}
+          <BrandedSelect
+            value={codeFont}
+            options={CODE_FONTS.map((f) => ({ value: f.id, label: t(`font.${f.id}`, f.id) }))}
+            onChange={(v) => setThemeSettings({ codeFont: v })}
+            ariaLabel={t('settings.fontCode', 'Code font')}
+            testid="appearance-codefont"
+          />
+        </label>
+      </div>
     </div>
   )
 }

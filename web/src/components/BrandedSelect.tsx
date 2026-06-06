@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useId, useEffect, useLayoutEffect, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronsUpDown, Check } from 'lucide-react'
+import styles from './BrandedSelect.module.css'
 
 export interface SelectOption { value: string; label: string }
 
@@ -184,11 +185,11 @@ export function BrandedSelect({
   )
 
   return (
-    <div className="modelsw brandsel">
+    <div>
       <button
         ref={triggerRef}
         type="button"
-        className="modelsw__trigger brandsel__trigger"
+        className={styles.trigger}
         data-testid={testid}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -197,8 +198,8 @@ export function BrandedSelect({
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={handleTriggerKeyDown}
       >
-        <span className="modelsw__label">{current?.label ?? value}</span>
-        <ChevronsUpDown size={11} />
+        <span>{current?.label ?? value}</span>
+        <ChevronsUpDown size={11} className={styles.chevron} />
       </button>
       {open &&
         pos &&
@@ -207,7 +208,7 @@ export function BrandedSelect({
           <div
             ref={listboxRef}
             id={listboxId}
-            className="modelsw__menu brandsel__menu"
+            className={styles.menu}
             role="listbox"
             aria-label={ariaLabel}
             aria-activedescendant={activeId}
@@ -225,7 +226,7 @@ export function BrandedSelect({
                   role="option"
                   aria-selected={isSelected}
                   tabIndex={isActive ? 0 : -1}
-                  className={`modelsw__item${isSelected ? ' modelsw__item--current' : ''}${isActive ? ' modelsw__item--active' : ''}`}
+                  className={`${styles.option}${isSelected ? ` ${styles.optionSelected}` : ''}${isActive ? ` ${styles.optionActive}` : ''}`}
                   onClick={() => pick(o.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -236,8 +237,8 @@ export function BrandedSelect({
                   }}
                   onMouseEnter={() => setActiveIndex(i)}
                 >
-                  <span className="modelsw__model">{o.label}</span>
-                  {isSelected && <Check size={13} className="modelsw__check" />}
+                  <span>{o.label}</span>
+                  {isSelected && <Check size={13} className={styles.check} />}
                 </div>
               )
             })}

@@ -48,6 +48,7 @@ export const en: Record<string, string> = {
   'settings.ownedByWave': 'This section is provided by its owning wave.',
   'settings.general': 'General',
   'settings.appearance': 'Appearance',
+  'settings.appearanceSub': 'Theme, accent colour, density, and fonts.',
   'settings.keybindings': 'Keybindings',
   'settings.providers': 'Providers & Keys',
   'settings.models': 'Models & Routing',

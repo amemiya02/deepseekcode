@@ -77,9 +77,9 @@ it('renders the listbox in a portal (not nested in the trigger wrapper) so an ov
   render(<BrandedSelect value="a" options={options} onChange={() => {}} testid="sel" />)
   fireEvent.click(screen.getByTestId('sel'))
   const listbox = screen.getByRole('listbox')
-  const wrapper = screen.getByTestId('sel').closest('.brandsel')
+  const wrapper = screen.getByTestId('sel').parentElement
   expect(wrapper).toBeTruthy()
-  // The menu must escape the .brandsel subtree (it lives under document.body).
+  // The menu must escape the trigger's subtree (it lives under document.body).
   expect(wrapper!.contains(listbox)).toBe(false)
 })
 

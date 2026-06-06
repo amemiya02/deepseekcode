@@ -46,6 +46,7 @@ export const zhCN: Record<string, string> = {
   'settings.ownedByWave': '此部分由其所属波次提供。',
   'settings.general': '通用',
   'settings.appearance': '外观',
+  'settings.appearanceSub': '主题、强调色、密度和字体。',
   'settings.keybindings': '快捷键',
   'settings.providers': '提供商与密钥',
   'settings.models': '模型与路由',

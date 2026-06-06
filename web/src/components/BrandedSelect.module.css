@@ -1,0 +1,24 @@
+.trigger {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-width: 200px; max-width: 320px; padding: 8px 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px); color: var(--text); font: var(--type-ui); cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.trigger:hover { border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); }
+.trigger:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent); outline: none; }
+.chevron { color: var(--text-3); flex-shrink: 0; }
+
+.menu {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 4px;
+  box-shadow: 0 10px 30px -8px rgb(0 0 0 / .22), 0 2px 8px -2px rgb(0 0 0 / .12);
+  max-height: 280px; overflow-y: auto;
+}
+.option {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border-radius: 6px; color: var(--text); font: var(--type-ui); cursor: pointer;
+}
+.option:hover, .optionActive { background: var(--elevated); }
+.optionSelected { color: var(--accent); }
+.optionSelected:hover { background: var(--accent-weak); }
+.check { color: var(--accent); flex-shrink: 0; }

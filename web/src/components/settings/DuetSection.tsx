@@ -1,52 +1,35 @@
-import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
-import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
+import { useConfig } from '../../lib/useConfig'
+import { Switch } from '../Switch'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
 export function DuetSection() {
-  const [cfg, setCfg] = useState<ConfigDTO | null>(null)
-  const [error, setError] = useState('')
+  const { cfg, error, patch, clearError } = useConfig()
 
-  async function load() {
-    setError('')
-    setCfg(null)
-    try {
-      setCfg(await fetchConfig())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function patch(p: Partial<ConfigDTO>) {
-    setCfg((prev) => (prev ? { ...prev, ...p } : prev))
-    try {
-      setCfg(await saveConfig(p))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  if (error) return <StateView kind="error" message={error} onRetry={load} />
   if (!cfg) return <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
 
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.duet', 'Duet')}</h2>
-      <label className={styles.toggle}>
-        <input
-          type="checkbox"
-          checked={cfg.duetEnabled}
-          onChange={(e) => void patch({ duetEnabled: e.target.checked })}
-        />
-        {t('settings.duetEnable', 'Enable Duet validation')}
-      </label>
-      <p className={styles.note}>
-        {t('settings.duetNote', 'Duet runs a second model pass to validate destructive operations before they execute. Adds latency on high-risk turns; recommended on for production work.')}
-      </p>
+      <div className={styles.header}>
+        <h2 className={styles.h2}>{t('settings.duet', 'Duet')}</h2>
+        <p className={styles.sub}>{t('settings.duetSub', 'Second-model validation for destructive operations.')}</p>
+      </div>
+      {error && (
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} aria-label={t('settings.dismiss', 'Dismiss')}>x</button>
+        </div>
+      )}
+      <div className={styles.group}>
+        <div className={styles.row}>
+          <div className={styles.rowText}>
+            <div className={styles.rowLabel}>{t('settings.duetEnable', 'Enable Duet validation')}</div>
+            <div className={styles.rowDesc}>{t('settings.duetNote', 'Duet runs a second model pass to validate destructive operations before they execute.')}</div>
+          </div>
+          <Switch checked={cfg.duetEnabled} onChange={(v) => void patch({ duetEnabled: v })} label={t('settings.duetEnable', 'Enable Duet validation')} testid="duet-enable" />
+        </div>
+      </div>
     </div>
   )
 }

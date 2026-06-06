@@ -1,0 +1,16 @@
+/* web/src/components/Switch.module.css */
+.track {
+  position: relative; width: 34px; height: 20px; border: none;
+  border-radius: 999px; background: var(--border-strong, #d4d8de);
+  cursor: pointer; flex-shrink: 0; padding: 0;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+.track:disabled { opacity: 0.5; cursor: not-allowed; }
+.track:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.on { background: var(--accent); }
+.knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff;
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.on .knob { transform: translateX(14px); }

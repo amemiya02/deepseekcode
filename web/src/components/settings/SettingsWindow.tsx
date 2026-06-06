@@ -1,11 +1,11 @@
 // Adapted from deepseek-reasonix (MIT) — SettingsPanel.tsx (nav-rail + active tab + section switch).
-import { useState } from 'react'
-import { X } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { t } from '../../lib/i18n'
 import {
   IconSettings, IconPalette, IconCommand, IconLanguages, IconModel, IconCoins, IconKey,
   IconShield, IconSandbox, IconEditor, IconDatabase, IconDuet, IconExtensions, IconNetwork,
   IconSessions, IconActivity, IconRefresh, IconInfo, type Icon,
+  IconChevronLeft, IconSearch,
 } from '../../lib/icons'
 import { GeneralSection } from './GeneralSection'
 import { AppearanceSection } from './AppearanceSection'
@@ -68,37 +68,70 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'about', labelKey: 'settings.about', fallback: 'About', group: 'system', icon: IconInfo },
 ]
 
-export interface SettingsWindowProps {
-  open: boolean
+export interface SettingsViewProps {
   onClose: () => void
 }
 
-export function SettingsWindow({ open, onClose }: SettingsWindowProps) {
+export function SettingsView({ onClose }: SettingsViewProps) {
   const [active, setActive] = useState('general')
-  if (!open) return null
+  const [query, setQuery] = useState('')
 
+  const q = query.trim().toLowerCase()
+  const matches = useMemo(
+    () => SETTINGS_SECTIONS.filter((s) => (q ? t(s.labelKey, s.fallback).toLowerCase().includes(q) : true)),
+    [q],
+  )
   const section = SETTINGS_SECTIONS.find((s) => s.id === active)
 
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label={t('settings.title', 'Settings')}>
-      <div className={styles.window}>
-        <nav className={styles.rail} aria-label={t('settings.title', 'Settings')}>
-          {SETTINGS_SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              className={active === s.id ? `${styles.railBtn} ${styles.active}` : styles.railBtn}
-              aria-current={active === s.id ? 'page' : undefined}
-              onClick={() => setActive(s.id)}
-            >
-              {t(s.labelKey, s.fallback)}
-            </button>
-          ))}
-        </nav>
-        <section className={styles.panel}>{renderSection(active, section)}</section>
-        <button className={styles.close} aria-label={t('settings.close', 'Close')} onClick={onClose}>
-          <X size={16} />
+    <div className={styles.view}>
+      <nav className={styles.nav} aria-label={t('settings.title', 'Settings')}>
+        <button className={styles.back} data-testid="settings-back" onClick={onClose}>
+          <IconChevronLeft size={16} />
+          <span>{t('settings.back', 'Back to app')}</span>
         </button>
-      </div>
+        <label className={styles.search}>
+          <IconSearch size={14} aria-hidden="true" />
+          <input
+            data-testid="settings-search"
+            type="search"
+            placeholder={t('settings.search', 'Search settings…')}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setQuery('') }}
+          />
+        </label>
+
+        {matches.length === 0 ? (
+          <p className={styles.searchEmpty}>{t('settings.searchEmpty', 'No matching settings.')}</p>
+        ) : (
+          SETTINGS_GROUPS.map((group) => {
+            const items = matches.filter((s) => s.group === group.id)
+            if (items.length === 0) return null
+            return (
+              <div className={styles.group} key={group.id}>
+                <div className={styles.groupLabel}>{t(group.labelKey, group.fallback)}</div>
+                {items.map((s) => {
+                  const Icon = s.icon
+                  return (
+                    <button
+                      key={s.id}
+                      data-testid="settings-nav-item"
+                      className={active === s.id ? `${styles.navItem} ${styles.active}` : styles.navItem}
+                      aria-current={active === s.id ? 'page' : undefined}
+                      onClick={() => setActive(s.id)}
+                    >
+                      <Icon size={15} aria-hidden="true" />
+                      <span>{t(s.labelKey, s.fallback)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })
+        )}
+      </nav>
+      <section className={styles.panel}>{renderSection(active, section)}</section>
     </div>
   )
 }

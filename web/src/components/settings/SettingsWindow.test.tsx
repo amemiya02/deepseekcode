@@ -1,13 +1,13 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, test } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import React from 'react'
 import { LocaleProvider } from '../../lib/i18n'
-import { SettingsWindow, SETTINGS_SECTIONS } from './SettingsWindow'
+import { SettingsView, SETTINGS_SECTIONS, SETTINGS_GROUPS } from './SettingsWindow'
 
 const wrap = (ui: React.ReactElement) => render(<LocaleProvider>{ui}</LocaleProvider>)
 
-describe('SettingsWindow', () => {
+describe('SettingsView', () => {
   it('exports all 18 section keys', () => {
     expect(SETTINGS_SECTIONS.length).toBe(18)
     const ids = SETTINGS_SECTIONS.map((s) => s.id)
@@ -17,36 +17,44 @@ describe('SettingsWindow', () => {
   })
 
   it('assigns every section to one of the six known groups', () => {
-    const groups = new Set(['personal', 'modelsCost', 'coding', 'integrations', 'workspace', 'system'])
-    for (const s of SETTINGS_SECTIONS) {
-      expect(groups.has(s.group), `${s.id} has group ${s.group}`).toBe(true)
+    const groups = new Set(SETTINGS_GROUPS.map((g) => g.id))
+    for (const s of SETTINGS_SECTIONS) expect(groups.has(s.group)).toBe(true)
+  })
+
+  it('is a full-page view, not a modal dialog (no role=dialog / aria-modal)', () => {
+    const { container } = wrap(<SettingsView onClose={() => {}} />)
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(container.querySelector('[aria-modal]')).toBeNull()
+  })
+
+  it('renders a nav button per section plus the group headers', () => {
+    wrap(<SettingsView onClose={() => {}} />)
+    const nav = screen.getByRole('navigation', { name: /settings/i })
+    expect(nav.querySelectorAll('[data-testid="settings-nav-item"]').length).toBe(18)
+    for (const g of SETTINGS_GROUPS) {
+      expect(screen.getByText(new RegExp(`^${g.fallback}$`, 'i'))).toBeInTheDocument()
     }
   })
 
-  it('renders the nav with one button per section', () => {
-    wrap(<SettingsWindow open onClose={() => {}} />)
-    const nav = screen.getByRole('navigation', { name: /settings/i })
-    expect(nav.querySelectorAll('button').length).toBe(18)
-  })
-
   it('switches the active section on nav click', async () => {
-    wrap(<SettingsWindow open onClose={() => {}} />)
+    wrap(<SettingsView onClose={() => {}} />)
     const apBtn = screen.getByRole('button', { name: /appearance/i })
     await userEvent.click(apBtn)
     expect(apBtn).toHaveAttribute('aria-current', 'page')
   })
 
-  it('renders nothing when closed', () => {
-    const { container } = wrap(<SettingsWindow open={false} onClose={() => {}} />)
-    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  it('search filters the nav and hides empty groups', async () => {
+    wrap(<SettingsView onClose={() => {}} />)
+    await userEvent.type(screen.getByTestId('settings-search'), 'sandbox')
+    expect(screen.getByRole('button', { name: /sandbox/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^general$/i })).toBeNull()
+    expect(screen.queryByText(/^Personal$/)).toBeNull()
   })
-})
 
-test('settings overlay uses a translucent scrim, never an opaque white wipe', () => {
-  render(<LocaleProvider><SettingsWindow open onClose={() => {}} /></LocaleProvider>)
-  const overlay = document.querySelector('[class*="overlay"]') as HTMLElement
-  expect(overlay).toBeTruthy()
-  const bg = getComputedStyle(overlay).background + getComputedStyle(overlay).backgroundColor
-  // must not be solid white, and must reference the scrim variable
-  expect(bg).not.toMatch(/#ffffff|rgb\(255,\s*255,\s*255\)/i)
+  it('the back button calls onClose', async () => {
+    const onClose = vi.fn()
+    wrap(<SettingsView onClose={onClose} />)
+    await userEvent.click(screen.getByTestId('settings-back'))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
 })

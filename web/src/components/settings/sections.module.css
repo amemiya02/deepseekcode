@@ -24,3 +24,37 @@
 .button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
 .ok { color: var(--success); font: var(--type-body); }
 .err { color: var(--danger); font: var(--type-body); }
+
+/* --- Production kit (2026-06-06 overhaul) --- */
+.header { margin: 0 0 var(--s-5, 20px); }
+.header .h2 { margin: 0; }
+.sub { font: var(--type-body); color: var(--text-3); margin: 2px 0 0; }
+
+.group {
+  border: 1px solid var(--border); border-radius: var(--r-lg, 12px);
+  background: var(--surface); padding: var(--s-4, 16px);
+  margin-bottom: var(--s-4, 16px);
+}
+.groupTitle { font: var(--type-ui); font-weight: 600; color: var(--text); margin: 0 0 var(--s-1, 4px); }
+.groupDesc { font: var(--type-label); color: var(--text-3); margin: 0 0 var(--s-3, 12px); }
+
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s-4, 16px); padding: var(--s-2, 8px) 0;
+}
+.row + .row { border-top: 1px solid var(--border-weak, var(--border)); }
+.rowText { min-width: 0; }
+.rowLabel { font: var(--type-ui); color: var(--text); }
+.rowDesc { font: var(--type-label); color: var(--text-3); margin-top: 2px; }
+
+.inlineError {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: var(--s-2, 8px) var(--s-3, 12px); margin-bottom: var(--s-3, 12px);
+  border: 1px solid var(--danger); border-radius: var(--r-md, 8px);
+  color: var(--danger); font: var(--type-label); background: color-mix(in oklch, var(--danger) 8%, transparent);
+}
+.inlineError button { background: none; border: none; color: var(--danger); cursor: pointer; font: inherit; }
+
+/* Enlarge the legacy inputs to kit sizing. */
+.select, .input { padding: 8px 11px; border-radius: var(--r-md, 8px); max-width: 460px; }
+.fieldHelp { font: var(--type-label); color: var(--text-3); margin-top: 4px; }

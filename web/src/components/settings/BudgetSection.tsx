@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
-import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
+import { useConfig } from '../../lib/useConfig'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
@@ -16,61 +15,50 @@ function fromMiB(s: string): number {
 }
 
 export function BudgetSection() {
-  const [cfg, setCfg] = useState<ConfigDTO | null>(null)
-  const [error, setError] = useState('')
+  const { cfg, error, patch, clearError } = useConfig()
 
-  async function load() {
-    setError('')
-    setCfg(null)
-    try {
-      setCfg(await fetchConfig())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function patch(p: Partial<ConfigDTO>) {
-    setCfg((prev) => (prev ? { ...prev, ...p } : prev))
-    try {
-      setCfg(await saveConfig(p))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  if (error) return <StateView kind="error" message={error} onRetry={load} />
   if (!cfg) return <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
 
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.budget', 'Budget & Cache')}</h2>
-      <label className={styles.field}>
-        {t('settings.maxReadBytes', 'Max file read size (MiB)')}
-        <input
-          className={styles.input}
-          type="number"
-          min={1}
-          max={512}
-          value={toMiB(cfg.maxReadBytes)}
-          onChange={(e) => void patch({ maxReadBytes: fromMiB(e.target.value) })}
-        />
-      </label>
-      <label className={styles.field}>
-        {t('settings.maxWriteBytes', 'Max file write size (MiB)')}
-        <input
-          className={styles.input}
-          type="number"
-          min={1}
-          max={512}
-          value={toMiB(cfg.maxWriteBytes)}
-          onChange={(e) => void patch({ maxWriteBytes: fromMiB(e.target.value) })}
-        />
-      </label>
+      <div className={styles.header}>
+        <h2 className={styles.h2}>{t('settings.budget', 'Budget & Cache')}</h2>
+        <p className={styles.sub}>{t('settings.budgetSub', 'File read/write caps and cache management.')}</p>
+      </div>
+      {error && (
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} aria-label={t('settings.dismiss', 'Dismiss')}>×</button>
+        </div>
+      )}
+      <div className={styles.group}>
+        <label className={styles.field}>
+          {t('settings.maxReadBytes', 'Max file read size (MiB)')}
+          <input
+            className={styles.input}
+            type="number"
+            min={1}
+            max={512}
+            value={toMiB(cfg.maxReadBytes)}
+            onChange={(e) => void patch({ maxReadBytes: fromMiB(e.target.value) })}
+            data-testid="budget-read"
+          />
+        </label>
+        <label className={styles.field}>
+          {t('settings.maxWriteBytes', 'Max file write size (MiB)')}
+          <input
+            className={styles.input}
+            type="number"
+            min={1}
+            max={512}
+            value={toMiB(cfg.maxWriteBytes)}
+            onChange={(e) => void patch({ maxWriteBytes: fromMiB(e.target.value) })}
+            data-testid="budget-write"
+          />
+        </label>
+      </div>
       <p className={styles.note}>
-        {t('settings.budgetNote', 'File read/write caps guard against accidental large-file operations. The prefix cache is managed automatically; cache metrics are visible in the Cockpit tab.')}
+        {t('settings.budgetNote', 'File read/write caps guard against accidental large-file operations. The prefix cache is managed automatically.')}
       </p>
     </div>
   )

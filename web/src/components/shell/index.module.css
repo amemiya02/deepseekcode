@@ -52,21 +52,6 @@
 .splitter:hover::before, .splitter:focus-visible::before { background: var(--accent); }
 .splitter:hover::after, .splitter:focus-visible::after { background: color-mix(in oklch, var(--accent) 55%, transparent); }
 
-.collapseTab {
-  position: absolute;
-  top: var(--s-2);
-  display: flex;
-  background: var(--elevated);
-  color: var(--text-3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: var(--s-1);
-  cursor: pointer;
-  z-index: 2;
-}
-.collapseTabLeft { left: var(--s-2); }
-.collapseTabRight { right: var(--s-2); }
-.collapseTab:hover { color: var(--text); }
 
 /* TitleBar */
 .titlebar {
@@ -104,6 +89,24 @@
   -webkit-app-region: no-drag;
 }
 .iconBtn:hover { color: var(--text); background: var(--elevated); }
+.titlebarDivider { width: 1px; height: 18px; background: var(--border); margin: 0 var(--s-1); -webkit-app-region: no-drag; }
+.paneToggles {
+  display: inline-flex;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+.paneToggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 26px;
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.paneToggle + .paneToggle { border-left: 1px solid var(--border); }
+.paneToggle:hover { color: var(--text); background: var(--surface); }
+.paneToggle[aria-pressed='true'] { color: var(--text); }
 
 /* CommandPalette */
 .paletteOverlay { position: fixed; inset: 0; background: var(--overlay); opacity: 0.6; z-index: 900; }

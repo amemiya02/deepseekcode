@@ -120,7 +120,7 @@ export interface McpServer {
   name: string
   enabled: boolean
   transport: string
-  command: string
+  command?: string
   status?: string
   toolCount?: number
 }

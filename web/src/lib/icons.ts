@@ -27,6 +27,21 @@ export {
   Activity as IconActivity,
   Coins as IconCoins,
   Database as IconDatabase,
+  ChevronLeft as IconChevronLeft,
+  Languages as IconLanguages,
+  Cpu as IconModel,
+  KeyRound as IconKey,
+  ShieldCheck as IconShield,
+  Box as IconSandbox,
+  SquarePen as IconEditor,
+  Users as IconDuet,
+  Blocks as IconExtensions,
+  Globe as IconNetwork,
+  MessagesSquare as IconSessions,
+  Info as IconInfo,
+  Server as IconServer,
+  Trash2 as IconTrash,
+  Power as IconPower,
 } from 'lucide-react'
 
 import type { LucideIcon } from 'lucide-react'

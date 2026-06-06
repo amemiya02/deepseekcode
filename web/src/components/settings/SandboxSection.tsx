@@ -1,57 +1,42 @@
-import { useEffect, useState } from 'react'
 import { t } from '../../lib/i18n'
-import { fetchConfig, saveConfig, type ConfigDTO } from '../../lib/system'
+import { useConfig } from '../../lib/useConfig'
+import { Switch } from '../Switch'
 import { StateView } from '../StateViews'
 import styles from './sections.module.css'
 
 export function SandboxSection() {
-  const [cfg, setCfg] = useState<ConfigDTO | null>(null)
-  const [error, setError] = useState('')
+  const { cfg, error, patch, clearError } = useConfig()
 
-  async function load() {
-    setError('')
-    setCfg(null)
-    try {
-      setCfg(await fetchConfig())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-  useEffect(() => {
-    void load()
-  }, [])
-
-  async function patch(p: Partial<ConfigDTO>) {
-    setCfg((prev) => (prev ? { ...prev, ...p } : prev))
-    try {
-      setCfg(await saveConfig(p))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  if (error) return <StateView kind="error" message={error} onRetry={load} />
   if (!cfg) return <StateView kind="loading" message={t('settings.loading', 'Loading…')} />
 
   return (
     <div>
-      <h2 className={styles.h2}>{t('settings.sandbox', 'Sandbox')}</h2>
-      <p className={styles.note}>
-        {t('settings.sandboxNote', 'Workspace confinement plus a macOS Seatbelt bash jail; the egress gate blocks network access for sandboxed commands.')}
-      </p>
-      <label className={styles.toggle}>
-        <input type="checkbox" checked={cfg.sandboxEnabled} onChange={(e) => void patch({ sandboxEnabled: e.target.checked })} />
-        {t('settings.sandboxEnable', 'Enable sandbox')}
-      </label>
-      <label className={styles.toggle}>
-        <input
-          type="checkbox"
-          checked={cfg.sandboxNetwork}
-          disabled={!cfg.sandboxEnabled}
-          onChange={(e) => void patch({ sandboxNetwork: e.target.checked })}
-        />
-        {t('settings.sandboxNetwork', 'Allow network egress')}
-      </label>
+      <div className={styles.header}>
+        <h2 className={styles.h2}>{t('settings.sandbox', 'Sandbox')}</h2>
+        <p className={styles.sub}>{t('settings.sandboxSub', 'Workspace confinement and network egress control.')}</p>
+      </div>
+      {error && (
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} aria-label={t('settings.dismiss', 'Dismiss')}>×</button>
+        </div>
+      )}
+      <div className={styles.group}>
+        <div className={styles.row}>
+          <div className={styles.rowText}>
+            <div className={styles.rowLabel}>{t('settings.sandboxEnable', 'Enable sandbox')}</div>
+            <div className={styles.rowDesc}>{t('settings.sandboxNote', 'Workspace confinement plus a macOS Seatbelt bash jail.')}</div>
+          </div>
+          <Switch checked={cfg.sandboxEnabled} onChange={(v) => void patch({ sandboxEnabled: v })} label={t('settings.sandboxEnable', 'Enable sandbox')} testid="sandbox-enable" />
+        </div>
+        <div className={styles.row}>
+          <div className={styles.rowText}>
+            <div className={styles.rowLabel}>{t('settings.sandboxNetwork', 'Allow network egress')}</div>
+            <div className={styles.rowDesc}>{t('settings.sandboxNetworkNote', 'When disabled, sandboxed commands cannot make network requests.')}</div>
+          </div>
+          <Switch checked={cfg.sandboxNetwork} disabled={!cfg.sandboxEnabled} onChange={(v) => void patch({ sandboxNetwork: v })} label={t('settings.sandboxNetwork', 'Allow network egress')} testid="sandbox-network" />
+        </div>
+      </div>
     </div>
   )
 }

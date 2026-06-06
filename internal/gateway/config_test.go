@@ -12,7 +12,6 @@ import (
 
 func TestConfigGet(t *testing.T) {
 	cfg := config.Default()
-	cfg.Defaults.Theme = "graphite"
 	cfg.Defaults.Model = "deepseek-v4"
 	cfg.UI.Accent = "indigo"
 	cfg.UI.Density = "comfortable"
@@ -32,9 +31,6 @@ func TestConfigGet(t *testing.T) {
 	var dto gateway.ConfigDTO
 	if err := json.NewDecoder(resp.Body).Decode(&dto); err != nil {
 		t.Fatalf("decode: %v", err)
-	}
-	if dto.Theme != "graphite" {
-		t.Errorf("Theme = %q, want graphite", dto.Theme)
 	}
 	if dto.Accent != "indigo" {
 		t.Errorf("Accent = %q, want indigo", dto.Accent)
@@ -56,7 +52,7 @@ func TestConfigPutRoundTrip(t *testing.T) {
 	t.Cleanup(func() { gateway.ResetConfigSeam() })
 
 	ts := newTestServer(t, "")
-	body := `{"theme":"lumen","accent":"terracotta","density":"compact","model":"deepseek-v4-pro","transcriptVerbosity":"verbose","autoRoute":true}`
+	body := `{"accent":"terracotta","density":"compact","model":"deepseek-v4-pro","autoRoute":true}`
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/config", strings.NewReader(body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -65,9 +61,6 @@ func TestConfigPutRoundTrip(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if saved.Defaults.Theme != "lumen" {
-		t.Errorf("saved theme = %q, want lumen", saved.Defaults.Theme)
 	}
 	if saved.UI.Accent != "terracotta" {
 		t.Errorf("saved accent = %q, want terracotta", saved.UI.Accent)
@@ -80,5 +73,13 @@ func TestConfigPutRoundTrip(t *testing.T) {
 	}
 	if !saved.Routing.AutoRoute {
 		t.Error("AutoRoute should be true after PUT")
+	}
+}
+
+func TestConfigDTO_OmitsDeadFields(t *testing.T) {
+	b, _ := json.Marshal(gateway.ConfigDTO{})
+	s := string(b)
+	if strings.Contains(s, "\"theme\"") || strings.Contains(s, "\"transcriptVerbosity\"") {
+		t.Fatalf("DTO must not carry theme/transcriptVerbosity: %s", s)
 	}
 }

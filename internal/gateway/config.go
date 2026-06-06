@@ -17,11 +17,9 @@ import (
 // contract stays stable even as config.Config grows. Field names are the JSON
 // keys the SPA's system.ts depends on.
 type ConfigDTO struct {
-	Theme               string `json:"theme"`
 	Accent              string `json:"accent"`
 	Density             string `json:"density"`
 	Language            string `json:"language"`
-	TranscriptVerbosity string `json:"transcriptVerbosity"`
 	Model               string `json:"model"`
 	ReasoningEffort     string `json:"reasoningEffort"`
 	BaseURL             string `json:"baseUrl"`
@@ -103,7 +101,6 @@ func storeConfig(c config.Config) error {
 // Density are surfaced so the Appearance section can round-trip them.
 func configToDTO(c config.Config) ConfigDTO {
 	return ConfigDTO{
-		Theme:               c.Defaults.Theme,
 		Accent:              c.UI.Accent,
 		Density:             c.UI.Density,
 		Language:            c.UI.Language,
@@ -117,7 +114,6 @@ func configToDTO(c config.Config) ConfigDTO {
 		SandboxNetwork:      c.Sandbox.AllowNetwork,
 		AutoReasoning:       c.Defaults.AutoReasoning,
 		AutoClarify:         c.Clarify.AutoClarify,
-		TranscriptVerbosity: "normal", // UI-only preference; persisted client-side, echoed for shape stability.
 
 		// Network / proxy
 		ProxyMode:   c.Network.ProxyMode,
@@ -149,9 +145,6 @@ func configToDTO(c config.Config) ConfigDTO {
 // concerns (mcp servers, hooks, secrets) are preserved untouched. Accent and
 // Density are applied so the Appearance section persists them.
 func applyDTO(c config.Config, d ConfigDTO) config.Config {
-	if d.Theme != "" {
-		c.Defaults.Theme = d.Theme
-	}
 	if d.Accent != "" {
 		c.UI.Accent = d.Accent
 	}
@@ -282,7 +275,6 @@ func saveConfigDefault(c config.Config) error {
 		}
 	}
 	setSub(existing, "defaults", map[string]any{
-		"theme":            c.Defaults.Theme,
 		"model":            c.Defaults.Model,
 		"reasoning_effort": c.Defaults.ReasoningEffort,
 		"auto_reasoning":   c.Defaults.AutoReasoning,

@@ -25,7 +25,7 @@ export function McpSection() {
   }
   useEffect(() => { void load() }, [])
 
-  async function onToggle(s: McpServer) { setItems(await toggleMcpServer(s.name, s.enabled)) }
+  async function onToggle(s: McpServer) { setItems(await toggleMcpServer(s.name, !s.enabled)) }
   async function onDelete(name: string) { setItems(await deleteMcpServer(name)) }
   async function onSave() {
     if (!editing || !editing.name.trim()) return
@@ -109,7 +109,7 @@ export function McpSection() {
                 <div className={styles.rowMeta}>{s.transport} · {s.command}</div>
               </div>
               <button className={styles.iconBtn} aria-label={t('mcp.edit', 'Edit server')}
-                onClick={() => setEditing({ name: s.name, transport: s.transport, command: s.command, url: '', args: '' })}>
+                onClick={() => setEditing({ name: s.name, transport: s.transport, command: s.command ?? '', url: '', args: '' })}>
                 <IconSettings size={15} />
               </button>
               <button className={styles.iconBtn} aria-label={t('mcp.delete', 'Remove server')} onClick={() => onDelete(s.name)}>

@@ -147,8 +147,10 @@ func TestPersistConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("secrets file not written: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("secrets file perms = %o, want 0600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("secrets file perms = %o, want 0600", info.Mode().Perm())
+		}
 	}
 
 	// Config file must have model and base_url

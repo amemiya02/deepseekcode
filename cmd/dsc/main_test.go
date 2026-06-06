@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,9 @@ func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 	// Build the binary into a temp dir.
 	dir := t.TempDir()
 	bin := dir + "/dsc"
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	if err := exec.Command("go", "build", "-o", bin, "github.com/amemiya02/deepseekcode/cmd/dsc").Run(); err != nil {
 		t.Fatalf("build failed: %v", err)
 	}

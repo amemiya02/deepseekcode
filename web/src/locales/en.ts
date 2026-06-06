@@ -11,6 +11,7 @@ export const en: Record<string, string> = {
   'palette.placeholder': 'Search commands, files, sessions…',
   'palette.results': '{n} results',
   'palette.empty': 'No matches',
+  'shell.layout': 'Layout',
   'shell.collapseSessions': 'Collapse sessions',
   'shell.collapseWorkspace': 'Collapse workspace',
   'zone.sessions': 'Sessions',

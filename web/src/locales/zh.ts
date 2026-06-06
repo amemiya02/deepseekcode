@@ -9,6 +9,7 @@ export const zhCN: Record<string, string> = {
   'palette.placeholder': '搜索命令、文件、会话…',
   'palette.results': '{n} 项结果',
   'palette.empty': '无匹配项',
+  'shell.layout': '布局',
   'shell.collapseSessions': '收起会话栏',
   'shell.collapseWorkspace': '收起工作区',
   'zone.sessions': '会话',

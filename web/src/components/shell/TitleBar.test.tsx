@@ -4,10 +4,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TitleBar } from './TitleBar'
 import { LocaleProvider } from '../../lib/i18n'
 import { useThemeStore, setThemeSettings, DEFAULT_THEME_SETTINGS } from '../../lib/theme/store'
+import { useLayoutStore } from '../../lib/layoutStore'
+import { DEFAULT_LAYOUT, isReviewOpen } from './layout'
 
 beforeEach(() => {
   localStorage.clear()
   setThemeSettings(DEFAULT_THEME_SETTINGS)
+  useLayoutStore.setState({ layout: { ...DEFAULT_LAYOUT } })
 })
 
 function renderTitleBar(props: Partial<React.ComponentProps<typeof TitleBar>> = {}) {
@@ -50,5 +53,26 @@ describe('TitleBar', () => {
     renderTitleBar()
     expect(screen.queryByTestId('cycle-theme')).toBeNull()
     expect(screen.getByTestId('toggle-mode')).toBeInTheDocument() // the working light/dark toggle stays
+  })
+
+  it('renders the segmented rail + panel toggles', () => {
+    renderTitleBar()
+    expect(screen.getByTestId('collapse-sessions')).toBeInTheDocument()
+    expect(screen.getByTestId('collapse-workspace')).toBeInTheDocument()
+  })
+
+  it('rail toggle flips leftCollapsed in the store', async () => {
+    const user = userEvent.setup()
+    renderTitleBar()
+    expect(useLayoutStore.getState().layout.leftCollapsed).toBe(false)
+    await user.click(screen.getByTestId('collapse-sessions'))
+    expect(useLayoutStore.getState().layout.leftCollapsed).toBe(true)
+  })
+
+  it('panel toggle pins the review pane open', async () => {
+    const user = userEvent.setup()
+    renderTitleBar({ workspaceHasContent: false })
+    await user.click(screen.getByTestId('collapse-workspace'))
+    expect(isReviewOpen(useLayoutStore.getState().layout, false)).toBe(true)
   })
 })

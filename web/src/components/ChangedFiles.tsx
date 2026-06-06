@@ -57,9 +57,11 @@ function splitPath(path: string): { dir: string; name: string; isDir: boolean } 
 export function ChangedFiles({ refreshKey = 0, selected, onOpen }: ChangedFilesProps) {
   const [entries, setEntries] = useState<ChangedEntry[]>([])
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let live = true
+    setLoading(true)
     fetchChanged()
       .then((res) => {
         if (!live) return
@@ -71,10 +73,21 @@ export function ChangedFiles({ refreshKey = 0, selected, onOpen }: ChangedFilesP
         setError(String(e))
         setEntries([])
       })
+      .finally(() => { if (live) setLoading(false) })
     return () => {
       live = false
     }
   }, [refreshKey])
+
+  if (loading) {
+    return (
+      <div className={styles.changed}>
+        <div className={styles.skeleton} data-testid="changed-skeleton" aria-hidden="true">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className={styles.skelRow} />)}
+        </div>
+      </div>
+    )
+  }
 
   if (error) {
     return (

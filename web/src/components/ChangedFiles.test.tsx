@@ -101,4 +101,10 @@ describe('ChangedFiles', () => {
     render(<ChangedFiles />)
     await waitFor(() => expect(screen.getByText(/network error/i)).toBeInTheDocument())
   })
+
+  it('shows a loading skeleton before the first response resolves', () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {})) // never resolves
+    render(<ChangedFiles />)
+    expect(screen.getByTestId('changed-skeleton')).toBeInTheDocument()
+  })
 })

@@ -2,7 +2,7 @@ version: 2
 project_name: deepseekcode
 
 release:
-  replace_existing_assets: true
+  replace_existing_artifacts: true
 
 before:
   hooks:

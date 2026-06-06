@@ -53,6 +53,12 @@ func TestBinary_ProxyEnvPassthrough(t *testing.T) {
 		// config.ResolveSecret; it must be non-empty so onboarding is skipped.
 		"DEEPSEEK_API_KEY=sk-fake-proxy-test",
 	)
+	// Windows: Go runtime needs SYSTEMROOT and TEMP to initialise.
+	for _, k := range []string{"SYSTEMROOT", "TEMP", "COMSPEC"} {
+		if v := os.Getenv(k); v != "" {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
 	out, _ := cmd.CombinedOutput()
 	outStr := string(out)
 

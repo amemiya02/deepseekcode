@@ -129,6 +129,7 @@ func TestValidateKey_Unauthorized(t *testing.T) {
 func TestPersistConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir) // Windows: os.UserHomeDir() uses USERPROFILE
 	t.Setenv("XDG_CONFIG_HOME", "") // force ~/.deepseekcode path
 
 	err := onboarding.PersistConfig(onboarding.OnboardingResult{
@@ -167,6 +168,7 @@ func TestPersistConfig(t *testing.T) {
 func TestPersistConfig_OverlayPreservesExistingKeys(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir) // Windows: os.UserHomeDir() uses USERPROFILE
 	t.Setenv("XDG_CONFIG_HOME", "") // force ~/.deepseekcode path
 
 	// Pre-write a config.toml with an extra key that PersistConfig should not clobber.
@@ -265,6 +267,7 @@ func TestRun_Interactive(t *testing.T) {
 	// Redirect HOME and XDG so PersistConfig writes to a temp dir.
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir) // Windows: os.UserHomeDir() uses USERPROFILE
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	cfg := config.Config{

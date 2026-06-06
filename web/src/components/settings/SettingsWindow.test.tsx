@@ -16,6 +16,13 @@ describe('SettingsWindow', () => {
     }
   })
 
+  it('assigns every section to one of the six known groups', () => {
+    const groups = new Set(['personal', 'modelsCost', 'coding', 'integrations', 'workspace', 'system'])
+    for (const s of SETTINGS_SECTIONS) {
+      expect(groups.has(s.group), `${s.id} has group ${s.group}`).toBe(true)
+    }
+  })
+
   it('renders the nav with one button per section', () => {
     wrap(<SettingsWindow open onClose={() => {}} />)
     const nav = screen.getByRole('navigation', { name: /settings/i })

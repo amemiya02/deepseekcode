@@ -390,7 +390,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	mcpReg := mcp.NewRegistry()
 	defer mcpReg.Shutdown()
 	var mcpNotices []string
-	for name, srv := range cfg.MCPServers {
+	for name, srv := range cfg.ActiveMCPServers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
 		switch srv.Transport {
@@ -920,7 +920,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	// (mcp_schema_hash). Notices go to stderr; one-shot output is on stdout.
 	mcpReg := mcp.NewRegistry()
 	defer mcpReg.Shutdown()
-	for name, srv := range cfg.MCPServers {
+	for name, srv := range cfg.ActiveMCPServers() {
 		mctx, mcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var cerr error
 		switch srv.Transport {

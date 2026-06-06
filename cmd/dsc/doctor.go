@@ -437,7 +437,7 @@ func checkMCP(cfg config.Config) checkResult {
 	}
 	var parts []string
 	reg := mcp.NewRegistry()
-	for name, srv := range cfg.MCPServers {
+	for name, srv := range cfg.ActiveMCPServers() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := reg.Connect(ctx, name, srv.Command, srv.Args, srv.Env)
 		cancel()

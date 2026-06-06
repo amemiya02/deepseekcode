@@ -19,10 +19,13 @@ const baseCfg: system.ConfigDTO = {
   transparentBackground: false,
 }
 
-// Helper — open a BrandedSelect trigger by testid and click an option by text
+// Helper — open a BrandedSelect trigger by testid and click an option by text.
+// BrandedSelect portals its listbox to document.body, so we must wait for the
+// option to appear before clicking it.
 async function pickOption(testid: string, optionText: string) {
   fireEvent.click(await screen.findByTestId(testid))
-  fireEvent.click(screen.getByRole('option', { name: optionText }))
+  const opt = await screen.findByRole('option', { name: optionText })
+  fireEvent.click(opt)
 }
 
 describe('AppearanceSection', () => {
@@ -38,7 +41,8 @@ describe('AppearanceSection', () => {
     const trigger = await screen.findByTestId('appearance-language')
     expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
     fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole('option', { name: '中文' }))
+    const opt = await screen.findByRole('option', { name: '中文' })
+    fireEvent.click(opt)
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ language: 'zh' })))
   })
 

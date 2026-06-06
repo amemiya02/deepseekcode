@@ -1,0 +1,28 @@
+.header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: var(--s-4, 16px); }
+.h2 { font: var(--type-title); color: var(--text); margin: 0; }
+.sub { font: var(--type-body); color: var(--text-3); margin: 2px 0 0; }
+.add { display: inline-flex; align-items: center; gap: 5px; padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--r-md, 8px); background: var(--surface); color: var(--text); cursor: pointer; font: var(--type-ui); }
+.add:hover { border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); color: var(--accent); }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md, 10px); background: var(--surface); }
+.rowOff { opacity: 0.6; }
+.rowIcon { color: var(--text-3); flex-shrink: 0; }
+.rowMain { flex: 1; min-width: 0; }
+.rowName { display: flex; align-items: center; gap: 8px; color: var(--text); font: var(--type-ui); font-weight: 500; }
+.ok { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font: var(--type-label); font-weight: 400; }
+.rowMeta { color: var(--text-3); font: var(--type-label); font-family: var(--type-mono-family); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iconBtn { display: inline-flex; background: none; border: none; color: var(--text-3); cursor: pointer; padding: 5px; border-radius: var(--r-sm, 6px); }
+.iconBtn:hover { color: var(--text); background: var(--elevated); }
+.toggle { position: relative; width: 34px; height: 20px; border: none; border-radius: 999px; background: var(--border-strong, #d4d8de); cursor: pointer; flex-shrink: 0; }
+.toggleOn { background: var(--accent); }
+.knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform var(--dur-fast) var(--ease-standard); }
+.toggleOn .knob { transform: translateX(14px); }
+.back { display: inline-flex; align-items: center; gap: 5px; background: none; border: none; color: var(--text-2); cursor: pointer; font: var(--type-ui); margin-bottom: var(--s-4, 16px); }
+.back:hover { color: var(--text); }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--s-3, 12px); max-width: 460px; }
+.field label { font: var(--type-label); color: var(--text-2); font-weight: 600; }
+.field input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md, 8px); padding: 8px 11px; color: var(--text); font: var(--type-body); outline: none; }
+.field input:focus { border-color: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+.actions { display: flex; gap: 10px; justify-content: flex-end; max-width: 460px; margin-top: var(--s-4, 16px); }
+.cancel { padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--r-md, 8px); background: none; color: var(--text-2); cursor: pointer; font: var(--type-ui); }
+.save { padding: 8px 18px; border: none; border-radius: var(--r-md, 8px); background: var(--accent); color: var(--text-on-accent); cursor: pointer; font: var(--type-ui); }

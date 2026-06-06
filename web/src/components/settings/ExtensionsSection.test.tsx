@@ -15,23 +15,24 @@ function mockFetch(map: Record<string, unknown>) {
 }
 
 describe('ExtensionsSection', () => {
-  it('renders four tabs: MCP, Skills, Hooks, Memory', async () => {
-    mockFetch({ '/v1/mcp': { items: [] } })
+  it('renders three tabs: Skills, Hooks, Memory', async () => {
+    mockFetch({ '/v1/skills': { items: [] } })
     render(<ExtensionsSection />)
-    for (const name of [/mcp/i, /skills/i, /hooks/i, /memory/i]) {
+    for (const name of [/skills/i, /hooks/i, /memory/i]) {
       expect(screen.getByRole('tab', { name })).toBeInTheDocument()
     }
+    expect(screen.queryByRole('tab', { name: /mcp/i })).toBeNull()
   })
 
   it('lists items for the active tab', async () => {
-    mockFetch({ '/v1/mcp': { items: [{ id: 'fs', name: 'filesystem', enabled: true }] } })
+    mockFetch({ '/v1/skills': { items: [{ id: 'fs', name: 'filesystem', enabled: true }] } })
     render(<ExtensionsSection />)
     await waitFor(() => expect(screen.getByText('filesystem')).toBeInTheDocument())
   })
 
   it('switching to Hooks fetches the hooks endpoint', async () => {
     const spy = mockFetch({
-      '/v1/mcp': { items: [] },
+      '/v1/skills': { items: [] },
       '/v1/hooks': { items: [{ id: 'h1', name: 'PreToolUse', enabled: true }] },
     })
     render(<ExtensionsSection />)

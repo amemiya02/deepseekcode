@@ -11,7 +11,6 @@ interface ExtItem {
 }
 
 const TABS = [
-  { id: 'mcp', path: '/v1/mcp', labelKey: 'settings.mcp', fallback: 'MCP' },
   { id: 'skills', path: '/v1/skills', labelKey: 'settings.skills', fallback: 'Skills' },
   { id: 'hooks', path: '/v1/hooks', labelKey: 'settings.hooks', fallback: 'Hooks' },
   { id: 'memory', path: '/v1/memory', labelKey: 'settings.memory', fallback: 'Memory' },
@@ -20,7 +19,7 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id']
 
 export function ExtensionsSection() {
-  const [active, setActive] = useState<TabId>('mcp')
+  const [active, setActive] = useState<TabId>('skills')
   const [items, setItems] = useState<ExtItem[]>([])
   const [loading, setLoading] = useState(true)
 

@@ -4,7 +4,7 @@ import { t } from '../../lib/i18n'
 import {
   IconSettings, IconPalette, IconCommand, IconLanguages, IconModel, IconCoins, IconKey,
   IconShield, IconSandbox, IconEditor, IconDatabase, IconDuet, IconExtensions, IconNetwork,
-  IconSessions, IconActivity, IconRefresh, IconInfo, type Icon,
+  IconSessions, IconActivity, IconRefresh, IconInfo, IconServer, type Icon,
   IconChevronLeft, IconSearch,
 } from '../../lib/icons'
 import { GeneralSection } from './GeneralSection'
@@ -13,6 +13,7 @@ import { ProvidersSection } from './ProvidersSection'
 import { NetworkSection } from './NetworkSection'
 import { SandboxSection } from './SandboxSection'
 import { ExtensionsSection } from './ExtensionsSection'
+import { McpSection } from './McpSection'
 import { DoctorView } from './DoctorView'
 import { UpdatesSection } from './UpdatesSection'
 import { KeybindingsSection } from './KeybindingsSection'
@@ -60,6 +61,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'editor', labelKey: 'settings.editor', fallback: 'Editor & Diff', group: 'coding', icon: IconEditor },
   { id: 'context', labelKey: 'settings.context', fallback: 'Context & Memory', group: 'coding', icon: IconDatabase },
   { id: 'duet', labelKey: 'settings.duet', fallback: 'Duet', group: 'coding', icon: IconDuet },
+  { id: 'mcp', labelKey: 'settings.mcp', fallback: 'MCP', group: 'integrations', icon: IconServer },
   { id: 'extensions', labelKey: 'settings.extensions', fallback: 'Extensions', group: 'integrations', icon: IconExtensions },
   { id: 'network', labelKey: 'settings.network', fallback: 'Network / Proxy', group: 'integrations', icon: IconNetwork },
   { id: 'sessions', labelKey: 'settings.sessions', fallback: 'Sessions & Storage', group: 'workspace', icon: IconSessions },
@@ -161,6 +163,8 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <EditorSection />
     case 'context':
       return <ContextSection />
+    case 'mcp':
+      return <McpSection />
     case 'extensions':
       return <ExtensionsSection />
     case 'network':

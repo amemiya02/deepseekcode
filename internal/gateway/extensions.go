@@ -57,32 +57,6 @@ func (h *Handler) workspaceRoot() string {
 	return ""
 }
 
-// handleMCP implements GET /v1/mcp. It enumerates the configured MCP servers
-// from the loaded config (the user/project [mcp_servers] tables). A configured
-// server is reported enabled; the SPA shows this as the "enabled" badge.
-func (h *Handler) handleMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	cfg, err := loadConfig()
-	if err != nil {
-		// Never 404/500 the Extensions UI: degrade to an honest empty list.
-		writeExtItems(w, nil)
-		return
-	}
-	names := make([]string, 0, len(cfg.MCPServers))
-	for name := range cfg.MCPServers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	items := make([]extItem, 0, len(names))
-	for _, name := range names {
-		items = append(items, extItem{ID: name, Name: name, Enabled: true})
-	}
-	writeExtItems(w, items)
-}
-
 // handleHooks implements GET /v1/hooks. It enumerates the configured lifecycle
 // hooks from config ([[hooks]] tables). Each configured hook is reported
 // enabled. The display name combines the event with the builtin name or

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
+	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/webapp"
@@ -70,6 +71,7 @@ type Handler struct {
 	root        string // workspace root for /v1/files, /v1/file, /v1/changed
 	store       *session.Store     // optional: wired by WithStore (Wave 5 checkpoint endpoints)
 	snaps       *snapshots.Manager // optional: wired by WithSnapshots (Wave 5 code-rewind)
+	mcpReg      *mcp.Registry      // optional: wired by WithMCPRegistry (live status overlay)
 	hub         *hub
 	reqSeq      atomic.Int64
 	mu          sync.Mutex
@@ -148,6 +150,7 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 	// subsystems. These never 404 — an unconfigured/unreadable subsystem
 	// returns 200 {"items":[]} so the SPA shows an honest empty state.
 	h.mux.HandleFunc("/v1/mcp", h.handleMCP)
+	h.mux.HandleFunc("/v1/mcp/", h.handleMCPByName)
 	h.mux.HandleFunc("/v1/hooks", h.handleHooks)
 	h.mux.HandleFunc("/v1/skills", h.handleSkills)
 	h.mux.HandleFunc("/v1/memory", h.handleMemory)

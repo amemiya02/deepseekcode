@@ -169,9 +169,10 @@ func TestExtensionsNeverNotFound(t *testing.T) {
 }
 
 // TestExtensionsRejectsNonGET confirms the read-only endpoints reject mutations.
+// /v1/mcp is excluded: POST is now valid (add server).
 func TestExtensionsRejectsNonGET(t *testing.T) {
 	ts := newExtServer(t, t.TempDir(), config.Default())
-	for _, path := range []string{"/v1/mcp", "/v1/hooks", "/v1/skills", "/v1/memory"} {
+	for _, path := range []string{"/v1/hooks", "/v1/skills", "/v1/memory"} {
 		req, _ := http.NewRequest(http.MethodPost, ts.URL+path, nil)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

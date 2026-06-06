@@ -19,7 +19,7 @@ describe('theme store', () => {
   })
 
   it('persist then load round-trips the chosen settings', () => {
-    const s = { theme: 'lumen', mode: 'light', density: 'compact', accent: 'emerald', uiFont: 'system', codeFont: 'sf-mono' } as const
+    const s = { theme: 'lumen', mode: 'light', density: 'compact', accent: 'emerald', uiFont: 'system', codeFont: 'sf-mono', transcriptVerbosity: 'normal' } as const
     persistThemeSettings(s)
     expect(loadThemeSettings()).toEqual(s)
   })

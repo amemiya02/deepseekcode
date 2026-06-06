@@ -11,17 +11,16 @@ function mockFetch(status: number, body: unknown) {
 
 describe('system client', () => {
   it('fetchConfig returns the DTO', async () => {
-    mockFetch(200, { theme: 'graphite', accent: 'indigo', density: 'comfortable', model: 'deepseek-v4', autoRoute: false })
+    mockFetch(200, { accent: 'indigo', density: 'comfortable', model: 'deepseek-v4', autoRoute: false })
     const cfg = await fetchConfig()
-    expect(cfg.theme).toBe('graphite')
     expect(cfg.accent).toBe('indigo')
     expect(cfg.model).toBe('deepseek-v4')
   })
 
   it('saveConfig PUTs and returns the echoed DTO', async () => {
-    const spy = mockFetch(200, { theme: 'lumen', accent: 'terracotta', density: 'compact', model: 'deepseek-v4', autoRoute: true })
-    const out = await saveConfig({ theme: 'lumen' })
-    expect(out.theme).toBe('lumen')
+    const spy = mockFetch(200, { accent: 'terracotta', density: 'compact', model: 'deepseek-v4', autoRoute: true })
+    const out = await saveConfig({ accent: 'terracotta' })
+    expect(out.accent).toBe('terracotta')
     expect(spy).toHaveBeenCalledWith('/v1/config', expect.objectContaining({ method: 'PUT' }))
   })
 

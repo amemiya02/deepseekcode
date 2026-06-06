@@ -207,6 +207,20 @@ type MCPServerConfig struct {
 	TimeoutSeconds int               `toml:"timeout_seconds"`
 	EnabledTools   []string          `toml:"enabled_tools"`  // allowlist: only these tools exposed
 	DisabledTools  []string          `toml:"disabled_tools"` // blocklist: these tools hidden
+	Disabled       bool              `toml:"disabled,omitempty"` // configured but not connected
+}
+
+// ActiveMCPServers returns the subset of MCPServers that are not Disabled, so the
+// runtime bridge and doctor connect only enabled servers. The result is a new map.
+func (c Config) ActiveMCPServers() map[string]MCPServerConfig {
+	out := make(map[string]MCPServerConfig, len(c.MCPServers))
+	for name, srv := range c.MCPServers {
+		if srv.Disabled {
+			continue
+		}
+		out[name] = srv
+	}
+	return out
 }
 
 // Load reads user + project config and overlays them onto defaults.

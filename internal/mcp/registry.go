@@ -383,7 +383,9 @@ func (r *Registry) Shutdown() {
 		}(s)
 	}
 	closed := make(chan struct{})
-	go func() { cwg.Wait(); close(closed) }()
+	var helperWg sync.WaitGroup
+	helperWg.Add(1)
+	go func() { defer helperWg.Done(); cwg.Wait(); close(closed) }()
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
@@ -393,11 +395,17 @@ func (r *Registry) Shutdown() {
 	// r.done (closed above) or on their transport's Done (closed by
 	// Close above), so this returns promptly.
 	watchers := make(chan struct{})
-	go func() { r.wg.Wait(); close(watchers) }()
+	helperWg.Add(1)
+	go func() { defer helperWg.Done(); r.wg.Wait(); close(watchers) }()
 	select {
 	case <-watchers:
 	case <-time.After(5 * time.Second):
 	}
+
+	// Ensure the helper goroutines above have fully returned so callers
+	// that sample runtime.NumGoroutine() immediately after Shutdown
+	// don't see them as leaked.
+	helperWg.Wait()
 }
 
 // Servers returns a snapshot of all registered server proxies. The

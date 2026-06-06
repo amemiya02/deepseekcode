@@ -165,7 +165,7 @@ export function Composer({
       </AttachmentDrop>
       {streaming && text.trim().length > 0 && (
         <div className="composer__steer-hint" data-testid="composer-steer-hint">
-          {t('composer.steerHint', '⏎ to steer · Esc to stop')}
+          {t('composer.steerHint', 'Enter to steer · Esc to stop')}
         </div>
       )}
       <div className="composer-bar">

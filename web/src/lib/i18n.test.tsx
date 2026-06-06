@@ -43,6 +43,14 @@ describe('i18n', () => {
     }
   })
 
+  it('no rendered locale value contains emoji/symbol glyphs (icon-audit guard)', () => {
+    // Misc-Technical (⏎ ⌫), dingbats/symbols, emoji blocks, and VS-16. CJK,
+    // middot, and ellipsis are intentionally NOT matched.
+    const re = /[⌀-⏿☀-➿⬀-⯿️]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/
+    for (const [k, v] of Object.entries(en)) expect(re.test(v), `en.${k} = ${v}`).toBe(false)
+    for (const [k, v] of Object.entries(zhCN)) expect(re.test(v), `zh.${k} = ${v}`).toBe(false)
+  })
+
   it('useLocale re-renders consumers on locale switch', () => {
     function Probe() {
       const tt = useT()

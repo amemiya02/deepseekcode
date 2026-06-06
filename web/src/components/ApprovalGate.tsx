@@ -56,7 +56,7 @@ export function ApprovalGate({
         <button className="approval__btn approval__btn--deny" data-testid="approve-deny" type="button" onClick={() => decide('deny')}>
           <X size={13} aria-hidden="true" /> {t('approval.deny', 'Reject')}
         </button>
-        <span className="approval__hint" aria-hidden="true">{t('approval.hint', '⏎ accept · ⌫ reject')}</span>
+        <span className="approval__hint" aria-hidden="true">{t('approval.hint', 'Enter to accept · Backspace to reject')}</span>
       </div>
     </div>
   )

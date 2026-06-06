@@ -32,11 +32,6 @@ export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[];
               'Ask a question, plan a change, or build something — cache, cost, and routing stay in view the whole way.',
             )}
           </p>
-          <div className="empty-convo__chips" aria-hidden="true">
-            <span className="empty-convo__chip">{t('empty.ex1', 'Explain this codebase')}</span>
-            <span className="empty-convo__chip">{t('empty.ex2', 'Write a failing test, then fix it')}</span>
-            <span className="empty-convo__chip">{t('empty.ex3', 'Refactor for readability')}</span>
-          </div>
         </div>
       )}
       <div className="transcript__lane">

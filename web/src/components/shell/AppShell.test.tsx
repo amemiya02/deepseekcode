@@ -1,8 +1,10 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { AppShell } from './AppShell'
 import { LocaleProvider } from '../../lib/i18n'
+import { useLayoutStore } from '../../lib/layoutStore'
+import { DEFAULT_LAYOUT } from './layout'
 
 function renderShell(props: { workspaceHasContent?: boolean } = {}) {
   return render(
@@ -17,7 +19,10 @@ function renderShell(props: { workspaceHasContent?: boolean } = {}) {
   )
 }
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  useLayoutStore.setState({ layout: { ...DEFAULT_LAYOUT } })
+})
 
 describe('AppShell', () => {
   it('renders rail + conversation always; workspace only with content', () => {
@@ -39,20 +44,24 @@ describe('AppShell', () => {
     expect(screen.getByTestId('app-shell').getAttribute('data-workspace-collapsed')).toBe('false')
   })
 
-  it('the workspace toggle pins the pane open even without changes', async () => {
-    const user = userEvent.setup()
+  it('reflects sessions-collapsed from the store', () => {
+    renderShell()
+    expect(screen.getByTestId('app-shell').getAttribute('data-sessions-collapsed')).toBe('false')
+    act(() => { useLayoutStore.getState().toggleLeft() })
+    expect(screen.getByTestId('app-shell').getAttribute('data-sessions-collapsed')).toBe('true')
+  })
+
+  it('the workspace pin (store) reveals the pane even without changes', () => {
     renderShell({ workspaceHasContent: false })
     expect(screen.queryByTestId('zone-workspace')).toBeNull()
-    await user.click(screen.getByTestId('collapse-workspace'))
+    act(() => { useLayoutStore.getState().toggleRight(false) })
     expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
   })
 
-  it('collapsing the sessions zone sets the collapsed flag', async () => {
-    const user = userEvent.setup()
+  it('no longer renders the floating collapse tabs (moved to the title bar)', () => {
     renderShell()
-    const grid = screen.getByTestId('app-shell')
-    await user.click(screen.getByTestId('collapse-sessions'))
-    expect(grid.getAttribute('data-sessions-collapsed')).toBe('true')
+    expect(screen.queryByTestId('collapse-sessions')).toBeNull()
+    expect(screen.queryByTestId('collapse-workspace')).toBeNull()
   })
 
   it('persists split sizes to localStorage on resize', () => {

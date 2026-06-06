@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { IconPanelLeft, IconPanelRight } from '../../lib/icons'
-import { useT } from '../../lib/i18n'
 import {
-  loadLayout, saveLayout, clampLeft, clampRight, isReviewOpen,
+  saveLayout, clampLeft, clampRight, isReviewOpen,
   LEFT_MIN, LEFT_MAX, RIGHT_MIN, RIGHT_MAX,
   type Layout,
 } from './layout'
+import { useLayoutStore } from '../../lib/layoutStore'
 import styles from './index.module.css'
 
 export interface AppShellProps {
@@ -23,8 +22,8 @@ const STEP_BIG = 64
 const GUTTER = 24
 
 export function AppShell({ sessions, conversation, workspace, workspaceHasContent }: AppShellProps) {
-  const t = useT()
-  const [layout, setLayout] = useState<Layout>(() => loadLayout())
+  const layout = useLayoutStore((s) => s.layout)
+  const setLayout = useLayoutStore((s) => s.setLayout)
   const [dragging, setDragging] = useState(false)
   const reviewOpen = isReviewOpen(layout, !!workspaceHasContent)
 
@@ -134,23 +133,6 @@ export function AppShell({ sessions, conversation, workspace, workspaceHasConten
     return () => window.removeEventListener('keydown', handler)
   }, [workspaceHasContent])
 
-  // ── Collapse toggles ──────────────────────────────────────────────────────
-
-  const toggleLeft = () =>
-    setLayout((prev) => {
-      const next = { ...prev, leftCollapsed: !prev.leftCollapsed }
-      saveLayout(next)
-      return next
-    })
-
-  const toggleRight = () =>
-    setLayout((prev) => {
-      const open = isReviewOpen(prev, !!workspaceHasContent)
-      const next = { ...prev, reviewPin: open ? 'closed' as const : 'open' as const }
-      saveLayout(next)
-      return next
-    })
-
   // ── CSS custom properties → grid ──────────────────────────────────────────
 
   const gridStyle: CSSProperties = {
@@ -188,25 +170,7 @@ export function AppShell({ sessions, conversation, workspace, workspaceHasConten
       />
 
       <main className={`${styles.zone} ${styles.zoneConversation} shell-main`}>
-        <button
-          className={`${styles.collapseTab} ${styles.collapseTabLeft}`}
-          data-testid="collapse-sessions"
-          aria-label={t('shell.collapseSessions')}
-          onClick={toggleLeft}
-        >
-          <IconPanelLeft size={14} />
-        </button>
-
         {conversation}
-
-        <button
-          className={`${styles.collapseTab} ${styles.collapseTabRight}`}
-          data-testid="collapse-workspace"
-          aria-label={t('shell.collapseWorkspace')}
-          onClick={toggleRight}
-        >
-          <IconPanelRight size={14} />
-        </button>
       </main>
 
       <div

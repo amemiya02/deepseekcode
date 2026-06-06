@@ -246,14 +246,37 @@ button { font-family: inherit; }
 /* (e) Inline code chip */
 .markdown-body code.md-code { font: var(--type-mono); background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: 0 4px; }
 
-/* (f) Thinking pill */
-.thinking { margin: 0; }
-.thinking__toggle { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-hair); border-radius: 999px; color: var(--text-3); font: var(--type-label); cursor: pointer; padding: 2px 10px; }
+/* (f) Reasoning disclosure — a quiet inline line that belongs to the turn,
+   indented to align with the assistant prose (avatar column + gap). No pill. */
+.thinking { margin: 0 0 2px; padding-left: calc(var(--avatar-size) + var(--s-2)); }
+.thinking__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text-3);
+  font: var(--type-label);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.thinking__toggle:hover { color: var(--text-2); }
 .thinking--live .thinking__toggle { color: var(--accent); }
 .thinking--live .thinking__toggle::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: blink 1s step-end infinite; }
 .thinking__chevron { transition: transform var(--dur-fast) var(--ease-standard); }
 .thinking__chevron--open { transform: rotate(90deg); }
-.thinking__body { margin: 6px 0 0; white-space: pre-wrap; color: var(--text-2); font: var(--type-mono); background: var(--surface); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: var(--s-2); opacity: 0.92; }
+.thinking__body {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: var(--text-2);
+  font: var(--type-mono);
+  background: var(--surface);
+  border: 1px solid var(--border-hair);
+  border-radius: var(--r-sm);
+  padding: var(--s-2);
+  opacity: 0.92;
+}
 
 /* (g) Markdown prose polish */
 .markdown-body { font: var(--type-body); color: var(--text); line-height: 1.65; }

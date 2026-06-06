@@ -114,3 +114,52 @@ export async function connectKey(input: ConnectKeyInput): Promise<void> {
     throw new Error(text || `gateway error ${res.status}`)
   }
 }
+
+export interface McpServer {
+  id: string
+  name: string
+  enabled: boolean
+  transport: string
+  command: string
+  status?: string
+  toolCount?: number
+}
+
+export interface McpUpsert {
+  name: string
+  transport: string
+  command?: string
+  url?: string
+  args?: string[]
+  env?: Record<string, string>
+  disabled?: boolean
+  timeoutSeconds?: number
+}
+
+export async function fetchMcpServers(): Promise<McpServer[]> {
+  const body = await jsonOrThrow<{ items: McpServer[] }>(await fetch('/v1/mcp'))
+  return body.items ?? []
+}
+
+export async function saveMcpServer(u: McpUpsert): Promise<McpServer[]> {
+  const body = await jsonOrThrow<{ items: McpServer[] }>(
+    await fetch('/v1/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(u) }),
+  )
+  return body.items ?? []
+}
+
+export async function deleteMcpServer(name: string): Promise<McpServer[]> {
+  const body = await jsonOrThrow<{ items: McpServer[] }>(
+    await fetch(`/v1/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  )
+  return body.items ?? []
+}
+
+export async function toggleMcpServer(name: string, disabled: boolean): Promise<McpServer[]> {
+  const body = await jsonOrThrow<{ items: McpServer[] }>(
+    await fetch(`/v1/mcp/${encodeURIComponent(name)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled }),
+    }),
+  )
+  return body.items ?? []
+}

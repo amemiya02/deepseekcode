@@ -3,7 +3,7 @@ import { ReviewPanel } from './components/ReviewPanel'
 import { TelemetryStrip } from './components/TelemetryStrip'
 import { SessionRail } from './components/SessionRail'
 import { StatusBarLive } from './components/StatusBarLive'
-import { SettingsWindow } from './components/settings/SettingsWindow'
+import { SettingsView } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
 import { rewind, fork, summarize, switchSession } from './lib/checkpoint'
@@ -461,18 +461,21 @@ function AppInner() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        <div className={styles.appRoot}>
-          {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
-          <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
-          <div className={styles.appBody}>
-            <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
+        {settingsOpen ? (
+          <SettingsView onClose={() => setSettingsOpen(false)} />
+        ) : (
+          <div className={styles.appRoot}>
+            {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
+            <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+            <div className={styles.appBody}>
+              <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
+            </div>
+            <div data-testid="hero-statusbar">
+              <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
+            </div>
           </div>
-          <div data-testid="hero-statusbar">
-            <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
-          </div>
-        </div>
+        )}
         <CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
-        <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <OnboardingWizard open={onboardingOpen} onComplete={() => setOnboardingOpen(false)} />
         <Toasts />
       </ErrorBoundary>

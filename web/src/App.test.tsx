@@ -288,21 +288,23 @@ describe('App — full shell integration (Wave 0)', () => {
     expect(within(zone).queryByTestId('ws-tab-workspace')).toBeNull()
   })
 
-  it('opens the SettingsWindow via the titlebar gear button', async () => {
+  it('opens the SettingsView via the titlebar gear button (full-page, no dialog)', async () => {
     const user = userEvent.setup()
     render(<App />)
-    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    expect(screen.queryByTestId('settings-back')).toBeNull()
     await user.click(screen.getByTestId('open-settings'))
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    expect(await screen.findByTestId('settings-back')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
   })
 
-  it('opens the SettingsWindow via the command palette (Cmd+K) Settings command', async () => {
+  it('opens the SettingsView via the command palette (Cmd+K) Settings command', async () => {
     const user = userEvent.setup()
     render(<App />)
-    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    expect(screen.queryByTestId('settings-back')).toBeNull()
     fireEvent.keyDown(window, { key: 'k', metaKey: true })
     await user.click(await screen.findByText('Settings'))
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    expect(await screen.findByTestId('settings-back')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
   })
 
   it('shows the OnboardingWizard when onboarding is needed', async () => {

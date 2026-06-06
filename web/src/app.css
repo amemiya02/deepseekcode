@@ -336,7 +336,7 @@ button { font-family: inherit; }
 
 /* SendStopButton */
 .composer__btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--border); cursor: pointer; }
-.composer__btn--send { background: var(--accent); color: var(--text-on-accent); border-color: transparent; box-shadow: var(--glow-accent); }
+.composer__btn--send { background: var(--accent); color: var(--text-on-accent); border-color: transparent; border-radius: 50%; box-shadow: var(--glow-accent); }
 .composer__btn--send:hover:not(:disabled) { background: var(--accent-ink); box-shadow: var(--glow-accent-hover); }
 .composer__btn--send:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 .composer__btn--stop { background: var(--danger); color: var(--text-on-accent); }

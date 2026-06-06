@@ -8,10 +8,14 @@ import { SettingsView, SETTINGS_SECTIONS, SETTINGS_GROUPS } from './SettingsWind
 const wrap = (ui: React.ReactElement) => render(<LocaleProvider>{ui}</LocaleProvider>)
 
 describe('SettingsView', () => {
-  it('exports all 19 section keys', () => {
-    expect(SETTINGS_SECTIONS.length).toBe(19)
+  it('exports 15 sections and no general/language/context/updates ids', () => {
     const ids = SETTINGS_SECTIONS.map((s) => s.id)
-    for (const id of ['general', 'appearance', 'models', 'budget', 'duet', 'network', 'about', 'mcp']) {
+    expect(ids).toHaveLength(15)
+    for (const dead of ['general', 'language', 'context', 'updates']) {
+      expect(ids).not.toContain(dead)
+    }
+    expect(ids).toContain('about')
+    for (const id of ['appearance', 'models', 'budget', 'duet', 'network', 'mcp']) {
       expect(ids).toContain(id)
     }
   })
@@ -30,7 +34,7 @@ describe('SettingsView', () => {
   it('renders a nav button per section plus the group headers', () => {
     wrap(<SettingsView onClose={() => {}} />)
     const nav = screen.getByRole('navigation', { name: /settings/i })
-    expect(nav.querySelectorAll('[data-testid="settings-nav-item"]').length).toBe(19)
+    expect(nav.querySelectorAll('[data-testid="settings-nav-item"]').length).toBe(15)
     for (const g of SETTINGS_GROUPS) {
       expect(screen.getByText(new RegExp(`^${g.fallback}$`, 'i'))).toBeInTheDocument()
     }

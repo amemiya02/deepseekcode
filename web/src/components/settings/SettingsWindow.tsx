@@ -2,12 +2,11 @@
 import { useMemo, useState } from 'react'
 import { t } from '../../lib/i18n'
 import {
-  IconSettings, IconPalette, IconCommand, IconLanguages, IconModel, IconCoins, IconKey,
-  IconShield, IconSandbox, IconEditor, IconDatabase, IconDuet, IconExtensions, IconNetwork,
-  IconSessions, IconActivity, IconRefresh, IconInfo, IconServer, type Icon,
+  IconPalette, IconCommand, IconModel, IconCoins, IconKey,
+  IconShield, IconSandbox, IconEditor, IconDuet, IconExtensions, IconNetwork,
+  IconSessions, IconActivity, IconInfo, IconServer, type Icon,
   IconChevronLeft, IconSearch,
 } from '../../lib/icons'
-import { GeneralSection } from './GeneralSection'
 import { AppearanceSection } from './AppearanceSection'
 import { ProvidersSection } from './ProvidersSection'
 import { NetworkSection } from './NetworkSection'
@@ -15,14 +14,13 @@ import { SandboxSection } from './SandboxSection'
 import { ExtensionsSection } from './ExtensionsSection'
 import { McpSection } from './McpSection'
 import { DoctorView } from './DoctorView'
-import { UpdatesSection } from './UpdatesSection'
+import { AboutSection } from './AboutSection'
 import { KeybindingsSection } from './KeybindingsSection'
 import { ModelsSection } from './ModelsSection'
 import { BudgetSection } from './BudgetSection'
 import { DuetSection } from './DuetSection'
 import { PermissionsSection } from './PermissionsSection'
 import { EditorSection } from './EditorSection'
-import { ContextSection } from './ContextSection'
 import { SessionsSection } from './SessionsSection'
 import styles from './SettingsWindow.module.css'
 
@@ -49,24 +47,20 @@ export const SETTINGS_GROUPS: { id: SettingsGroup; labelKey: string; fallback: s
 // SETTINGS_SECTIONS is the canonical nav model: id + i18n key + English fallback + group + icon.
 // Exported so tests and the command palette can enumerate sections.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { id: 'general', labelKey: 'settings.general', fallback: 'General', group: 'personal', icon: IconSettings },
   { id: 'appearance', labelKey: 'settings.appearance', fallback: 'Appearance', group: 'personal', icon: IconPalette },
   { id: 'keybindings', labelKey: 'settings.keybindings', fallback: 'Keybindings', group: 'personal', icon: IconCommand },
-  { id: 'language', labelKey: 'settings.language', fallback: 'Language', group: 'personal', icon: IconLanguages },
   { id: 'models', labelKey: 'settings.models', fallback: 'Models & Routing', group: 'modelsCost', icon: IconModel },
   { id: 'budget', labelKey: 'settings.budget', fallback: 'Budget & Cache', group: 'modelsCost', icon: IconCoins },
   { id: 'providers', labelKey: 'settings.providers', fallback: 'Providers & Keys', group: 'modelsCost', icon: IconKey },
   { id: 'permissions', labelKey: 'settings.permissions', fallback: 'Permissions & Autonomy', group: 'coding', icon: IconShield },
   { id: 'sandbox', labelKey: 'settings.sandbox', fallback: 'Sandbox', group: 'coding', icon: IconSandbox },
   { id: 'editor', labelKey: 'settings.editor', fallback: 'Editor & Diff', group: 'coding', icon: IconEditor },
-  { id: 'context', labelKey: 'settings.context', fallback: 'Context & Memory', group: 'coding', icon: IconDatabase },
   { id: 'duet', labelKey: 'settings.duet', fallback: 'Duet', group: 'coding', icon: IconDuet },
   { id: 'mcp', labelKey: 'settings.mcp', fallback: 'MCP', group: 'integrations', icon: IconServer },
   { id: 'extensions', labelKey: 'settings.extensions', fallback: 'Extensions', group: 'integrations', icon: IconExtensions },
   { id: 'network', labelKey: 'settings.network', fallback: 'Network / Proxy', group: 'integrations', icon: IconNetwork },
   { id: 'sessions', labelKey: 'settings.sessions', fallback: 'Sessions & Storage', group: 'workspace', icon: IconSessions },
   { id: 'doctor', labelKey: 'settings.doctor', fallback: 'Doctor', group: 'system', icon: IconActivity },
-  { id: 'updates', labelKey: 'settings.updates', fallback: 'Updates', group: 'system', icon: IconRefresh },
   { id: 'about', labelKey: 'settings.about', fallback: 'About', group: 'system', icon: IconInfo },
 ]
 
@@ -75,7 +69,7 @@ export interface SettingsViewProps {
 }
 
 export function SettingsView({ onClose }: SettingsViewProps) {
-  const [active, setActive] = useState('general')
+  const [active, setActive] = useState('appearance')
   const [query, setQuery] = useState('')
 
   const q = query.trim().toLowerCase()
@@ -140,9 +134,6 @@ export function SettingsView({ onClose }: SettingsViewProps) {
 
 function renderSection(active: string, section: SettingsSection | undefined) {
   switch (active) {
-    case 'general':
-    case 'language':
-      return <GeneralSection />
     case 'appearance':
       return <AppearanceSection />
     case 'keybindings':
@@ -161,8 +152,6 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <SandboxSection />
     case 'editor':
       return <EditorSection />
-    case 'context':
-      return <ContextSection />
     case 'mcp':
       return <McpSection />
     case 'extensions':
@@ -173,9 +162,8 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <SessionsSection />
     case 'doctor':
       return <DoctorView />
-    case 'updates':
     case 'about':
-      return <UpdatesSection />
+      return <AboutSection />
     default:
       return (
         <div className={styles.placeholder}>

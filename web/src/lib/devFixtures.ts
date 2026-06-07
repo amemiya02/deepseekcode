@@ -76,8 +76,8 @@ export function sessionsFixture(now: number): Session[] {
   ]
 }
 
-// DEV-only: seed a pending permission so ?fixture=approval renders the inline gate
-// and ?fixture=approval-cmd renders the fallback modal. Tree-shaken from production.
+// DEV-only: seed a pending permission so ?fixture=approval renders the inline diff
+// gate and ?fixture=approval-cmd the inline command card. Tree-shaken from production.
 export const permissionFixtures: Record<string, PermissionRequest> = {
   approval: { id: 'fx-edit', tool: 'edit_file', args: { path: 'src/parser.ts', old_string: 'function doEverything(src) {\n  /* …38 lines… */\n}', new_string: 'export function parse(src) {\n  return build(tokenize(src))\n}' }, options: [] },
   'approval-cmd': { id: 'fx-cmd', tool: 'bash', args: { command: 'rm -rf build/' }, options: [] },

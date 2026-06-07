@@ -39,4 +39,18 @@ describe('ApprovalGate', () => {
     await userEvent.keyboard('{Backspace}')
     expect(calls).toEqual(['once', 'deny'])
   })
+  it('non-edit tools render the command card (no diff island) with the bare command', () => {
+    const cmd: PermissionRequest = { id: 'p2', tool: 'bash', args: { command: 'rm -rf build/' }, options: [] }
+    const { container } = wrap(<ApprovalGate request={cmd} onDecide={vi.fn()} />)
+    expect(screen.getByTestId('approval-cmd')).toBeInTheDocument()
+    expect(container.querySelector('.island')).toBeNull()
+    expect(screen.getByText('bash')).toBeInTheDocument()
+    expect(screen.getByText('rm -rf build/')).toBeInTheDocument()
+  })
+  it('non-edit tools without a command string pretty-print the args', () => {
+    const glob: PermissionRequest = { id: 'p3', tool: 'glob', args: { pattern: '**/*.pdf' }, options: [] }
+    wrap(<ApprovalGate request={glob} onDecide={vi.fn()} />)
+    expect(screen.getByTestId('approval-cmd')).toBeInTheDocument()
+    expect(screen.getByText(/\*\*\/\*\.pdf/)).toBeInTheDocument()
+  })
 })

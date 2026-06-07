@@ -355,3 +355,49 @@ export async function fetchBalance(): Promise<Balance> {
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   return res.json() as Promise<Balance>
 }
+
+// ---- MCP Discovery (B1) ----
+
+export interface McpToolResult {
+  server: string
+  tool: string
+  desc: string
+}
+
+export interface McpToolDetail {
+  server: string
+  tool: string
+  desc: string
+  input_schema?: Record<string, unknown>
+}
+
+export async function mcpSearch(query: string): Promise<McpToolResult[]> {
+  const res = await fetch('/v1/mcp/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.results ?? []) as McpToolResult[]
+}
+
+export async function mcpDescribe(server: string, tool: string): Promise<McpToolDetail> {
+  const res = await fetch('/v1/mcp/describe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server, tool }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<McpToolDetail>
+}
+
+export async function mcpCall(server: string, tool: string, args?: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch('/v1/mcp/call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server, tool, args: args ?? {} }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json()
+}

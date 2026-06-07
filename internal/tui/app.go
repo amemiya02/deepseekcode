@@ -943,6 +943,9 @@ func (a *App) renderOverlay() string {
 	case modePermissions:
 		body = renderPermissions(a.theme, a.overlay.Permissions(), a.width, h)
 		footerText = "esc close"
+	case modeQuitConfirm:
+		body = renderQuitConfirm(a.theme, a.width, h)
+		footerText = "y quit · n/cancel"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -1973,6 +1976,18 @@ func (a *App) toggleAllReasoning() {
 func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 	if a.overlay.Filterable() {
 		return a.handleFilterableOverlayKey(km)
+	}
+
+	// modeQuitConfirm has its own y/n/esc semantics; delegate before the
+	// generic esc/q close so "q" is not auto-quit here.
+	if a.overlay.Mode() == modeQuitConfirm {
+		switch a.overlay.QuitConfirmResolve(km.String()) {
+		case quitConfirmed:
+			return tea.Quit
+		case quitCancel:
+			return nil
+		}
+		return nil // quitNone: ignore unrecognized keys
 	}
 
 	switch km.String() {

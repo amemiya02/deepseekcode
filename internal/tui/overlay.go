@@ -25,6 +25,7 @@ const (
 	modeLSP                  // /lsp — LSP server status overlay
 	modePermissions          // /permissions — effective policy overlay
 	modeEffort               // /effort — reasoning-effort picker (filterable)
+	modeQuitConfirm          // quit-confirm y/n dialog
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -368,6 +369,42 @@ func (o *Overlay) OpenPermissions(rows []PermissionRow) {
 
 // Permissions returns the permission rows (read-only).
 func (o *Overlay) Permissions() []PermissionRow { return o.permRows }
+
+// quitDecision is the outcome of the quit-confirm dialog.
+type quitDecision int
+
+const (
+	quitNone quitDecision = iota
+	quitConfirmed
+	quitCancel
+)
+
+// OpenQuitConfirm switches to the quit-confirm dialog (y/n prompt).
+func (o *Overlay) OpenQuitConfirm() {
+	o.mode = modeQuitConfirm
+	o.cursor = 0
+}
+
+// QuitConfirmResolve processes a key press in the quit-confirm dialog.
+// "y"/"Y" confirms quit, "n"/"N"/"esc" cancels, anything else is ignored.
+func (o *Overlay) QuitConfirmResolve(key string) quitDecision {
+	switch key {
+	case "y", "Y":
+		o.Close()
+		return quitConfirmed
+	case "n", "N", "esc":
+		o.Close()
+		return quitCancel
+	default:
+		return quitNone
+	}
+}
+
+// renderQuitConfirm draws the quit-confirm dialog as a small centered y/n card.
+func renderQuitConfirm(t Theme, width, height int) string {
+	body := t.Hint.Render("y") + "  quit  " + t.Hint.Render("n") + "  cancel"
+	return wrapPane(t, "quit", "confirm?", body, width, height)
+}
 
 // modelOption is one row in the /models picker.
 type modelOption struct {

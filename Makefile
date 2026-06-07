@@ -1,4 +1,4 @@
-.PHONY: build build-web install install-web test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline cover-cache web web-test desktop ci
+.PHONY: build build-web install install-web test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline demo-headtohead cover-cache web web-test desktop ci
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -60,6 +60,9 @@ demo-cache:
 demo-cache-offline:
 	@echo "Running offline cache A/B demo (committed fixture, no API key)..."
 	@go run ./bench/cmd/cachedemo -fixture bench/cache-demo/results.sample.json -out bench/cache-demo/results.json
+
+demo-headtohead: ## run cache cost head-to-head (offline golden by default)
+	go run ./bench/cmd/cachedemo headtohead $(ARGS)
 
 cover-cache:
 	go test -cover -coverprofile=coverage-cache.out ./internal/llm/ ./internal/repair/ ./internal/routing/ ./internal/agent/

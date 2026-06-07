@@ -1,0 +1,16 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2, 8px);
+  padding: 2px var(--s-3, 12px);
+  background: color-mix(in oklch, var(--elevated) 80%, transparent);
+  backdrop-filter: blur(var(--glass-blur, 12px));
+  border-top: 1px solid var(--glass-edge, color-mix(in oklch, var(--text) 6%, transparent));
+  color: var(--text-2);
+  font: var(--type-label);
+}
+.part + .part::before {
+  content: '\00b7'; /* middle dot separator */
+  margin-right: var(--s-2, 8px);
+  color: var(--text-3);
+}

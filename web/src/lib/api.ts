@@ -401,3 +401,24 @@ export async function mcpCall(server: string, tool: string, args?: Record<string
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   return res.json()
 }
+
+// ---- Wave 5: Capabilities introspection + Runtime info (B4) ----
+
+export interface RuntimeInfo {
+  model: string
+  version: string
+  caps: Record<string, boolean>
+}
+
+export async function fetchCapabilities(): Promise<Record<string, boolean>> {
+  const res = await fetch('/v1/capabilities')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.caps ?? {}) as Record<string, boolean>
+}
+
+export async function fetchRuntimeInfo(): Promise<RuntimeInfo> {
+  const res = await fetch('/v1/runtime')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<RuntimeInfo>
+}

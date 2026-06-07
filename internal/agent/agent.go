@@ -164,6 +164,10 @@ type Agent struct {
 	// prevCacheEpoch tracks the previous turn's compaction epoch number for
 	// cache attribution. 0 until the first turn completes.
 	prevCacheEpoch cache.Epoch
+	// cacheEpoch is a monotonic counter bumped ONLY at compaction — the single
+	// deliberate cache-reset point. A change between two turns means the whole
+	// prefix was re-prefilled. It is process-local (not persisted across sessions).
+	cacheEpoch cacheEpochCounter
 
 	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
 	DisablePrefixEpoch bool
@@ -895,6 +899,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
 				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
 				// the model no longer holds those files' contents — force a
@@ -944,6 +949,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
 	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
 	a.Tools.FileTracker().Clear()
@@ -1425,15 +1431,10 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if len(req.Tools) > 0 {
 		curStaticPrefix.Tools = append([]llm.Tool(nil), req.Tools...)
 	}
-	curCacheEpoch := cache.Epoch(0)
-	if epoch != nil {
-		// Derive a monotonic epoch number from the epoch ID. The epoch ID
-		// format is "epoch_N" so we extract N; fallback to 0 when parsing fails
-		// (graceful degradation — the receipt still classifies cold/steady/mutation).
-		if seq := epochSeqFromID(epoch.EpochID); seq > 0 {
-			curCacheEpoch = cache.Epoch(seq)
-		}
-	}
+	// M3: the compaction epoch is a process-local counter bumped ONLY at
+	// compaction. After the LLM call (and any compaction it triggered),
+	// a.cacheEpoch.value() reflects whether the prefix was rewritten this turn.
+	curCacheEpoch := cache.Epoch(a.cacheEpoch.value())
 	receipt := cache.Attribute(cache.Input{
 		Turn:      a.turnsSeen,
 		Model:     respModel,
@@ -2684,17 +2685,14 @@ func (a *Agent) Close() {
 var _ tools.JobController = (*Agent)(nil)
 var _ tools.JobStatusController = (*Agent)(nil)
 
-// epochSeqFromID extracts the monotonic sequence number from an epoch ID of
-// the form "epoch_N". Returns 0 on parse failure (graceful degradation for
-// cache attribution — the receipt still classifies cold/steady/mutation).
-func epochSeqFromID(id string) int64 {
-	const prefix = "epoch_"
-	if !strings.HasPrefix(id, prefix) {
-		return 0
-	}
-	var n int64
-	if _, err := fmt.Sscanf(id[len(prefix):], "%d", &n); err != nil {
-		return 0
-	}
-	return n
+// cacheEpochCounter is a monotonic counter bumped ONLY at compaction — the
+// single deliberate cache-reset point. A change between two turns means the
+// whole prefix was re-prefilled. It is process-local (not persisted across
+// sessions), so it always starts at 0 in a fresh agent.
+type cacheEpochCounter struct {
+	n int
 }
+
+func (e *cacheEpochCounter) value() int                { return e.n }
+func (e *cacheEpochCounter) afterCompaction()          { e.n++ }
+func (e *cacheEpochCounter) afterTurnNoCompaction() {} // no-op

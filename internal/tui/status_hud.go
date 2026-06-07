@@ -27,6 +27,14 @@ func StatusLabel(phase string) string {
 	}
 }
 
+// MissCauses holds the four-cause breakdown of cache-miss tokens.
+type MissCauses struct {
+	ColdTokens     int // prompt segment never seen by the model
+	MutTokens      int // prefix mutated since last cache
+	ResidualTokens int // tail that didn't align to a cache boundary
+	ResetTokens    int // tokens lost to a session/context reset
+}
+
 // HUDData holds the data for rendering the status HUD.
 type HUDData struct {
 	Model           string
@@ -44,6 +52,7 @@ type HUDData struct {
 	SessionCNY      float64
 	ActiveAgent     string
 	RunningJobs     int
+	MissCauses      *MissCauses // optional four-cause breakdown; nil disables
 }
 
 // RenderHUD renders a single-line status HUD with width-aware truncation.
@@ -78,6 +87,10 @@ func RenderHUD(data HUDData, width int) string {
 		chip := fmt.Sprintf("cache %.1f%%", ratio)
 		if data.SavedCNY > 0 {
 			chip += fmt.Sprintf(" · saved ¥%.3f", data.SavedCNY)
+		}
+		if mc := data.MissCauses; mc != nil {
+			chip += fmt.Sprintf(" [cold %d mut %d res %d rst %d]",
+				mc.ColdTokens, mc.MutTokens, mc.ResidualTokens, mc.ResetTokens)
 		}
 		parts = append(parts, chip)
 	}

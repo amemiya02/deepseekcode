@@ -391,10 +391,10 @@ func TestValidateWebConfig(t *testing.T) {
 	}
 }
 
-func TestCacheAlignUnitDefaultsTo128(t *testing.T) {
+func TestCacheAlignUnitDefaultsToZero(t *testing.T) {
 	cfg := Default()
-	if cfg.Cache.AlignUnit != 128 {
-		t.Fatalf("AlignUnit default = %d, want 128 (empirically measured)", cfg.Cache.AlignUnit)
+	if cfg.Cache.AlignUnit != 0 {
+		t.Fatalf("AlignUnit default = %d, want 0 (off until benchmark validates benefit)", cfg.Cache.AlignUnit)
 	}
 }
 

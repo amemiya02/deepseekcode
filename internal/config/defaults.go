@@ -94,9 +94,6 @@ func Default() Config {
 			ProxyMode:   "auto",
 			ProxyScheme: "http",
 		},
-		Cache: CacheConfig{
-			AlignUnit: 128, // empirically measured via bench/cmd/cacheprobe
-		},
 		Active: ActiveConfig{Provider: "deepseek"},
 		Providers: map[string]ProviderConfigTOML{
 			"deepseek": {

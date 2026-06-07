@@ -391,6 +391,51 @@ func TestValidateWebConfig(t *testing.T) {
 	}
 }
 
+func TestCacheAlignUnitDefaultsToZero(t *testing.T) {
+	cfg := Default()
+	if cfg.Cache.AlignUnit != 0 {
+		t.Fatalf("AlignUnit default = %d, want 0 (alignment off until measured)", cfg.Cache.AlignUnit)
+	}
+}
+
+func TestOverlayCacheAlignUnit(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[cache]
+align_unit = 1024
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cache.AlignUnit != 1024 {
+		t.Errorf("align_unit = %d, want 1024", cfg.Cache.AlignUnit)
+	}
+}
+
+func TestOverlayCacheAlignUnitZeroNoOp(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[cache]
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Cache.AlignUnit = 512 // simulate a previously-set value
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cache.AlignUnit != 512 {
+		t.Errorf("overlay with no align_unit should keep existing value, got %d", cfg.Cache.AlignUnit)
+	}
+}
+
 func TestWebConfigEnabledFalse(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.toml"

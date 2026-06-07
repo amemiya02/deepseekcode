@@ -35,10 +35,22 @@ type Config struct {
 	UI          UIConfig                      `toml:"ui"`
 	Routing     RoutingConfig                 `toml:"routing"`
 	Clarify     ClarifyConfig                 `toml:"clarify"`
+	Cache       CacheConfig                   `toml:"cache"`
 
 	LegacyAPIUsed         bool `toml:"-"`
 	DefaultsModelExplicit bool `toml:"-"`
 	providersExplicit     bool
+}
+
+// CacheConfig controls prompt-cache alignment and compaction behaviour.
+// All fields default to the zero value (off), so omitting the [cache]
+// section preserves today's behaviour exactly.
+type CacheConfig struct {
+	// AlignUnit is the measured DeepSeek cache block size in tokens.
+	// When non-zero, the prefix assembler pads messages so they end on
+	// an AlignUnit boundary, maximising cache hit rate. 0 = alignment
+	// off until the unit is empirically measured (M2).
+	AlignUnit int `toml:"align_unit"`
 }
 
 // UIConfig holds presentational TUI options. Purely cosmetic — nothing
@@ -353,6 +365,11 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 		base.Routing.EscalationModel = ov.Routing.EscalationModel
 	}
 	base.Clarify.AutoClarify = ov.Clarify.AutoClarify || base.Clarify.AutoClarify
+
+	// Cache: AlignUnit is non-zero-wins (0 = alignment off / not yet measured).
+	if ov.Cache.AlignUnit != 0 {
+		base.Cache.AlignUnit = ov.Cache.AlignUnit
+	}
 
 	if ov.Defaults.ReasoningEffort != "" {
 		base.Defaults.ReasoningEffort = ov.Defaults.ReasoningEffort

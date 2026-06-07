@@ -15,3 +15,20 @@ export const MODES: Record<AutonomyMode, ModeMeta> = {
 export function nextMode(m: AutonomyMode): AutonomyMode {
   return ORDER[(ORDER.indexOf(m) + 1) % ORDER.length]
 }
+
+// Permission-tier mapping: each PermissionTier value maps to an AutonomyMode
+// so the 3-segment control (read-only / workspace-write / full) can drive autonomy.
+export type PermissionTier = 'read-only' | 'workspace-write' | 'full'
+
+export const TIER_TO_MODE: Record<PermissionTier, AutonomyMode> = {
+  'read-only': 'plan',
+  'workspace-write': 'ask',
+  full: 'yolo',
+}
+
+export const MODE_TO_TIER: Record<AutonomyMode, PermissionTier> = {
+  plan: 'read-only',
+  ask: 'workspace-write',
+  'auto-edit': 'workspace-write',
+  yolo: 'full',
+}

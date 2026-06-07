@@ -1,15 +1,20 @@
 // Adapted from deepseek-reasonix (MIT) — components/WorkspacePanel.tsx
 // (change-row rendering: git status badge + deleted marker).
 import { useEffect, useState } from 'react'
-import { File, FileCode, FileJson, FileText, Folder, Image, type LucideIcon } from 'lucide-react'
+import { Check, X, File, FileCode, FileJson, FileText, Folder, Image, type LucideIcon } from 'lucide-react'
 import { fetchChanged, type ChangedEntry } from '../lib/workspace'
 import { t } from '../lib/i18n'
 import styles from './ChangedFiles.module.css'
+
+export type FileReviewStatus = 'pending' | 'approved' | 'rejected'
 
 export interface ChangedFilesProps {
   refreshKey?: number
   selected?: string
   onOpen?: (path: string) => void
+  onApprove?: (path: string) => void
+  onReject?: (path: string) => void
+  reviewStatus?: Record<string, FileReviewStatus>
 }
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'])
@@ -54,7 +59,7 @@ function splitPath(path: string): { dir: string; name: string; isDir: boolean } 
 // bumps refreshKey after each turn so the working-tree view stays current. A
 // per-render request guard drops a stale response if refreshKey changed again
 // before the previous fetch resolved.
-export function ChangedFiles({ refreshKey = 0, selected, onOpen }: ChangedFilesProps) {
+export function ChangedFiles({ refreshKey = 0, selected, onOpen, onApprove, onReject, reviewStatus }: ChangedFilesProps) {
   const [entries, setEntries] = useState<ChangedEntry[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -111,31 +116,62 @@ export function ChangedFiles({ refreshKey = 0, selected, onOpen }: ChangedFilesP
           const Icon = iconFor(entry.path, isDir)
           const code = (entry.status ?? '').trim() || '?'
           const isSel = entry.path === selected
+          const review = reviewStatus?.[entry.path] ?? 'pending'
           return (
             <li key={entry.path}>
-              <button
-                className={styles.row}
-                aria-current={isSel ? 'true' : undefined}
-                onClick={() => onOpen?.(entry.path)}
-              >
-                <span
-                  className={styles.status}
-                  data-testid="change-status"
-                  data-code={code[0]}
+              <div className={styles.rowWrap}>
+                <button
+                  className={styles.row}
+                  aria-current={isSel ? 'true' : undefined}
+                  onClick={() => onOpen?.(entry.path)}
                 >
-                  {code}
-                </span>
-                <span className={styles.icon} data-testid="change-icon" aria-hidden="true">
-                  <Icon size={14} />
-                </span>
-                {dir && <span className={styles.dir}>{dir}</span>}
-                <span className={styles.name}>{name}</span>
-                {entry.deleted && (
-                  <span className={styles.deleted} data-testid={`deleted-${entry.path}`}>
-                    {t('workspace.deleted', 'deleted')}
+                  <span
+                    className={styles.status}
+                    data-testid="change-status"
+                    data-code={code[0]}
+                  >
+                    {code}
+                  </span>
+                  <span className={styles.icon} data-testid="change-icon" aria-hidden="true">
+                    <Icon size={14} />
+                  </span>
+                  {dir && <span className={styles.dir}>{dir}</span>}
+                  <span className={styles.name}>{name}</span>
+                  {entry.deleted && (
+                    <span className={styles.deleted} data-testid={`deleted-${entry.path}`}>
+                      {t('workspace.deleted', 'deleted')}
+                    </span>
+                  )}
+                </button>
+                {review !== 'pending' && (
+                  <span
+                    className={`${styles.reviewBadge} ${review === 'approved' ? styles.badgeApproved : styles.badgeRejected}`}
+                    data-testid={`file-status-${entry.path}`}
+                  >
+                    {review === 'approved' ? t('review.approved', 'approved') : t('review.rejected', 'rejected')}
                   </span>
                 )}
-              </button>
+                {onApprove && (
+                  <button
+                    className={styles.actionBtn}
+                    data-testid={`approve-${entry.path}`}
+                    aria-label={t('review.approve', 'Approve')}
+                    onClick={(e) => { e.stopPropagation(); onApprove(entry.path) }}
+                  >
+                    <Check size={12} />
+                  </button>
+                )}
+                {onReject && (
+                  <button
+                    className={styles.actionBtn}
+                    data-testid={`reject-${entry.path}`}
+                    aria-label={t('review.reject', 'Reject')}
+                    onClick={(e) => { e.stopPropagation(); onReject(entry.path) }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
             </li>
           )
         })}

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { ChangedFiles } from './ChangedFiles'
+import { ChangedFiles, type FileReviewStatus } from './ChangedFiles'
 import { DiffView } from './DiffView'
 import { CodeViewer } from './CodeViewer'
 import { fetchDiff, fetchFile } from '../lib/workspace'
@@ -21,10 +21,18 @@ export function ReviewPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   const [sel, setSel] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
   const [listW, setListW] = useState(220)
+  const [reviewStatus, setReviewStatus] = useState<Record<string, FileReviewStatus>>({})
   const drag = useRef<{ startX: number; startW: number } | null>(null)
   // Monotonic request token: a slow earlier fetch must not overwrite a newer
   // selection's preview (rapid row switches → last-click-wins, not last-resolve).
   const reqRef = useRef(0)
+
+  const onApprove = useCallback((path: string) => {
+    setReviewStatus((prev) => ({ ...prev, [path]: 'approved' }))
+  }, [])
+  const onReject = useCallback((path: string) => {
+    setReviewStatus((prev) => ({ ...prev, [path]: 'rejected' }))
+  }, [])
 
   const onMove = useCallback((e: MouseEvent) => {
     const d = drag.current
@@ -67,7 +75,7 @@ export function ReviewPanel({ refreshKey = 0 }: { refreshKey?: number }) {
   return (
     <div className={styles.review} style={{ gridTemplateColumns: `${listW}px 6px 1fr` }}>
       <div className={styles.list}>
-        <ChangedFiles refreshKey={refreshKey} selected={sel} onOpen={open} />
+        <ChangedFiles refreshKey={refreshKey} selected={sel} onOpen={open} onApprove={onApprove} onReject={onReject} reviewStatus={reviewStatus} />
       </div>
       <div
         className={styles.splitter}

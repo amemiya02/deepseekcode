@@ -3,6 +3,7 @@ import { ReviewPanel } from './components/ReviewPanel'
 import { TelemetryStrip } from './components/TelemetryStrip'
 import { SessionRail } from './components/SessionRail'
 import { StatusBarLive } from './components/StatusBarLive'
+import { RuntimeBanner } from './components/RuntimeBanner'
 import { SettingsView } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -27,6 +28,8 @@ import { PermissionModal } from './components/PermissionModal'
 import { ApprovalGate } from './components/ApprovalGate'
 import { AskCard } from './components/AskCard'
 import { PlanTodoPanel } from './components/PlanTodoPanel'
+import { GoalPanel, type Goal } from './components/GoalPanel'
+import { SddPanel } from './components/SddPanel'
 import {
   GatewayClient,
   submitPrompt,
@@ -471,6 +474,7 @@ function AppInner() {
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>
             <div data-testid="hero-statusbar">
+              <RuntimeBanner model={model || undefined} />
               <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
             </div>
           </div>

@@ -22,6 +22,7 @@ import { DuetSection } from './DuetSection'
 import { PermissionsSection } from './PermissionsSection'
 import { EditorSection } from './EditorSection'
 import { SessionsSection } from './SessionsSection'
+import { CapabilitiesView } from '../CapabilitiesView'
 import styles from './SettingsWindow.module.css'
 
 export type SettingsGroup = 'personal' | 'modelsCost' | 'coding' | 'integrations' | 'workspace' | 'system'
@@ -61,6 +62,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'network', labelKey: 'settings.network', fallback: 'Network / Proxy', group: 'integrations', icon: IconNetwork },
   { id: 'sessions', labelKey: 'settings.sessions', fallback: 'Sessions & Storage', group: 'workspace', icon: IconSessions },
   { id: 'doctor', labelKey: 'settings.doctor', fallback: 'Doctor', group: 'system', icon: IconActivity },
+  { id: 'capabilities', labelKey: 'settings.capabilities', fallback: 'Capabilities', group: 'system', icon: IconActivity },
   { id: 'about', labelKey: 'settings.about', fallback: 'About', group: 'system', icon: IconInfo },
 ]
 
@@ -162,6 +164,8 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <SessionsSection />
     case 'doctor':
       return <DoctorView />
+    case 'capabilities':
+      return <CapabilitiesView caps={{ mcp: true, web: false, skills: false }} />
     case 'about':
       return <AboutSection />
     default:

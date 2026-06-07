@@ -251,8 +251,8 @@ button { font-family: inherit; }
 .markdown-body .hljs-attribute, .markdown-body .hljs-variable, .markdown-body .hljs-template-variable { color: #9a5b00; }
 .markdown-body .hljs-tag { color: var(--text-2); }
 
-/* (e) Inline code chip */
-.markdown-body code.md-code { font: var(--type-mono); background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: 0 4px; }
+/* (e) Inline code chip — neutral mono on subtle bg; accent reserved for actionable */
+.md-code { font-family: var(--type-mono-family); font-size: 12px; background: var(--elevated); color: var(--text); border-radius: var(--r-sm); padding: 1px 6px; }
 
 /* (f) Reasoning disclosure — a quiet inline line that belongs to the turn,
    indented to align with the assistant prose (avatar column + gap). No pill. */

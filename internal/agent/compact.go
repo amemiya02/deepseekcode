@@ -367,19 +367,20 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 // absolute and ratio-of-max triggers from disagreeing on the firing point
 // (T4.4) — the deterministic fallback never waits longer than the semantic
 // path's compact tier, nor vice versa. With the defaults (800_000 absolute,
-// 0.80 ratio, 1_000_000 window) both equal 800_000, so this is a no-op until
-// one is overridden.
+// 0.90 ratio, 1_000_000 window) the ratio-derived threshold is 900_000, so
+// the absolute 800_000 is stricter and wins (the deterministic fallback fires
+// first).
 //
 // A non-positive absolute is left as-is (deterministic intentionally disabled —
 // never enabled from the ratio); a non-positive ratio mirrors
-// ShouldSemanticCompact's 0.80 default; a non-positive maxContextTokens leaves
+// ShouldSemanticCompact's 0.90 default; a non-positive maxContextTokens leaves
 // the absolute unchanged (no ratio to derive).
 func reconcileCompactThreshold(absolute int, compactRatio float64, maxContextTokens int) int {
 	if absolute <= 0 {
 		return absolute
 	}
 	if compactRatio <= 0 {
-		compactRatio = 0.80
+		compactRatio = 0.90
 	}
 	if maxContextTokens <= 0 {
 		return absolute

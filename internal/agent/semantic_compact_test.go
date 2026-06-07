@@ -14,62 +14,62 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
-// --- Test 1: 75% context pressure emits warning ---
-func TestShouldSemanticCompact_WarnAt75Percent(t *testing.T) {
+// --- Test 1: 80% context pressure emits warning ---
+func TestShouldSemanticCompact_WarnAt80Percent(t *testing.T) {
 	cfg := SemanticCompactionConfig{
-		WarnThreshold:       0.75,
-		CompactThreshold:    0.80,
-		ProtectionThreshold: 0.90,
-	}
-	action := ShouldSemanticCompact(0.75, cfg)
-	if action != "warn" {
-		t.Errorf("expected 'warn' at 75%% pressure; got %q", action)
-	}
-	action = ShouldSemanticCompact(0.76, cfg)
-	if action != "warn" {
-		t.Errorf("expected 'warn' at 76%% pressure; got %q", action)
-	}
-	action = ShouldSemanticCompact(0.79, cfg)
-	if action != "warn" {
-		t.Errorf("expected 'warn' at 79%% pressure; got %q", action)
-	}
-}
-
-// --- Test 2: 80% context pressure attempts semantic compaction ---
-func TestShouldSemanticCompact_CompactAt80Percent(t *testing.T) {
-	cfg := SemanticCompactionConfig{
-		WarnThreshold:       0.75,
-		CompactThreshold:    0.80,
-		ProtectionThreshold: 0.90,
+		WarnThreshold:       0.80,
+		CompactThreshold:    0.90,
+		ProtectionThreshold: 0.95,
 	}
 	action := ShouldSemanticCompact(0.80, cfg)
-	if action != "compact" {
-		t.Errorf("expected 'compact' at 80%% pressure; got %q", action)
+	if action != "warn" {
+		t.Errorf("expected 'warn' at 80%% pressure; got %q", action)
 	}
 	action = ShouldSemanticCompact(0.85, cfg)
-	if action != "compact" {
-		t.Errorf("expected 'compact' at 85%% pressure; got %q", action)
+	if action != "warn" {
+		t.Errorf("expected 'warn' at 85%% pressure; got %q", action)
 	}
 	action = ShouldSemanticCompact(0.89, cfg)
-	if action != "compact" {
-		t.Errorf("expected 'compact' at 89%% pressure; got %q", action)
+	if action != "warn" {
+		t.Errorf("expected 'warn' at 89%% pressure; got %q", action)
 	}
 }
 
-// --- Test 3: 90% context pressure enters protection mode ---
-func TestShouldSemanticCompact_ProtectAt90Percent(t *testing.T) {
+// --- Test 2: 90% context pressure attempts semantic compaction ---
+func TestShouldSemanticCompact_CompactAt90Percent(t *testing.T) {
 	cfg := SemanticCompactionConfig{
-		WarnThreshold:       0.75,
-		CompactThreshold:    0.80,
-		ProtectionThreshold: 0.90,
+		WarnThreshold:       0.80,
+		CompactThreshold:    0.90,
+		ProtectionThreshold: 0.95,
 	}
 	action := ShouldSemanticCompact(0.90, cfg)
-	if action != "protect" {
-		t.Errorf("expected 'protect' at 90%% pressure; got %q", action)
+	if action != "compact" {
+		t.Errorf("expected 'compact' at 90%% pressure; got %q", action)
 	}
-	action = ShouldSemanticCompact(0.95, cfg)
+	action = ShouldSemanticCompact(0.92, cfg)
+	if action != "compact" {
+		t.Errorf("expected 'compact' at 92%% pressure; got %q", action)
+	}
+	action = ShouldSemanticCompact(0.94, cfg)
+	if action != "compact" {
+		t.Errorf("expected 'compact' at 94%% pressure; got %q", action)
+	}
+}
+
+// --- Test 3: 95% context pressure enters protection mode ---
+func TestShouldSemanticCompact_ProtectAt95Percent(t *testing.T) {
+	cfg := SemanticCompactionConfig{
+		WarnThreshold:       0.80,
+		CompactThreshold:    0.90,
+		ProtectionThreshold: 0.95,
+	}
+	action := ShouldSemanticCompact(0.95, cfg)
 	if action != "protect" {
 		t.Errorf("expected 'protect' at 95%% pressure; got %q", action)
+	}
+	action = ShouldSemanticCompact(0.97, cfg)
+	if action != "protect" {
+		t.Errorf("expected 'protect' at 97%% pressure; got %q", action)
 	}
 	action = ShouldSemanticCompact(1.0, cfg)
 	if action != "protect" {
@@ -80,34 +80,34 @@ func TestShouldSemanticCompact_ProtectAt90Percent(t *testing.T) {
 // --- Test: Below thresholds returns none ---
 func TestShouldSemanticCompact_NoneBelowThreshold(t *testing.T) {
 	cfg := SemanticCompactionConfig{
-		WarnThreshold:       0.75,
-		CompactThreshold:    0.80,
-		ProtectionThreshold: 0.90,
+		WarnThreshold:       0.80,
+		CompactThreshold:    0.90,
+		ProtectionThreshold: 0.95,
 	}
 	action := ShouldSemanticCompact(0.50, cfg)
 	if action != "none" {
 		t.Errorf("expected 'none' at 50%% pressure; got %q", action)
 	}
-	action = ShouldSemanticCompact(0.74, cfg)
+	action = ShouldSemanticCompact(0.79, cfg)
 	if action != "none" {
-		t.Errorf("expected 'none' at 74%% pressure; got %q", action)
+		t.Errorf("expected 'none' at 79%% pressure; got %q", action)
 	}
 }
 
 // --- Test: Default thresholds when zero ---
 func TestShouldSemanticCompact_DefaultThresholds(t *testing.T) {
 	cfg := SemanticCompactionConfig{} // all zero → use defaults
-	action := ShouldSemanticCompact(0.75, cfg)
+	action := ShouldSemanticCompact(0.80, cfg)
 	if action != "warn" {
-		t.Errorf("expected 'warn' with default thresholds at 0.75; got %q", action)
-	}
-	action = ShouldSemanticCompact(0.80, cfg)
-	if action != "compact" {
-		t.Errorf("expected 'compact' with default thresholds at 0.80; got %q", action)
+		t.Errorf("expected 'warn' with default thresholds at 0.80; got %q", action)
 	}
 	action = ShouldSemanticCompact(0.90, cfg)
+	if action != "compact" {
+		t.Errorf("expected 'compact' with default thresholds at 0.90; got %q", action)
+	}
+	action = ShouldSemanticCompact(0.95, cfg)
 	if action != "protect" {
-		t.Errorf("expected 'protect' with default thresholds at 0.90; got %q", action)
+		t.Errorf("expected 'protect' with default thresholds at 0.95; got %q", action)
 	}
 }
 
@@ -628,14 +628,17 @@ func TestSemanticCompact_EmptyWhenTooFewMessages(t *testing.T) {
 // --- Test: DefaultSemanticCompactionConfig ---
 func TestDefaultSemanticCompactionConfig(t *testing.T) {
 	cfg := defaultSemanticCompactionConfig()
-	if cfg.WarnThreshold != 0.75 {
-		t.Errorf("WarnThreshold: got %f want 0.75", cfg.WarnThreshold)
+	if cfg.WarnThreshold != 0.80 {
+		t.Errorf("WarnThreshold: got %f want 0.80", cfg.WarnThreshold)
 	}
-	if cfg.CompactThreshold != 0.80 {
-		t.Errorf("CompactThreshold: got %f want 0.80", cfg.CompactThreshold)
+	if cfg.CompactThreshold != 0.90 {
+		t.Errorf("CompactThreshold: got %f want 0.90", cfg.CompactThreshold)
 	}
-	if cfg.ProtectionThreshold != 0.90 {
-		t.Errorf("ProtectionThreshold: got %f want 0.90", cfg.ProtectionThreshold)
+	if cfg.ProtectionThreshold != 0.95 {
+		t.Errorf("ProtectionThreshold: got %f want 0.95", cfg.ProtectionThreshold)
+	}
+	if cfg.UsableWindowTokens != 1_000_000 {
+		t.Errorf("UsableWindowTokens: got %d want 1000000", cfg.UsableWindowTokens)
 	}
 	if cfg.SummaryModel != "deepseek-v4-flash" {
 		t.Errorf("SummaryModel: got %q want deepseek-v4-flash", cfg.SummaryModel)

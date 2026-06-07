@@ -590,14 +590,14 @@ func TestReconcileCompactThreshold(t *testing.T) {
 		maxCtx   int
 		want     int
 	}{
-		{"defaults coincide (no-op)", 800_000, 0.80, 1_000_000, 800_000},
-		{"absolute higher than ratio → clamp to ratio", 900_000, 0.80, 1_000_000, 800_000},
-		{"absolute stricter than ratio → keep absolute", 500_000, 0.80, 1_000_000, 500_000},
-		{"zero ratio mirrors 0.80 default", 900_000, 0, 1_000_000, 800_000},
-		{"disabled absolute stays disabled", 0, 0.80, 1_000_000, 0},
-		{"negative absolute stays as-is", -1, 0.80, 1_000_000, -1},
-		{"zero window leaves absolute unchanged", 800_000, 0.80, 0, 800_000},
-		{"small window lowers threshold", 800_000, 0.80, 100_000, 80_000},
+		{"defaults: absolute stricter than ratio → keep absolute", 800_000, 0.90, 1_000_000, 800_000},
+		{"absolute higher than ratio → clamp to ratio", 950_000, 0.90, 1_000_000, 900_000},
+		{"absolute stricter than ratio → keep absolute", 500_000, 0.90, 1_000_000, 500_000},
+		{"zero ratio mirrors 0.90 default", 950_000, 0, 1_000_000, 900_000},
+		{"disabled absolute stays disabled", 0, 0.90, 1_000_000, 0},
+		{"negative absolute stays as-is", -1, 0.90, 1_000_000, -1},
+		{"zero window leaves absolute unchanged", 800_000, 0.90, 0, 800_000},
+		{"small window lowers threshold", 800_000, 0.90, 100_000, 90_000},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

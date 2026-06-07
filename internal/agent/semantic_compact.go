@@ -21,17 +21,24 @@ import (
 // SemanticCompactionConfig controls semantic compaction behavior.
 type SemanticCompactionConfig struct {
 	// WarnThreshold is the context ratio (0-1) at which to emit
-	// a warning and prepare pinned facts. Default: 0.75
+	// a warning and prepare pinned facts. Default: 0.80
 	WarnThreshold float64
 
 	// CompactThreshold is the context ratio at which to attempt
-	// semantic compaction. Default: 0.80
+	// semantic compaction. Default: 0.90
 	CompactThreshold float64
 
 	// ProtectionThreshold is the context ratio at which to enter
 	// protection mode (preserve task continuity over full history).
-	// Default: 0.90
+	// Default: 0.95
 	ProtectionThreshold float64
+
+	// UsableWindowTokens is the model's effective context window in tokens.
+	// Used for documentation and future window-aware heuristics. ContextPressure
+	// already takes maxContextTokens as a parameter, so this field does not
+	// change the pressure calculation — it records the window size the thresholds
+	// were tuned against. Default: 1_000_000 (DeepSeek V4).
+	UsableWindowTokens int
 
 	// SummaryModel is the model to use for semantic summaries.
 	// Default: "deepseek-v4-flash"
@@ -70,13 +77,13 @@ func ContextPressure(messages []llm.Message, maxContextTokens int, charsPerToken
 // Returns the action: "none", "warn", "compact", or "protect".
 func ShouldSemanticCompact(pressure float64, cfg SemanticCompactionConfig) string {
 	if cfg.WarnThreshold <= 0 {
-		cfg.WarnThreshold = 0.75
+		cfg.WarnThreshold = 0.80
 	}
 	if cfg.CompactThreshold <= 0 {
-		cfg.CompactThreshold = 0.80
+		cfg.CompactThreshold = 0.90
 	}
 	if cfg.ProtectionThreshold <= 0 {
-		cfg.ProtectionThreshold = 0.90
+		cfg.ProtectionThreshold = 0.95
 	}
 
 	switch {
@@ -95,9 +102,10 @@ func ShouldSemanticCompact(pressure float64, cfg SemanticCompactionConfig) strin
 // sensible defaults.
 func defaultSemanticCompactionConfig() SemanticCompactionConfig {
 	return SemanticCompactionConfig{
-		WarnThreshold:       0.75,
-		CompactThreshold:    0.80,
-		ProtectionThreshold: 0.90,
+		WarnThreshold:       0.80,
+		CompactThreshold:    0.90,
+		ProtectionThreshold: 0.95,
+		UsableWindowTokens:  1_000_000,
 		SummaryModel:        "deepseek-v4-flash",
 		SummaryTimeout:      15 * time.Second,
 		MaxSummaryTokens:    2000,

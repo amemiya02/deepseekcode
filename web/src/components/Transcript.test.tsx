@@ -17,7 +17,7 @@ describe('Transcript', () => {
     render(<LocaleProvider><Transcript items={items} /></LocaleProvider>)
     expect(screen.getByText('do it')).toBeInTheDocument()
     expect(screen.getByTestId('thinking-toggle')).toBeInTheDocument()
-    expect(screen.getByText('read_file')).toBeInTheDocument()
+    expect(screen.getAllByText('read_file').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('pro')).toBeInTheDocument()
     expect(screen.getByText('done')).toBeInTheDocument()
   })
@@ -25,5 +25,20 @@ describe('Transcript', () => {
   it('renders an empty container for no items', () => {
     const { container } = render(<LocaleProvider><Transcript items={[]} /></LocaleProvider>)
     expect(container.querySelector('.transcript')).toBeInTheDocument()
+  })
+
+  it('renders MessageTimeline when tool items are present', () => {
+    render(<LocaleProvider><Transcript items={items} /></LocaleProvider>)
+    expect(screen.getByTestId('message-timeline')).toBeInTheDocument()
+    expect(screen.getByTestId('block-tool')).toBeInTheDocument()
+  })
+
+  it('does not render MessageTimeline when no tool items are present', () => {
+    const noTools: TranscriptItem[] = [
+      { type: 'user', text: 'hello' },
+      { type: 'assistant', text: 'hi', streaming: false },
+    ]
+    render(<LocaleProvider><Transcript items={noTools} /></LocaleProvider>)
+    expect(screen.queryByTestId('message-timeline')).not.toBeInTheDocument()
   })
 })

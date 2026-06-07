@@ -9,6 +9,8 @@ import { ToolCard } from './ToolCard'
 import { RoutingActivity } from './RoutingActivity'
 import { DuetBadge } from './DuetBadge'
 import { Logo } from './Logo'
+import { MessageTimeline } from './MessageTimeline'
+import type { TimelineItem } from './MessageTimeline'
 import { t } from '../lib/i18n'
 
 export interface TranscriptRewindHandlers {
@@ -62,6 +64,18 @@ export function Transcript({ items, rewindHandlers }: { items: TranscriptItem[];
           }
         })}
       </div>
+      {(() => {
+        const timelineItems: TimelineItem[] = items
+          .filter((item): item is Extract<TranscriptItem, { type: 'tool' }> => item.type === 'tool')
+          .map((item) => ({
+            type: 'tool' as const,
+            name: item.name,
+            args: item.args,
+            readOnly: item.readOnly,
+            status: item.status,
+          }))
+        return timelineItems.length > 0 ? <MessageTimeline items={timelineItems} /> : null
+      })()}
     </div>
   )
 }

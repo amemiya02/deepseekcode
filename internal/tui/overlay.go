@@ -24,6 +24,7 @@ const (
 	modeMCP                  // /mcp — MCP server status overlay
 	modeLSP                  // /lsp — LSP server status overlay
 	modePermissions          // /permissions — effective policy overlay
+	modeEffort               // /effort — reasoning-effort picker (filterable)
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -56,6 +57,7 @@ type Overlay struct {
 	mcpServers   []McpServerRow
 	lspServers   []LspServerRow
 	permRows     []PermissionRow
+	efforts      []string // reasoning-effort rows: low, medium, high, max
 	filter       filterableList
 }
 
@@ -180,7 +182,7 @@ func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % 
 // keys. modeTape and modeHelp are not filterable.
 func (o *Overlay) Filterable() bool {
 	switch o.mode {
-	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP:
+	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP, modeEffort:
 		return true
 	}
 	return false
@@ -292,6 +294,36 @@ func (o *Overlay) SelectedThemeID() string {
 
 // Themes returns the picker rows (read-only).
 func (o *Overlay) Themes() []themeOption { return o.themes }
+
+// OpenEffort switches to the reasoning-effort picker. The filterableList is
+// seeded with the four effort levels; the cursor lands on the row that matches
+// current, falling back to 0 if no match.
+func (o *Overlay) OpenEffort(current string) {
+	o.efforts = []string{"low", "medium", "high", "max"}
+	o.mode = modeEffort
+	o.cursor = 0
+	labels := make([]string, len(o.efforts))
+	copy(labels, o.efforts)
+	o.filter.SetRows(labels)
+	for i, e := range o.efforts {
+		if e == current {
+			o.cursorTo(i)
+			break
+		}
+	}
+}
+
+// SelectedEffort returns the effort level under the cursor (mapped through the
+// filter), or "" when nothing matches.
+func (o *Overlay) SelectedEffort() string {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.efforts) {
+		return o.efforts[i]
+	}
+	return ""
+}
+
+// Efforts returns the effort picker rows (read-only).
+func (o *Overlay) Efforts() []string { return o.efforts }
 
 // OpenMCP switches to the /mcp status overlay.
 func (o *Overlay) OpenMCP(rows []McpServerRow) {
@@ -546,6 +578,41 @@ func renderThemesPicker(t Theme, rows []themeOption, visible []int, cursor int, 
 	}
 	header := fmt.Sprintf("%d themes · type to filter · ⏎ apply · esc cancel", len(rows))
 	return wrapPane(t, "/theme", header, b.String(), width, height)
+}
+
+// renderEffortPicker draws the reasoning-effort picker overlay. Each row is
+// simply the effort level name. The active effort is marked with *, the cursor
+// row uses selectedRow. Mirrors renderModelsPicker's structure.
+func renderEffortPicker(t Theme, efforts []string, visible []int, cursor int, filter, activeEffort string, width, height int) string {
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no effort levels match the filter)"))
+	}
+	for vi, idx := range visible {
+		effort := efforts[idx]
+		active := " "
+		if effort == activeEffort {
+			active = "*"
+		}
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s %s", active, effort)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			marker := " "
+			if effort == activeEffort {
+				marker = t.StatusGood.Render("*")
+			}
+			line := fmt.Sprintf("  %s %s", marker, t.StatusModel.Render(effort))
+			b.WriteString(line + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d levels · type to filter · ⏎ apply · esc cancel", len(efforts))
+	return wrapPane(t, "/effort", header, b.String(), width, height)
 }
 
 // renderSessionsPicker draws the /sessions picker overlay. visible is the

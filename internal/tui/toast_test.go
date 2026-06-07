@@ -72,8 +72,8 @@ func TestToastStaleTickDoesNotClearNewer(t *testing.T) {
 	}
 }
 
-// TestCtrlCArmsThenQuitsWhenIdle: with no run active, the first ^C arms quit
-// (no quit yet, a warning toast) and the second ^C within the window quits.
+// TestCtrlCArmsThenQuitsWhenIdle: with no run active, ^C opens the
+// quit-confirm overlay instead of arming a double-tap.
 func TestCtrlCArmsThenQuitsWhenIdle(t *testing.T) {
 	a := sizeApp(t, newKeyflowApp(t), 100, 40)
 
@@ -82,98 +82,65 @@ func TestCtrlCArmsThenQuitsWhenIdle(t *testing.T) {
 		t.Fatal("ctrl+c must be intercepted")
 	}
 	if isQuitCmd(cmd) {
-		t.Fatal("the first idle ^C must NOT quit — it arms")
+		t.Fatal("idle ^C must NOT quit directly — it opens the confirm overlay")
 	}
-	if !a.quitArmed {
-		t.Fatal("the first idle ^C should arm quit")
-	}
-	if !a.toastState.active || a.toastState.text != "press ^C again to quit" {
-		t.Fatalf("the first idle ^C should show the arm toast, got active=%v text=%q", a.toastState.active, a.toastState.text)
-	}
-
-	cmd2, intercepted2 := a.handleKey(ctrl('c'))
-	if !intercepted2 {
-		t.Fatal("the second ^C must be intercepted")
-	}
-	if !isQuitCmd(cmd2) {
-		t.Fatal("the second armed ^C should quit")
+	if a.overlay.Mode() != modeQuitConfirm {
+		t.Fatal("idle ^C should open the quit-confirm overlay")
 	}
 }
 
-// TestCtrlCDisarmedByOtherKey: an armed idle-quit is cancelled by ANY non-^C
-// key — the prompt is dismissed, the arm dropped, and a later lone ^C re-arms
-// (asks again) rather than quitting on a stale arm. This is the reported fix:
-// pressing anything other than ^C must clear the "press ^C again" prompt.
+// TestCtrlCDisarmedByOtherKey: with the quit-confirm overlay open, any key
+// other than y/n/esc is handled by the overlay. Pressing 'n' cancels.
 func TestCtrlCDisarmedByOtherKey(t *testing.T) {
 	a := sizeApp(t, newKeyflowApp(t), 100, 40)
 
 	if _, intercepted := a.handleKey(ctrl('c')); !intercepted {
 		t.Fatal("first idle ^C must be intercepted")
 	}
-	if !a.quitArmed || !a.toastState.active {
-		t.Fatal("first idle ^C should arm quit and show the prompt")
+	if a.overlay.Mode() != modeQuitConfirm {
+		t.Fatal("idle ^C should open the quit-confirm overlay")
 	}
 
-	// Any other key disarms and dismisses the toast.
-	_, _ = a.handleKey(press('j'))
-	if a.quitArmed {
-		t.Error("a non-^C key must disarm the idle-quit")
-	}
-	if a.toastState.active {
-		t.Error("a non-^C key must dismiss the 'press ^C again to quit' toast")
-	}
-
-	// A ^C after the disarm must re-arm (ask again), NOT quit on a stale flag.
-	cmd, _ := a.handleKey(ctrl('c'))
-	if isQuitCmd(cmd) {
-		t.Error("^C after disarming must re-arm, not quit")
-	}
-	if !a.quitArmed {
-		t.Error("^C after disarming should re-arm the idle-quit")
+	// Pressing 'n' cancels the quit-confirm overlay.
+	_, _ = a.handleKey(press('n'))
+	if a.overlay.IsOpen() {
+		t.Error("'n' should close the quit-confirm overlay")
 	}
 }
 
-// TestCtrlCDisarmsViaTick: the arm clears when the disarm tick lands, so a
-// later lone ^C re-arms (does not quit) rather than quitting on a stale flag.
+// TestCtrlCDisarmsViaTick: since ctrl+c now opens the quit-confirm overlay
+// instead of arming, the disarm tick is a no-op (quitArmed stays false).
 func TestCtrlCDisarmsViaTick(t *testing.T) {
 	a := sizeApp(t, newKeyflowApp(t), 100, 40)
 
 	_, _ = a.handleKey(ctrl('c'))
-	if !a.quitArmed {
-		t.Fatal("first ^C should arm")
+	if a.overlay.Mode() != modeQuitConfirm {
+		t.Fatal("first ^C should open quit-confirm overlay")
 	}
+	// Close the overlay so the disarm tick can be tested in idle state.
+	a.overlay.Close()
+
 	seq := a.quitSeq
-
 	a.Update(disarmQuitMsg{seq: seq})
+	// quitArmed should remain false since we never armed.
 	if a.quitArmed {
-		t.Fatal("the matching disarm tick should drop the arm")
-	}
-
-	// A fresh ^C re-arms (does not quit) because the flag was disarmed.
-	cmd, _ := a.handleKey(ctrl('c'))
-	if isQuitCmd(cmd) {
-		t.Fatal("a ^C after disarm must re-arm, not quit")
-	}
-	if !a.quitArmed {
-		t.Fatal("a ^C after disarm should re-arm")
+		t.Fatal("quitArmed should remain false (no arming in new flow)")
 	}
 }
 
-// TestCtrlCStaleDisarmIgnored: a re-arm bumps quitSeq, so the previous arm's
-// disarm tick (stale seq) must not cancel the fresh arm.
+// TestCtrlCStaleDisarmIgnored: since ctrl+c now opens the quit-confirm overlay
+// instead of arming, stale disarm ticks are harmless no-ops.
 func TestCtrlCStaleDisarmIgnored(t *testing.T) {
 	a := sizeApp(t, newKeyflowApp(t), 100, 40)
 
-	_, _ = a.handleKey(ctrl('c')) // arm #1
+	_, _ = a.handleKey(ctrl('c')) // opens overlay
 	staleSeq := a.quitSeq
-	// Disarm #1, then re-arm: the new arm carries a fresh seq.
-	a.Update(disarmQuitMsg{seq: staleSeq})
-	_, _ = a.handleKey(ctrl('c')) // arm #2 (re-arm)
+	a.overlay.Close()
 
-	// Arm #1's tick fires late with the stale seq — must not disarm arm #2.
+	// A stale disarm tick should be harmless.
 	a.Update(disarmQuitMsg{seq: staleSeq})
-	if !a.quitArmed {
-		t.Fatal("a stale disarm tick must not cancel the current arm")
+	if a.quitArmed {
+		t.Fatal("quitArmed should remain false (no arming in new flow)")
 	}
 }
 

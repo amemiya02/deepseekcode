@@ -18,14 +18,21 @@ body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
 }
+/* Body glaze — a subtle directional-light overlay so the whole page reads as
+   top-lit. Pointer-events: none keeps it purely decorative. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--glaze);
+  pointer-events: none;
+  z-index: 0;
+}
 #app { height: 100%; }
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 button { font-family: inherit; }
 .plain-code, .code, code {
   font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
-}
-@media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* Markdown + ThinkingBlock — superseded by SP2 rules in the Messages block above */
@@ -227,7 +234,8 @@ button { font-family: inherit; }
 .approval__menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 5;
   display: flex; flex-direction: column; min-width: 168px;
-  background: var(--island-card); border: 1px solid var(--island-line);
+  background: color-mix(in oklch, var(--island-card) 88%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--island-line);
   border-radius: var(--r-sm); box-shadow: var(--shadow-2); overflow: hidden;
 }
 .approval__menuitem { text-align: left; padding: 7px 12px; background: none; border: none; color: var(--island-ink); font: var(--type-label); cursor: pointer; }
@@ -306,8 +314,8 @@ button { font-family: inherit; }
 .context-pill__remove { background: none; border: none; color: var(--text-3); cursor: pointer; display: inline-flex; padding: 0; }
 .context-pill__remove:hover { color: var(--danger); }
 
-/* SlashMenu / FileMenu (shared .slashmenu container) */
-.slashmenu { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
+/* SlashMenu / FileMenu (shared .slashmenu container) — frosted glass dropdown */
+.slashmenu { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; background: color-mix(in oklch, var(--elevated) 85%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
 .slashmenu__item { display: flex; align-items: center; gap: 8px; padding: 4px var(--s-2); background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); }
 .slashmenu__item--active { background: var(--accent-weak); }
 .slashmenu__name { font: var(--type-mono); color: var(--accent); }
@@ -327,7 +335,7 @@ button { font-family: inherit; }
 .modelsw { position: relative; display: inline-flex; }
 .modelsw__trigger { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--text-2); font: var(--type-label); cursor: pointer; padding: 2px 4px; }
 .modelsw__backdrop { position: fixed; inset: 0; z-index: 10; }
-.modelsw__menu { position: absolute; bottom: 100%; left: 0; z-index: 11; min-width: 160px; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); padding: 4px; }
+.modelsw__menu { position: absolute; bottom: 100%; left: 0; z-index: 11; min-width: 160px; background: color-mix(in oklch, var(--elevated) 85%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); padding: 4px; }
 .modelsw__item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); padding: 4px var(--s-2); border-radius: var(--r-sm); }
 .modelsw__item--current { color: var(--accent); }
 .modelsw__empty { color: var(--text-3); font: var(--type-label); padding: 4px var(--s-2); }
@@ -356,7 +364,9 @@ button { font-family: inherit; }
   padding: var(--s-2) var(--s-2) var(--s-1);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--surface);
+  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   box-shadow: var(--shadow-2);
   transition: border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
 }

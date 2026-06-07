@@ -37,7 +37,7 @@ describe('App shell composition', () => {
   it('applies theme tokens to :root via ThemeProvider', () => {
     render(<App />)
     // Brand light default (spec §3.2): --bg is the exact brand hex, not OKLCH.
-    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f5f6f8')
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f8f9fb')
   })
 
   it('no longer renders the titlebar command-palette pill', () => {

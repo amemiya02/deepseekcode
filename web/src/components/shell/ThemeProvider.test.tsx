@@ -17,7 +17,7 @@ describe('ThemeProvider', () => {
     render(<ThemeProvider><div>child</div></ThemeProvider>)
     const root = document.documentElement
     // Brand light is the default (spec §3.2): exact-hex surface + the one accent.
-    expect(root.style.getPropertyValue('--bg')).toBe('#f5f6f8')
+    expect(root.style.getPropertyValue('--bg')).toBe('#f8f9fb')
     expect(root.style.getPropertyValue('--accent')).toBe('#4d6bfe')
   })
 
@@ -37,7 +37,7 @@ describe('ThemeProvider', () => {
     act(() => setThemeSettings({ mode: 'dark' }))
     const after = document.documentElement.style.getPropertyValue('--bg')
     expect(after).not.toBe(before)
-    expect(after).toBe('#0b0d13')
+    expect(after).toBe('#0e1018')
   })
 
   it('renders its children', () => {

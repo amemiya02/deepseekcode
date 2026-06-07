@@ -88,7 +88,7 @@ const ACCENT_MIST = '#f5f7ff' // faintest tint (light)
 
 /** Light palette (§3.2). */
 const LIGHT = {
-  bg: '#f5f6f8',
+  bg: '#f8f9fb',
   bg2: '#eef0f4', // recessed / hover fill
   surface: '#ffffff',
   ink: '#0d1016',
@@ -100,7 +100,7 @@ const LIGHT = {
 
 /** Dark "terminal island" palette (§3.3). */
 const DARK = {
-  bg: '#0b0d13',
+  bg: '#0e1018',
   bg2: '#0f1320',
   surface: '#11141d',
   ink: '#d6dae4',
@@ -205,8 +205,20 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--focus-ring': ac.focusRing,
     // Panel
     '--panel-pad': sp(4),
+    // Glass surface — backdrop blur for frosted-glass effect on elevated surfaces.
+    '--glass-blur': '24px',
     // Glass edge — a 1px top highlight so panels read as lifted, not painted-on.
     '--glass-edge': isDarkish ? 'oklch(1 0 0 / 0.05)' : 'oklch(1 0 0 / 0.9)',
+    // Body glaze — directional light overlay (body::after). No new hue; just
+    // a faint white wash that gives the whole page a sense of top-lit depth.
+    '--glaze': isDarkish
+      ? 'linear-gradient(168deg, rgba(255,255,255,0.04) 0%, transparent 55%)'
+      : 'linear-gradient(168deg, rgba(255,255,255,0.55) 0%, transparent 55%)',
+    // Topbar gradient — 3-stop vertical translucent wash so the titlebar reads
+    // as frosted glass floating above the canvas.
+    '--topbar-grad': isDarkish
+      ? 'linear-gradient(180deg, rgba(32,32,32,0.86) 0%, rgba(32,32,32,0.62) 50%, rgba(32,32,32,0.42) 100%)'
+      : 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.50) 50%, rgba(255,255,255,0.30) 100%)',
     // Elevation shadows (light §3.6; dark code islands deeper)
     '--shadow-1': isDarkish
       ? '0 1px 2px rgba(5,8,16,.5)'
@@ -250,7 +262,7 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     // A fixed dark material: light mode = paper-vs-obsidian contrast; dark mode = island
     // one step deeper than the #11141d surface + a brand glass edge. Mode-independent on
     // purpose, so `.island` (app.css) can re-scope surface/ink/border to these anywhere.
-    '--island-bg': DARK.bg, // #0b0d13 — island body
+    '--island-bg': '#0b0d13', // fixed obsidian — never changes with app bg nudge
     '--island-header': DARK.bg2, // #0f1320 — brand header strip
     '--island-card': DARK.surface, // #11141d — inset rows
     '--island-ink': DARK.ink, // #d6dae4

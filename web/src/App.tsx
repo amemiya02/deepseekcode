@@ -39,6 +39,7 @@ import {
   cancelTurn,
   renameSession,
   fetchModelState,
+  fetchRuntimeInfo,
   setModel as apiSetModel,
   setEffort as apiSetEffort,
   EFFORT_LEVELS,
@@ -143,10 +144,11 @@ function AppInner() {
   const removeSession = useSessionStore((s) => s.remove)
   const setActiveSession = useSessionStore((s) => s.setActive)
 
-  // Wave-6 state: settings / onboarding / update banner
+  // Wave-6 state: settings / onboarding / update banner / runtime info
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [runtimeInfo, setRuntimeInfo] = useState<{ version?: string }>({})
 
   const clientRef = useRef(new GatewayClient())
 
@@ -166,6 +168,11 @@ function AppInner() {
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
+
+  // Fetch runtime info (version, etc.) once on mount. Errors are swallowed.
+  useEffect(() => {
+    fetchRuntimeInfo().then(setRuntimeInfo).catch(() => {})
+  }, [])
 
   // First-run onboarding + update check. Both fail closed/quiet: a failed fetch
   // simply leaves the overlay/banner hidden.
@@ -490,7 +497,7 @@ function AppInner() {
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>
             <div data-testid="hero-statusbar">
-              <RuntimeBanner model={model || undefined} />
+              <RuntimeBanner model={model || undefined} version={runtimeInfo.version} />
               <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
             </div>
           </div>

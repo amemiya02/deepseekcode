@@ -1,5 +1,5 @@
 // Adapted from deepseek-reasonix (MIT) — SettingsPanel.tsx (nav-rail + active tab + section switch).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { t } from '../../lib/i18n'
 import {
   IconPalette, IconCommand, IconModel, IconCoins, IconKey,
@@ -23,6 +23,7 @@ import { PermissionsSection } from './PermissionsSection'
 import { EditorSection } from './EditorSection'
 import { SessionsSection } from './SessionsSection'
 import { CapabilitiesView } from '../CapabilitiesView'
+import { fetchCapabilities } from '../../lib/api'
 import styles from './SettingsWindow.module.css'
 
 export type SettingsGroup = 'personal' | 'modelsCost' | 'coding' | 'integrations' | 'workspace' | 'system'
@@ -134,6 +135,12 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   )
 }
 
+function CapabilitiesSection() {
+  const [caps, setCaps] = useState<Record<string, boolean>>({})
+  useEffect(() => { fetchCapabilities().then(setCaps).catch(() => {}) }, [])
+  return <CapabilitiesView caps={caps} />
+}
+
 function renderSection(active: string, section: SettingsSection | undefined) {
   switch (active) {
     case 'appearance':
@@ -165,7 +172,7 @@ function renderSection(active: string, section: SettingsSection | undefined) {
     case 'doctor':
       return <DoctorView />
     case 'capabilities':
-      return <CapabilitiesView caps={{ mcp: true, web: false, skills: false }} />
+      return <CapabilitiesSection />
     case 'about':
       return <AboutSection />
     default:

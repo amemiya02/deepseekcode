@@ -144,7 +144,7 @@ describe('buildTokens', () => {
       '--island-del-fg': '#f2a3a1',
     }
     // dark and HC keep the obsidian palette
-    for (const mode of ['dark', 'hc']) {
+    for (const mode of ['dark', 'hc'] as const) {
       const tok = buildTokens({ theme: 'graphite', mode, density: 'comfortable', accent: 'indigo' })
       for (const [k, v] of Object.entries(DARK_ISLAND)) {
         expect(tok[k], `${mode} ${k}`).toBe(v)

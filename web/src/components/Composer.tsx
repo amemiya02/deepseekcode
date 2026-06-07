@@ -67,6 +67,15 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // IME composition tracking. WebKit (the macOS desktop webview) fires the
+  // candidate-confirming Enter's keydown AFTER compositionend with
+  // isComposing === false, so the isComposing check alone misses it. We track
+  // the composition state ourselves and remember WHEN it ended: an Enter that
+  // lands within a few ms of compositionend is the confirm keystroke, not a
+  // send. (A human pressing Enter twice is always far slower than 75 ms.)
+  const composingRef = useRef(false)
+  const compositionEndAtRef = useRef(-Infinity)
+
   const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = Array.from(e.target.files ?? [])
     if (f.length) setFiles((p) => [...p, ...f])
@@ -129,8 +138,12 @@ export function Composer({
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME composition guard: never act on an Enter that confirms a candidate.
-    if (e.nativeEvent.isComposing) return
+    // IME composition guard: never act on a keystroke that drives the IME.
+    // keyCode 229 covers Chrome-family; the composingRef + the post-compositionend
+    // window covers WebKit, where the confirming Enter arrives after
+    // compositionend with isComposing already false.
+    if (e.nativeEvent.isComposing || e.keyCode === 229 || composingRef.current) return
+    if (e.key === 'Enter' && e.timeStamp - compositionEndAtRef.current < 75) return
 
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault()
@@ -177,6 +190,8 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={(e) => { composingRef.current = false; compositionEndAtRef.current = e.timeStamp }}
           placeholder={t('composer.placeholder', 'Ask, plan, or build…')}
           rows={1}
           disabled={disabled}

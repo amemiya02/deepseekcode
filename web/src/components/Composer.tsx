@@ -151,6 +151,24 @@ export function Composer({
       {menuMode === 'slash' && <SlashMenu items={slashMatches} activeIndex={active} onPick={pickCommand} onHover={setActive} />}
       {menuMode === 'at' && <FileMenu items={atMatches} activeIndex={active} onPick={pickEntry} onHover={setActive} />}
       <ContextPills items={pills} onRemove={(id) => setPills((prev) => prev.filter((p) => p.id !== id))} />
+      {files.length > 0 && (
+        <div className="composer__files" data-testid="composer-files">
+          {files.map((f, i) => (
+            <span key={i} className="composer__file-chip">
+              <span className="composer__file-name">{f.name}</span>
+              <button
+                type="button"
+                className="composer__file-remove"
+                data-testid={`remove-file-${i}`}
+                aria-label={`Remove ${f.name}`}
+                onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <AttachmentDrop onAttach={(f) => setFiles((prev) => [...prev, ...f])}>
         <textarea
           ref={taRef}

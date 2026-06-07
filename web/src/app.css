@@ -388,6 +388,21 @@ button { font-family: inherit; }
 .composer__input::placeholder { color: var(--text-3); }
 /* Mid-turn steer hint — shown below textarea when streaming and text is present */
 .composer__steer-hint { font: var(--type-label); color: var(--text-3); padding: 0 6px 2px; pointer-events: none; }
+.composer__files { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.composer__file-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px; border-radius: var(--r-sm);
+  background: var(--accent-weak); color: var(--accent-text);
+  font: var(--type-label);
+}
+.composer__file-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer__file-remove {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border: none; background: none;
+  color: var(--accent-text); cursor: pointer; font-size: 12px; line-height: 1;
+  border-radius: 50%; opacity: 0.7;
+}
+.composer__file-remove:hover { opacity: 1; background: color-mix(in oklch, var(--accent) 20%, transparent); }
 /* Composer action bar (SP3) — one row: tools left, send right */
 .composer-bar { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 /* Chips wrap to a second row when the conversation lane is narrow (wide review

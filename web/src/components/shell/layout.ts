@@ -19,7 +19,7 @@ export const LEFT_MIN = 236, LEFT_MAX = 420
 export const RIGHT_MIN = 280, RIGHT_MAX = 760
 
 export const DEFAULT_LAYOUT: Layout = {
-  left: 268, right: 360, leftCollapsed: false, rightCollapsed: false, preset: 'balanced', reviewPin: 'auto',
+  left: 268, right: 360, leftCollapsed: false, rightCollapsed: false, preset: 'balanced', reviewPin: 'closed',
 }
 
 const KEY = 'dsc.shell.layout'

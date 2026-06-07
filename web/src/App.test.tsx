@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { App } from './App'
 import { useThemeStore, DEFAULT_THEME_SETTINGS } from './lib/theme/store'
+import { useLayoutStore } from './lib/layoutStore'
 import * as system from './lib/system'
 import * as api from './lib/api'
 
@@ -12,9 +13,9 @@ beforeEach(() => {
 })
 
 describe('App shell composition', () => {
-  it('renders the three workspace zones', async () => {
-    // Stub fetch so /v1/changed returns a non-empty working tree, causing
-    // hasChanges=true and the workspace zone to auto-reveal.
+  it('renders the three workspace zones when review pane is open', async () => {
+    // Default reviewPin is 'closed' — workspace hidden. Open it first.
+    useLayoutStore.getState().toggleRight(false)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
@@ -155,6 +156,8 @@ describe('App — Wave 4 wiring', () => {
 describe('App workspace zone (SP5)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Default reviewPin is 'closed' — open it for workspace tests
+    useLayoutStore.setState((s) => ({ layout: { ...s.layout, reviewPin: 'open' as const } }))
     // Route fetch calls: changed files → entries; diff → patch; file → content.
     vi.stubGlobal(
       'fetch',
@@ -207,6 +210,8 @@ describe('App workspace zone (SP5)', () => {
 describe('App — full shell integration (Wave 0)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Default reviewPin is 'closed' — open it for workspace tests
+    useLayoutStore.setState((s) => ({ layout: { ...s.layout, reviewPin: 'open' as const } }))
     // Fail-closed by default: no onboarding, no update — keeps overlays hidden
     // unless a test opts in.
     vi.spyOn(system, 'fetchOnboarding').mockResolvedValue({

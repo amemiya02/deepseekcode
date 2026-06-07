@@ -47,7 +47,7 @@ describe('isReviewOpen', () => {
     expect(isReviewOpen(L('open'), false)).toBe(true)
     expect(isReviewOpen(L('closed'), true)).toBe(false)
   })
-  it('defaults to auto', () => {
-    expect(DEFAULT_LAYOUT.reviewPin).toBe('auto')
+  it('defaults to closed', () => {
+    expect(DEFAULT_LAYOUT.reviewPin).toBe('closed')
   })
 })

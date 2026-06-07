@@ -1457,6 +1457,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		TailTokens: tailTokens,
 		Usage:      sr.usage,
 	})
+	// Publish the structured receipt so the TUI can accumulate per-cause
+	// miss tokens for the four-cause HUD.
+	a.bus.Publish(EventCacheReceipt{
+		HitTokens:   receipt.HitTokens,
+		MissTokens:  receipt.MissTokens,
+		ResidualEst: receipt.ResidualEst,
+		Dominant:    string(receipt.Dominant),
+	})
 	// NOTE: this fires every turn. If noise becomes a problem, gate behind
 	// a verbose/debug flag when one is added to Agent.
 	a.EmitInfo(cache.ReceiptLine(receipt))

@@ -131,6 +131,8 @@ function AppInner() {
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
+  const [goal, setGoal] = useState<Goal | null>(null)
+  const [sddDraft, setSddDraft] = useState('')
 
   // Wave-3 state: sessions zone
   const sessions = useSessionStore((s) => s.sessions)
@@ -394,6 +396,11 @@ function AppInner() {
         title: t('titlebar.toggleLocale', 'Toggle language'),
         run: () => setLocale(locale === 'en' ? 'zh-CN' : 'en'),
       },
+      {
+        id: 'set-goal',
+        title: t('app.setGoal', 'Set goal'),
+        run: () => setGoal({ text: 'Demo goal', state: 'active' }),
+      },
     ],
     [t, locale, setLocale, onNewSession],
   )
@@ -427,6 +434,14 @@ function AppInner() {
     <div data-testid="zone-conversation" className="conversation-zone">
       <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
       <PlanTodoPanel items={planItems} onDismiss={() => setPlanItems([])} />
+      {goal && (
+        <GoalPanel
+          goal={goal}
+          onPause={() => setGoal(g => g ? { ...g, state: 'paused' } : null)}
+          onResume={() => setGoal(g => g ? { ...g, state: 'active' } : null)}
+          onComplete={() => setGoal(g => g ? { ...g, state: 'completed' } : null)}
+        />
+      )}
       {pendingAsk && <AskCard request={pendingAsk} onAnswer={onAskAnswer} onDismiss={onAskDismiss} />}
       {pendingPermission && editApproval && (
         <ApprovalGate request={pendingPermission} onDecide={onPermissionDecision} />
@@ -456,6 +471,7 @@ function AppInner() {
 
   const workspaceZone = (
     <div data-testid="zone-workspace" className={styles.workspaceZone}>
+      <SddPanel draft={sddDraft} onChange={setSddDraft} onSubmit={() => {}} />
       <ReviewPanel refreshKey={workspaceRefreshKey} />
       <TelemetryStrip sessionId={sessionId ?? undefined} />
     </div>

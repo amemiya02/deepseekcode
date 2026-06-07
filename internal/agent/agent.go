@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/cache"
 	"github.com/amemiya02/deepseekcode/internal/cacheunit"
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
@@ -156,6 +157,13 @@ type Agent struct {
 
 	prefixMon *llm.PrefixMonitor
 	epochMgr  *EpochManager
+
+	// prevStaticPrefix tracks the previous turn's StaticPrefix for cache
+	// attribution (cache.Attribute). nil on the first turn → CauseColdFirst.
+	prevStaticPrefix *llm.StaticPrefix
+	// prevCacheEpoch tracks the previous turn's compaction epoch number for
+	// cache attribution. 0 until the first turn completes.
+	prevCacheEpoch cache.Epoch
 
 	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
 	DisablePrefixEpoch bool
@@ -1402,6 +1410,37 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.calibrateCharsPerToken(req.Messages, sr.usage)
 	a.learnStaticResidual(sr.usage.PromptTokens, req.Messages)
 
+	// Cache attribution: classify why this turn's cache behaved as it did.
+	// Defensive copy of tools slice so later mutation cannot retroactively
+	// change what we compare against on the next turn (same pattern as
+	// PrefixMonitor.pin).
+	curStaticPrefix := llm.StaticPrefix{System: staticSys}
+	if len(req.Tools) > 0 {
+		curStaticPrefix.Tools = append([]llm.Tool(nil), req.Tools...)
+	}
+	curCacheEpoch := cache.Epoch(0)
+	if epoch != nil {
+		// Derive a monotonic epoch number from the epoch ID. The epoch ID
+		// format is "epoch_N" so we extract N; fallback to 0 when parsing fails
+		// (graceful degradation — the receipt still classifies cold/steady/mutation).
+		if seq := epochSeqFromID(epoch.EpochID); seq > 0 {
+			curCacheEpoch = cache.Epoch(seq)
+		}
+	}
+	receipt := cache.Attribute(cache.Input{
+		Turn:      a.turnsSeen,
+		Model:     respModel,
+		Prev:      a.prevStaticPrefix,
+		Cur:       curStaticPrefix,
+		PrevEpoch: a.prevCacheEpoch,
+		CurEpoch:  curCacheEpoch,
+		Unit:      a.cacheUnit,
+		Usage:     sr.usage,
+	})
+	a.EmitInfo(cache.ReceiptLine(receipt))
+	a.prevStaticPrefix = &curStaticPrefix
+	a.prevCacheEpoch = curCacheEpoch
+
 	return StepRecord{
 		FinishReason:      sr.finish,
 		Usage:             sr.usage,
@@ -2637,3 +2676,18 @@ func (a *Agent) Close() {
 
 var _ tools.JobController = (*Agent)(nil)
 var _ tools.JobStatusController = (*Agent)(nil)
+
+// epochSeqFromID extracts the monotonic sequence number from an epoch ID of
+// the form "epoch_N". Returns 0 on parse failure (graceful degradation for
+// cache attribution — the receipt still classifies cold/steady/mutation).
+func epochSeqFromID(id string) int64 {
+	const prefix = "epoch_"
+	if !strings.HasPrefix(id, prefix) {
+		return 0
+	}
+	var n int64
+	if _, err := fmt.Sscanf(id[len(prefix):], "%d", &n); err != nil {
+		return 0
+	}
+	return n
+}

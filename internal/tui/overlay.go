@@ -26,6 +26,7 @@ const (
 	modePermissions          // /permissions — effective policy overlay
 	modeEffort               // /effort — reasoning-effort picker (filterable)
 	modeQuitConfirm          // quit-confirm y/n dialog
+	modeFilePicker           // file-picker dialog (filterable)
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -58,8 +59,9 @@ type Overlay struct {
 	mcpServers   []McpServerRow
 	lspServers   []LspServerRow
 	permRows     []PermissionRow
-	efforts      []string // reasoning-effort rows: low, medium, high, max
-	filter       filterableList
+	efforts       []string // reasoning-effort rows: low, medium, high, max
+	filePickerPaths []string // file paths for the file-picker dialog
+	filter        filterableList
 }
 
 // McpServerRow is one row in the /mcp status overlay.
@@ -183,7 +185,7 @@ func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % 
 // keys. modeTape and modeHelp are not filterable.
 func (o *Overlay) Filterable() bool {
 	switch o.mode {
-	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP, modeEffort:
+	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP, modeEffort, modeFilePicker:
 		return true
 	}
 	return false
@@ -325,6 +327,30 @@ func (o *Overlay) SelectedEffort() string {
 
 // Efforts returns the effort picker rows (read-only).
 func (o *Overlay) Efforts() []string { return o.efforts }
+
+// OpenFilePicker switches to the file-picker dialog. The filterableList is
+// seeded with the supplied repo-relative paths; the cursor lands on the first
+// row.
+func (o *Overlay) OpenFilePicker(paths []string) {
+	o.filePickerPaths = paths
+	o.mode = modeFilePicker
+	o.cursor = 0
+	labels := make([]string, len(paths))
+	copy(labels, paths)
+	o.filter.SetRows(labels)
+}
+
+// SelectedFile returns the file path under the cursor (mapped through the
+// filter), or "" when nothing matches.
+func (o *Overlay) SelectedFile() string {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.filePickerPaths) {
+		return o.filePickerPaths[i]
+	}
+	return ""
+}
+
+// FilePickerPaths returns the file-picker rows (read-only).
+func (o *Overlay) FilePickerPaths() []string { return o.filePickerPaths }
 
 // OpenMCP switches to the /mcp status overlay.
 func (o *Overlay) OpenMCP(rows []McpServerRow) {
@@ -650,6 +676,32 @@ func renderEffortPicker(t Theme, efforts []string, visible []int, cursor int, fi
 	}
 	header := fmt.Sprintf("%d levels · type to filter · ⏎ apply · esc cancel", len(efforts))
 	return wrapPane(t, "/effort", header, b.String(), width, height)
+}
+
+// renderFilePicker draws the file-picker dialog overlay. Each row shows a
+// repo-relative file path. Mirrors renderEffortPicker's structure.
+func renderFilePicker(t Theme, paths []string, visible []int, cursor int, filter string, width, height int) string {
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no files match the filter)"))
+	}
+	for vi, idx := range visible {
+		path := paths[idx]
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s", path)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			line := fmt.Sprintf("  %s", t.StatusModel.Render(path))
+			b.WriteString(truncateCells(line, rowW) + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d files · type to filter · ⏎ select · esc cancel", len(paths))
+	return wrapPane(t, "file", header, b.String(), width, height)
 }
 
 // renderSessionsPicker draws the /sessions picker overlay. visible is the

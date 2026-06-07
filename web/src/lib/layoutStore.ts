@@ -1,13 +1,9 @@
 import { create } from 'zustand'
 import { loadLayout, saveLayout, isReviewOpen, type Layout } from '../components/shell/layout'
 
-export type Mode = 'code' | 'write'
-
 interface LayoutState {
   layout: Layout
-  mode: Mode
   setLayout: (next: Layout | ((prev: Layout) => Layout)) => void
-  setMode: (mode: Mode) => void
   toggleLeft: () => void
   toggleRight: (hasChanges: boolean) => void
 }
@@ -18,10 +14,8 @@ interface LayoutState {
 // pre-lift behavior); the toggle actions persist.
 export const useLayoutStore = create<LayoutState>((set) => ({
   layout: loadLayout(),
-  mode: 'code',
   setLayout: (next) =>
     set((s) => ({ layout: typeof next === 'function' ? (next as (p: Layout) => Layout)(s.layout) : next })),
-  setMode: (mode) => set({ mode }),
   toggleLeft: () =>
     set((s) => {
       const layout = { ...s.layout, leftCollapsed: !s.layout.leftCollapsed }

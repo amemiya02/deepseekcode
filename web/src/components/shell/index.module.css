@@ -224,38 +224,3 @@
 /* Workspace zone — Review hero (ReviewPanel) above a compact TelemetryStrip. */
 .workspaceZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
-/* ModeTabs — segmented control in the topbar */
-.modeTabs {
-  display: inline-flex;
-  background: var(--elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  overflow: hidden;
-  -webkit-app-region: no-drag;
-}
-.modeTab {
-  display: flex;
-  align-items: center;
-  gap: var(--s-1);
-  padding: 0 var(--s-3);
-  height: 26px;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-  font: var(--type-ui);
-  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
-}
-.modeTab + .modeTab { border-left: 1px solid var(--border); }
-.modeTab:hover:not(:disabled) { color: var(--text); background: var(--surface); }
-.modeTab--active {
-  color: var(--accent-text);
-  background: var(--accent);
-}
-.modeTab--active:hover { background: var(--accent); }
-.modeTab:disabled { cursor: default; opacity: 0.6; }
-.modeTab__hint {
-  font: var(--type-label);
-  color: var(--text-3);
-  opacity: 0.7;
-}

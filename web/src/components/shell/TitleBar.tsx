@@ -4,7 +4,6 @@ import { useThemeStore, setThemeSettings } from '../../lib/theme/store'
 import { useLayoutStore } from '../../lib/layoutStore'
 import { isReviewOpen } from './layout'
 import { Logo } from '../Logo'
-import { ModeTabs } from '../ModeTabs'
 import { GitBranchPicker } from '../GitBranchPicker'
 import styles from './index.module.css'
 
@@ -21,8 +20,6 @@ export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent 
   const settings = useThemeStore((s) => s.settings)
   const isDark = settings.mode === 'dark'
   const layout = useLayoutStore((s) => s.layout)
-  const mode = useLayoutStore((s) => s.mode)
-  const setMode = useLayoutStore((s) => s.setMode)
   const toggleLeft = useLayoutStore((s) => s.toggleLeft)
   const toggleRight = useLayoutStore((s) => s.toggleRight)
   const reviewOpen = isReviewOpen(layout, workspaceHasContent)
@@ -34,7 +31,6 @@ export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent 
       <div className={styles.titlebarLeft}>
         <Logo size={20} className={styles.titlebarLogo} />
         <span className={styles.appName}>DeepSeekCode</span>
-        <ModeTabs mode={mode} onChange={setMode} />
         <GitBranchPicker
           current={branch}
           branches={[branch]}

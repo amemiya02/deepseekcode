@@ -1,4 +1,4 @@
-import type { Mode } from '../lib/layoutStore'
+type Mode = 'code' | 'write'
 
 export interface ModeTabsProps {
   mode: Mode

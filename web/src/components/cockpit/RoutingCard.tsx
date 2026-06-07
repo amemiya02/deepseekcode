@@ -5,7 +5,7 @@ import styles from './RoutingCard.module.css'
 
 export function RoutingCard({ hops = [] }: { hops?: RoutingHop[] }) {
   return (
-    <section className={styles.card} data-testid="routing-card">
+    <section className={`${styles.card} ds-card`} data-testid="routing-card">
       <h3 className={styles.title}>{t('cockpit.routing.title', 'Routing')}</h3>
       {hops.length === 0 ? (
         <p className={styles.empty} data-testid="routing-empty">

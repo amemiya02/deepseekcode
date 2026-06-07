@@ -549,3 +549,24 @@ button { font-family: inherit; }
 .fold__toggle:hover {
   color: var(--text, #0d1016);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   P0.1 — Systematic motion language (lift / press / pulse / shimmer)
+   Brand-neutral ds-* utility classes. Timings from motion.ts contract.
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes ds-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes ds-shiny { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+.ds-status-dot { animation: ds-pulse 1800ms ease-in-out infinite; }
+.ds-streaming-text {
+  background: linear-gradient(90deg, var(--text-2) 30%, var(--text) 50%, var(--text-2) 70%);
+  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
+  animation: ds-shiny 2400ms linear infinite;
+}
+.ds-card { transition: transform var(--motion-standard) var(--ease-standard), background var(--motion-micro) var(--ease-standard); }
+.ds-card:hover { transform: var(--lift); }
+.ds-pressable:active { transform: var(--press); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}

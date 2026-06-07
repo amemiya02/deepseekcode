@@ -298,5 +298,10 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--dur-fast': '120ms',
     '--dur-base': '200ms',
     '--dur-slow': '320ms',
+    '--motion-micro': '140ms',
+    '--motion-standard': '150ms',
+    '--motion-deep': '300ms',
+    '--lift': 'translateY(-1px)',
+    '--press': 'scale(0.985)',
   }
 }

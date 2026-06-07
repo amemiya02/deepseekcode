@@ -18,7 +18,7 @@ export function PermissionCard({
   const decide = (d: PermissionDecision) => onDecide?.(d)
 
   return (
-    <div className={styles.card} role="group" aria-label={t('perm.aria', 'permission request')}>
+    <div className={`${styles.card} ds-card`} role="group" aria-label={t('perm.aria', 'permission request')}>
       <div className={styles.head}>
         <span className={styles.tool}>{request.tool}</span>
         <span className={styles.label}>{t('perm.wantsToRun', 'wants to run')}</span>

@@ -33,7 +33,7 @@ export function LedgerDrillDown({ sessionId = '', turn }: { sessionId?: string; 
   }, [sessionId, turn])
 
   return (
-    <section className={styles.card} data-testid="ledger-card">
+    <section className={`${styles.card} ds-card`} data-testid="ledger-card">
       <h3 className={styles.title}>{t('cockpit.ledger.title', 'Per-turn ledger')}</h3>
 
       {!sessionId ? (

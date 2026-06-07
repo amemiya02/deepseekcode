@@ -16,7 +16,7 @@ export function CostCard({
   currency?: string
 }) {
   return (
-    <section className={styles.card} data-testid="cost-card">
+    <section className={`${styles.card} ds-card`} data-testid="cost-card">
       <h3 className={styles.title}>{t('cockpit.cost.title', 'Cost')}</h3>
       <dl className={styles.rows}>
         <div className={styles.row}>

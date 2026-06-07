@@ -38,7 +38,7 @@ export function ToolCard({ item }: { item: ToolItem }) {
 
   return (
     <div className={`tool tool--${item.status} ${quiet ? 'tool--quiet' : ''}`}>
-      <button className="tool__row" data-testid="toolcard-header" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button className="tool__row ds-pressable" data-testid="toolcard-header" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <ChevronRight className={`tool__chevron ${open ? 'tool__chevron--open' : ''}`} size={13} />
         <Icon className="tool__icon" size={14} />
         <span className="tool__name">{item.name}</span>

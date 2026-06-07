@@ -1,6 +1,6 @@
 // Adapted from deepseek-reasonix (MIT) — empty/banner state idioms (className="empty"/"banner banner--error").
 // Reusable designed states. One component, three kinds, token-styled.
-import { Loader2, AlertCircle } from 'lucide-react'
+import { Loader2, AlertCircle, Inbox } from 'lucide-react'
 import { t } from '../lib/i18n'
 import styles from './StateViews.module.css'
 
@@ -23,7 +23,8 @@ export function StateView({ kind, message, title, hint, onRetry }: StateViewProp
   }
   if (kind === 'empty') {
     return (
-      <div className={`${styles.state} ${styles.empty}`}>
+      <div className={`${styles.state} ${styles.empty}`} role="status">
+        <Inbox className={styles.emptyIcon} size={28} strokeWidth={1.5} aria-hidden="true" />
         <p className={styles.title}>{title}</p>
         {hint && <p className={styles.hint}>{hint}</p>}
       </div>

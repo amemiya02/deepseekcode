@@ -21,10 +21,10 @@ describe('layout persistence', () => {
     expect(l.leftCollapsed).toBe(false)
   })
   it('clamps widths to bounds', () => {
-    expect(clampLeft(10)).toBe(160)
-    expect(clampLeft(9999)).toBe(480)
-    expect(clampRight(10)).toBe(240)
-    expect(clampRight(9999)).toBe(720)
+    expect(clampLeft(10)).toBe(236)
+    expect(clampLeft(9999)).toBe(420)
+    expect(clampRight(10)).toBe(280)
+    expect(clampRight(9999)).toBe(760)
   })
   it('applyPreset focus collapses both rails; review widens right + collapses left', () => {
     const base = DEFAULT_LAYOUT

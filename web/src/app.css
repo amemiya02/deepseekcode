@@ -586,6 +586,35 @@ button { font-family: inherit; }
 .ds-card { transition: transform var(--motion-standard) var(--ease-standard), background var(--motion-micro) var(--ease-standard); }
 .ds-card:hover { transform: var(--lift); }
 .ds-pressable:active { transform: var(--press); }
+/* ── MessageTimeline blocks ─────────────────────────────────────────── */
+.message-timeline { display: flex; flex-direction: column; gap: var(--s-1); }
+.tl-block { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); border-radius: var(--radius-sm); font: var(--type-ui); }
+.tl-block__icon { color: var(--text-2); flex-shrink: 0; }
+.tl-block--reasoning { color: var(--text-2); font-style: italic; padding: 0 var(--s-1); }
+.tl-block__text { white-space: pre-wrap; }
+.tl-block--tool { border: 1px solid var(--border); background: var(--surface-2); }
+.tl-block--tool-running { border-color: var(--accent-dim); }
+.tl-block--tool-error { border-color: var(--danger); }
+.tl-block__name { font: var(--type-mono); font-weight: 600; color: var(--accent); }
+.tl-block__subject { color: var(--text-2); font: var(--type-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tl-block__status { margin-left: auto; }
+.tl-block--command { flex-direction: column; align-items: stretch; border: 1px solid var(--border); background: var(--surface-2); }
+.tl-block__cmd-head { display: flex; align-items: center; gap: var(--s-2); }
+.tl-block__cmd { font: var(--type-mono); font-weight: 600; color: var(--accent); }
+.tl-block__output { margin: var(--s-1) 0 0; padding: var(--s-1) var(--s-2); border-top: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 200px; overflow: auto; }
+.tl-block--file-change { border: 1px solid var(--border); background: var(--surface-2); }
+.tl-block__path { font: var(--type-mono); color: var(--text); }
+.tl-block__counts { margin-left: auto; display: flex; gap: var(--s-1); }
+.tl-block__added { color: var(--ok); font: var(--type-mono); }
+.tl-block__removed { color: var(--danger); font: var(--type-mono); }
+.ico { vertical-align: middle; }
+.ico--ok { color: var(--ok); }
+.ico--err { color: var(--danger); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cursor { display: inline-block; width: 2px; height: 1em; background: var(--text); margin-left: 2px; animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }

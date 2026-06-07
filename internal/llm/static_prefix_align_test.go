@@ -11,9 +11,9 @@ func count(s string) int { return len([]rune(s)) }
 
 func TestAlignPadding_MakesPrefixUnitMultiple(t *testing.T) {
 	const unit = 128
-	prefixTokens := count("SYSTEM PROMPT BODY ....")
-	pad := cacheunit.PadText(prefixTokens, unit, count)
-	total := prefixTokens + count(pad)
+	prefix := "SYSTEM PROMPT BODY ...."
+	pad := cacheunit.PadTextConcat(prefix, unit, count)
+	total := count(prefix + pad)
 	if total%unit != 0 {
 		t.Fatalf("aligned total = %d, not a multiple of %d", total, unit)
 	}
@@ -21,14 +21,14 @@ func TestAlignPadding_MakesPrefixUnitMultiple(t *testing.T) {
 
 func TestAlignPadding_ByteStable(t *testing.T) {
 	const unit = 128
-	pt := 1000
-	if cacheunit.PadText(pt, unit, count) != cacheunit.PadText(pt, unit, count) {
-		t.Fatal("PadText not deterministic for identical inputs")
+	prefix := "hello world test prefix"
+	if cacheunit.PadTextConcat(prefix, unit, count) != cacheunit.PadTextConcat(prefix, unit, count) {
+		t.Fatal("PadTextConcat not deterministic for identical inputs")
 	}
 }
 
 func TestAlignPadding_ZeroUnitIsNoop(t *testing.T) {
-	if got := cacheunit.PadText(1000, 0, count); got != "" {
+	if got := cacheunit.PadTextConcat("hello", 0, count); got != "" {
 		t.Fatalf("unit=0 should yield empty padding, got %q", got)
 	}
 }
@@ -54,7 +54,7 @@ func TestAssembledPrefixWithAlignmentStable(t *testing.T) {
 	// deterministic (same input -> same fingerprint).
 	sys := "You are a coding agent. You work with files."
 	const unit = 128
-	pad := cacheunit.PadText(count(sys), unit, count)
+	pad := cacheunit.PadTextConcat(sys, unit, count)
 	paddedSys := sys + pad
 
 	// Verify alignment: total tokens must be a unit multiple.
@@ -64,9 +64,9 @@ func TestAssembledPrefixWithAlignmentStable(t *testing.T) {
 	}
 
 	// Verify byte-stability: two identical pad operations produce the same string.
-	pad2 := cacheunit.PadText(count(sys), unit, count)
+	pad2 := cacheunit.PadTextConcat(sys, unit, count)
 	if pad != pad2 {
-		t.Fatal("PadText not deterministic for identical inputs")
+		t.Fatal("PadTextConcat not deterministic for identical inputs")
 	}
 
 	// Verify fingerprint stability: two padded prefixes have the same fingerprint.

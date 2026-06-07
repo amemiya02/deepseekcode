@@ -1442,16 +1442,23 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// compaction. After the LLM call (and any compaction it triggered),
 	// a.cacheEpoch.value() reflects whether the prefix was rewritten this turn.
 	curCacheEpoch := cache.Epoch(a.cacheEpoch.value())
+	// TailTokens: the conversation messages' token count (the post-prefix
+	// tail). When Unit > 0, ResidualEst = TailTokens % Unit gives the
+	// structural floor of wasted tokens in the incomplete tail block.
+	tailTokens := EstimateInputTokens(a.Messages, a.charsPerToken)
 	receipt := cache.Attribute(cache.Input{
-		Turn:      a.turnsSeen,
-		Model:     respModel,
-		Prev:      a.prevStaticPrefix,
-		Cur:       curStaticPrefix,
-		PrevEpoch: a.prevCacheEpoch,
-		CurEpoch:  curCacheEpoch,
-		Unit:      a.cacheUnit,
-		Usage:     sr.usage,
+		Turn:       a.turnsSeen,
+		Model:      respModel,
+		Prev:       a.prevStaticPrefix,
+		Cur:        curStaticPrefix,
+		PrevEpoch:  a.prevCacheEpoch,
+		CurEpoch:   curCacheEpoch,
+		Unit:       a.cacheUnit,
+		TailTokens: tailTokens,
+		Usage:      sr.usage,
 	})
+	// NOTE: this fires every turn. If noise becomes a problem, gate behind
+	// a verbose/debug flag when one is added to Agent.
 	a.EmitInfo(cache.ReceiptLine(receipt))
 	a.prevStaticPrefix = &curStaticPrefix
 	a.prevCacheEpoch = curCacheEpoch
@@ -2718,7 +2725,9 @@ func (m *compactionMetrics) record(costCNY float64) {
 }
 
 // CompactionCount returns the number of compactions that have occurred.
+// Must be called from the Run goroutine (not concurrency-safe).
 func (m *compactionMetrics) CompactionCount() int { return m.count }
 
 // CompactionLastCost returns the cost (CNY) of the most recent compaction.
+// Must be called from the Run goroutine (not concurrency-safe).
 func (m *compactionMetrics) CompactionLastCost() float64 { return m.lastCostCNY }

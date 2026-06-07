@@ -53,17 +53,17 @@ func init() {
 	toolRegistry["mcp_*"] = renderMCPCard
 }
 
-// statusGlyph returns a status icon styled with a semantic theme token.
+// statusGlyph returns a status icon styled with DeepSeek brand accents.
 func statusGlyph(t Theme, s ToolStatus) string {
 	switch s {
 	case ToolRunning:
-		return t.Info.Render("◐")
+		return lipgloss.NewStyle().Foreground(t.AccentFlash).Render("◐")
 	case ToolSuccess:
-		return t.Info.Render("●")
+		return lipgloss.NewStyle().Foreground(t.OkColor).Render("●")
 	case ToolError:
 		return t.Error.Render("✖")
 	case ToolAwaitingPermission:
-		return t.HookInfo.Render("◆")
+		return lipgloss.NewStyle().Foreground(t.AccentPro).Render("◆")
 	default:
 		return t.Info.Render("•")
 	}
@@ -88,7 +88,8 @@ func RenderTool(t Theme, width int, o ToolRenderOpts) string {
 
 // cardHead builds the common head line: status glyph + label + trailing detail.
 func cardHead(t Theme, o ToolRenderOpts, label, detail string) string {
-	head := statusGlyph(t, o.Status) + " " + t.StatusModel.Render(label)
+	brandLabel := lipgloss.NewStyle().Foreground(t.BrandDeep).Bold(true).Render(label)
+	head := statusGlyph(t, o.Status) + " " + brandLabel
 	if detail != "" {
 		// Account for the head prefix width when truncating detail.
 		prefixW := lipgloss.Width(head) + 1 // " " before detail
@@ -117,7 +118,8 @@ func cardBody(t Theme, body string) string {
 // renderDefaultCard is the fallback: status glyph + tool name + the existing
 // one-line summary as the body.
 func renderDefaultCard(t Theme, width int, o ToolRenderOpts) string {
-	head := statusGlyph(t, o.Status) + " " + t.StatusModel.Render(o.Tool)
+	brandLabel := lipgloss.NewStyle().Foreground(t.BrandDeep).Bold(true).Render(o.Tool)
+	head := statusGlyph(t, o.Status) + " " + brandLabel
 	body := RenderToolSummary(o.Tool, o.Args, o.Result, o.Status == ToolError, width)
 	return head + "\n" + body
 }

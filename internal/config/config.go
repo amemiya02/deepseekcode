@@ -51,6 +51,9 @@ type CacheConfig struct {
 	// an AlignUnit boundary, maximising cache hit rate. 0 = alignment
 	// off until the unit is empirically measured (M2).
 	AlignUnit int `toml:"align_unit"`
+	// FIMFastPath enables a gated, conservative Fill-In-the-Middle
+	// cheap-edit path for small single-hunk edits. Default false (off).
+	FIMFastPath bool `toml:"fim_fastpath"`
 }
 
 // UIConfig holds presentational TUI options. Purely cosmetic — nothing
@@ -369,6 +372,10 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	// Cache: AlignUnit is non-zero-wins (0 = alignment off / not yet measured).
 	if ov.Cache.AlignUnit != 0 {
 		base.Cache.AlignUnit = ov.Cache.AlignUnit
+	}
+	// FIMFastPath: bool opt-in, default false.
+	if meta.IsDefined("cache", "fim_fastpath") {
+		base.Cache.FIMFastPath = ov.Cache.FIMFastPath
 	}
 
 	if ov.Defaults.ReasoningEffort != "" {

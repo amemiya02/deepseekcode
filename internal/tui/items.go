@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
@@ -195,178 +193,44 @@ func (i chatItem) render(t Theme, width int) string {
 			fmt.Sprintf("(%.1fs · ~%d tok · [^R to collapse])", i.duration.Seconds(), i.tokens))) + "\n")
 		return b.String()
 	case itemToolCall:
-		// Tool CALL header: bar (model accent) + status glyph + summary +
-		// right-aligned duration. The call header stays barred but un-panelled.
-		accent := toolAccent(t, i.model)
-		mcpTag := ""
-		if strings.HasPrefix(i.tool, "mcp__") {
-			mcpTag = "[MCP] "
+		// Tool CALL: route through RenderTool card dispatch for rich rendering.
+		// RenderTool returns a complete card (head + optional body); wrap with
+		// gutterLine for the universal 2-cell indent.
+		innerW := width - len(t.Gutter())
+		if innerW < 10 {
+			innerW = 10
 		}
-		// Duration string (right-aligned to width).
-		dur := ""
-		if i.duration > 0 {
-			dur = i.duration.Round(time.Millisecond).String()
+		opts := ToolRenderOpts{
+			Tool:     i.tool,
+			Args:     i.args,
+			Status:   ToolRunning,
+			Expanded: i.expanded,
+			Width:    innerW,
 		}
-		// barLine prefix = gutter(2) + bar(1) + space(1) = 4 chars.
-		// LeftBar.Render adds icon(1) + space(1) + mcpTag prefix.
-		barPrefix := 4
-		iconOverhead := 2 + lipgloss.Width(mcpTag) // icon + space + mcpTag
-		durSpace := 0
-		if dur != "" {
-			durSpace = lipgloss.Width(dur) + 2 // "  " before dur
-		}
-		summaryWidth := width - barPrefix - iconOverhead - durSpace
-		if summaryWidth < 10 {
-			summaryWidth = 10
-		}
-		summary := RenderToolSummary(i.tool, i.args, "", false, summaryWidth)
-		headContent := t.LeftBar(accent).Render(IconToolPending + " " + mcpTag + summary)
-		if dur != "" {
-			visibleHead := lipgloss.Width(headContent)
-			padding := width - barPrefix - visibleHead - lipgloss.Width(dur)
-			if padding < 1 {
-				padding = 1
-			}
-			headContent += strings.Repeat(" ", padding) + lipgloss.NewStyle().Foreground(t.FgFaint).Render(dur)
-		}
-		return barLine(t, accent, headContent) + "\n"
+		card := RenderTool(t, innerW, opts)
+		return gutterLine(t, card) + "\n"
 	case itemToolResult:
-		// Tool RESULT: barred header (model accent, or err on failure), then a
-		// surface-panelled body. The header stays un-panelled; the body lives
-		// inside Theme.Panel(TierSurface) with fgMuted text, and highlighted
-		// code content sits on bgWell.
-		accent := toolAccent(t, i.model)
-		barColor := accent
+		// Tool RESULT: route through RenderTool card dispatch for rich
+		// rendering. RenderTool returns a complete card (head + optional
+		// body); wrap with gutterLine for the universal 2-cell indent.
+		status := ToolSuccess
 		if i.result.IsError {
-			barColor = t.ErrColor
+			status = ToolError
 		}
-
-		dur := i.duration.Round(time.Millisecond).String()
-		mcpTag := ""
-		if strings.HasPrefix(i.tool, "mcp__") {
-			mcpTag = "[MCP] "
+		innerW := width - len(t.Gutter())
+		if innerW < 10 {
+			innerW = 10
 		}
-
-		// Header line: status glyph + summary + right-aligned duration.
-		var statusIcon string
-		var headColor color.Color
-		if i.result.IsError {
-			statusIcon = IconToolErr
-			headColor = t.ErrColor
-		} else {
-			statusIcon = IconToolOk
-			headColor = accent
+		opts := ToolRenderOpts{
+			Tool:     i.tool,
+			Args:     i.args,
+			Result:   i.result.Content,
+			Status:   status,
+			Expanded: i.expanded,
+			Width:    innerW,
 		}
-		headStyle := lipgloss.NewStyle().Foreground(headColor)
-
-		// barLine prefix = gutter(2) + bar(1) + space(1) = 4 chars.
-		// statusIcon(1) + space(1) + mcpTag prefix.
-		barPrefix := 4
-		iconOverhead := 2 + lipgloss.Width(mcpTag) // icon + space + mcpTag
-		durSpace := lipgloss.Width(dur) + 2        // "  " before dur
-		// Account for badge (ERROR/NOTE) if present.
-		badgeSpace := 0
-		if i.result.IsError {
-			badgeSpace = lipgloss.Width(t.Badge(BadgeErr).Render("ERROR")) + 1
-		} else if isNoticeTool(i.tool) {
-			badgeSpace = lipgloss.Width(t.Badge(BadgeInfo).Render("NOTE")) + 1
-		}
-		summaryWidth := width - barPrefix - iconOverhead - durSpace - badgeSpace
-		if summaryWidth < 10 {
-			summaryWidth = 10
-		}
-		summary := RenderToolSummary(i.tool, i.args, i.result.Content, i.result.IsError, summaryWidth)
-
-		headText := headStyle.Render(statusIcon + " " + mcpTag + summary)
-		visibleHead := lipgloss.Width(headText)
-		padding := width - barPrefix - visibleHead - lipgloss.Width(dur) - badgeSpace
-		if padding < 1 {
-			padding = 1
-		}
-		headText += strings.Repeat(" ", padding) + headStyle.Render(dur)
-		if i.result.IsError {
-			headText += " " + t.Badge(BadgeErr).Render("ERROR")
-		} else if isNoticeTool(i.tool) {
-			headText += " " + t.Badge(BadgeInfo).Render("NOTE")
-		}
-		header := barLine(t, barColor, headText) + "\n"
-
-		body := i.result.Content
-		if body == "" {
-			return header
-		}
-
-		// Highlighted code content sits on the bgWell tier; everything else
-		// (plain output) on the bgSurface tier with fgMuted text.
-		lang := highlightLang(i.tool, i.args)
-		// Auto-detect raw diffs in tool output (e.g. `git diff` run via bash,
-		// which would otherwise be lexed as shell) and route them through the
-		// diff path regardless of which tool produced the content.
-		if lang != "diff" && looksLikeDiff(body) {
-			lang = "diff"
-		}
-
-		// maxBodyLines is a package const (shared with ExpandLastResult).
-
-		// Rich unified-diff rendering: edit/write/apply_patch and the
-		// structured git_diff tool (plus any auto-detected raw diff) route to
-		// diffview, which draws a line-number gutter and background-filled
-		// +/- bands. The diff already prefixes its own gutter, so we split its
-		// fully-rendered lines for truncation rather than re-indenting.
-		if lang == "diff" {
-			codeLang := diffCodeLang(body)
-			rendered := renderDiff(t, body, codeLang, width)
-			bodyLines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
-			var b strings.Builder
-			b.WriteString(header)
-			shown := bodyLines
-			truncated := false
-			if !i.expanded && len(bodyLines) > maxBodyLines {
-				shown = bodyLines[:maxBodyLines]
-				truncated = true
-			}
-			for _, line := range shown {
-				b.WriteString(line + "\n")
-			}
-			if truncated {
-				remaining := len(bodyLines) - maxBodyLines
-				b.WriteString(gutterLine(t, t.Hint.Render(
-					fmt.Sprintf("… %d more lines, press e to expand", remaining))) + "\n")
-			}
-			return b.String()
-		}
-
-		surface := t.Panel(TierSurface).Foreground(t.FgMuted)
-		bodyLines := strings.Split(body, "\n")
-		highlighted := lang != ""
-		if highlighted {
-			h := Highlight(t, body, lang)
-			bodyLines = strings.Split(h, "\n")
-		}
-		lineStyle := surface
-		if highlighted {
-			// Code keeps its chroma foreground colors; only the background
-			// tier moves down to the recessed well.
-			lineStyle = t.Panel(TierWell)
-		}
-
-		var b strings.Builder
-		b.WriteString(header)
-		shown := bodyLines
-		truncated := false
-		if !i.expanded && len(bodyLines) > maxBodyLines {
-			shown = bodyLines[:maxBodyLines]
-			truncated = true
-		}
-		for _, line := range shown {
-			b.WriteString(gutterLine(t, lineStyle.Render(line)) + "\n")
-		}
-		if truncated {
-			remaining := len(bodyLines) - maxBodyLines
-			b.WriteString(gutterLine(t, t.Hint.Render(
-				fmt.Sprintf("… %d more lines, press e to expand", remaining))) + "\n")
-		}
-		return b.String()
+		card := RenderTool(t, innerW, opts)
+		return gutterLine(t, card) + "\n"
 	case itemHookFired:
 		style := t.HookInfo
 		barColor := t.WarnColor

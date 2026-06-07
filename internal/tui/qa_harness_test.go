@@ -75,9 +75,9 @@ func TestQAFrame_ToolCall(t *testing.T) {
 
 	frame := CaptureScrollbackFrame("tool_call", sb, 80)
 
-	// Inline expected string for tool call: gutter + model-accent bar +
-	// status glyph + summary. assertFrameSnapshot trims the outer gutter.
-	expected := "▌ ● read test.go"
+	// Inline expected string for tool call: RenderTool dispatches to
+	// renderReadCard which shows status glyph + "read" + path.
+	expected := "◐ read test.go"
 	assertFrameSnapshot(t, frame, expected)
 }
 
@@ -87,20 +87,10 @@ func TestQAFrame_ToolResult(t *testing.T) {
 	sb.AppendToolResult("c1", tools.Result{Content: "package main\n\nfunc main() {}"}, 100*time.Millisecond)
 
 	frame := CaptureScrollbackFrame("tool_result", sb, 80)
-	view := stripANSI(frame.View)
 
-	// Print actual output for debugging
-	t.Logf("Actual tool result frame:\n%s", view)
-
-	// Inline expected string for tool result: the barred CALL header, then the
-	// barred RESULT header (model accent + status glyph + summary + duration),
-	// then the panelled body lines under the shared 2-cell gutter (no per-line
-	// bar). assertFrameSnapshot strips ANSI (so the panel background is not
-	// visible) and trims outer whitespace (so the first line's gutter drops).
-	// Duration is right-aligned to width 80. The header line:
-	// gutter(2) + bar(1) + space(1) + icon(1) + space(1) + summary(22) + padding + dur(5) = 80
-	// prefix(6) + summary(22) + padding + dur(5) = 80 → padding = 47.
-	expected := "▌ ● read test.go\n  ▌ ✓ read test.go (3 lines)" + strings.Repeat(" ", 47) + "100ms\n  package main\n  \n  func main() {}"
+	// RenderTool dispatches to renderReadCard: running call shows head only,
+	// success result shows head only (collapsed, no body).
+	expected := "◐ read test.go\n  ● read test.go"
 	assertFrameSnapshot(t, frame, expected)
 }
 
@@ -112,15 +102,16 @@ func TestQAFrame_ToolResultError(t *testing.T) {
 	frame := CaptureScrollbackFrame("tool_result_error", sb, 80)
 	view := stripANSI(frame.View)
 
-	// Error tool result should have error icon
-	if !strings.Contains(view, "✗") {
-		t.Errorf("expected error icon '✗' in frame, got %q", view)
+	// RenderTool dispatches to renderBashCard with ToolError status.
+	// Collapsed cards show head only (no body content).
+	if !strings.Contains(view, "✖") {
+		t.Errorf("expected error icon '✖' in frame, got %q", view)
 	}
-	if !strings.Contains(view, "permission denied") {
-		t.Errorf("expected 'permission denied' in frame, got %q", view)
+	if !strings.Contains(view, "bash") {
+		t.Errorf("expected 'bash' in frame, got %q", view)
 	}
-	if !strings.Contains(view, "bash: rm -rf /") {
-		t.Errorf("expected 'bash: rm -rf /' in frame, got %q", view)
+	if !strings.Contains(view, "rm -rf /") {
+		t.Errorf("expected 'rm -rf /' in frame, got %q", view)
 	}
 }
 

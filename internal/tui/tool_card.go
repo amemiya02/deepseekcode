@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 )
 
 // ToolStatus is the lifecycle state of a tool call as shown on its card.
@@ -88,7 +90,13 @@ func RenderTool(t Theme, width int, o ToolRenderOpts) string {
 func cardHead(t Theme, o ToolRenderOpts, label, detail string) string {
 	head := statusGlyph(t, o.Status) + " " + t.StatusModel.Render(label)
 	if detail != "" {
-		head += " " + t.Hint.Render(oneline(detail, 80))
+		// Account for the head prefix width when truncating detail.
+		prefixW := lipgloss.Width(head) + 1 // " " before detail
+		maxDetail := o.Width - prefixW
+		if maxDetail < 10 {
+			maxDetail = 10
+		}
+		head += " " + t.Hint.Render(oneline(detail, maxDetail))
 	}
 	return head
 }

@@ -615,6 +615,42 @@ button { font-family: inherit; }
 .cursor { display: inline-block; width: 2px; height: 1em; background: var(--text); margin-left: 2px; animation: blink 1s step-end infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* ModeTabs — global kebab-case rules matching ModeTabs.tsx class names */
+.mode-tabs {
+  display: inline-flex;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 0 var(--s-3);
+  height: 26px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font: var(--type-ui);
+  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.mode-tab + .mode-tab { border-left: 1px solid var(--border); }
+.mode-tab:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+.mode-tab--active {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+.mode-tab--active:hover { background: var(--accent); }
+.mode-tab:disabled { cursor: default; opacity: 0.6; }
+.mode-tab__hint {
+  font: var(--type-label);
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }

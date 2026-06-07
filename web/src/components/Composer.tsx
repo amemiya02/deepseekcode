@@ -9,13 +9,14 @@ import { Paperclip } from 'lucide-react'
 import { fetchFiles } from '../lib/workspace'
 import type { FileEntry, ModelInfo } from '../lib/api'
 import { useT } from '../lib/i18n'
-import { ORDER, type AutonomyMode } from '../lib/autonomy'
+import { ORDER, type AutonomyMode, MODE_TO_TIER, TIER_TO_MODE } from '../lib/autonomy'
 import { SlashMenu, type SlashCommand } from './SlashMenu'
 import { FileMenu } from './FileMenu'
 import { ContextPills, type ContextPill } from './ContextPills'
 import { ModelSwitcher } from './ModelSwitcher'
 import { EffortSwitcher } from './EffortSwitcher'
 import { ModeMenu } from './ModeMenu'
+import { PermissionTier, type Tier } from './PermissionTier'
 import { SendStopButton } from './SendStopButton'
 import { AttachmentDrop } from './AttachmentDrop'
 
@@ -187,6 +188,7 @@ export function Composer({
             <EffortSwitcher levels={effortLevels} current={effort} disabled={streaming} onPick={onEffortChange} />
           )}
           <ModeMenu mode={mode} onChange={onModeChange} />
+          <PermissionTier value={MODE_TO_TIER[mode]} onChange={(t) => onModeChange(TIER_TO_MODE[t])} disabled={streaming} />
         </div>
         <SendStopButton
           streaming={streaming}

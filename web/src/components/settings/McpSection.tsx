@@ -3,6 +3,7 @@ import { IconPlus, IconServer, IconTrash, IconSettings, IconChevronLeft } from '
 import { t } from '../../lib/i18n'
 import { StateView } from '../StateViews'
 import { BrandedSelect } from '../BrandedSelect'
+import { McpDiscovery } from '../McpDiscovery'
 import { fetchMcpServers, saveMcpServer, deleteMcpServer, toggleMcpServer, type McpServer } from '../../lib/system'
 import styles from './McpSection.module.css'
 
@@ -79,6 +80,10 @@ export function McpSection() {
 
   return (
     <div>
+      <details>
+        <summary>{t('mcp.discover', 'Discover tools')}</summary>
+        <McpDiscovery results={[]} onSearch={() => {}} onCall={() => {}} />
+      </details>
       <div className={styles.header}>
         <div>
           <h2 className={styles.h2}>{t('mcp.title', 'MCP servers')}</h2>

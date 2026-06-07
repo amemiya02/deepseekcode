@@ -30,6 +30,14 @@ describe('McpSection', () => {
     await waitFor(() => expect(screen.getByText('No MCP servers configured.')).toBeInTheDocument())
   })
 
+  it('renders the MCP discovery search input', async () => {
+    mockFetch(() => ({ items: [] }))
+    wrap(<McpSection />)
+    await waitFor(() => expect(screen.getByText('No MCP servers configured.')).toBeInTheDocument())
+    expect(screen.getByText('Discover tools')).toBeInTheDocument()
+    expect(screen.getByLabelText('Search MCP tools')).toBeInTheDocument()
+  })
+
   it('opens the add sub-view and posts a new server', async () => {
     const posted: RequestInit[] = []
     mockFetch((_url, init) => {

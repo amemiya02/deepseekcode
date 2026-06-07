@@ -24,3 +24,21 @@ func TestEpochBumpsOnlyOnCompaction(t *testing.T) {
 		t.Fatalf("epoch changed on non-compaction turn: %d -> %d", start+2, e.value())
 	}
 }
+
+func TestCompactionCountIsObservable(t *testing.T) {
+	var m compactionMetrics
+	if m.CompactionCount() != 0 {
+		t.Fatalf("initial compaction count = %d, want 0", m.CompactionCount())
+	}
+	m.record(0.005) // re-prefill cost estimate (CNY)
+	if m.CompactionCount() != 1 {
+		t.Fatalf("count after one compaction = %d, want 1", m.CompactionCount())
+	}
+	m.record(0.010)
+	if m.CompactionCount() != 2 {
+		t.Fatalf("count after two compactions = %d, want 2", m.CompactionCount())
+	}
+	if m.CompactionLastCost() != 0.010 {
+		t.Fatalf("last cost = %f, want 0.010", m.CompactionLastCost())
+	}
+}

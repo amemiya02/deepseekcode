@@ -169,6 +169,11 @@ type Agent struct {
 	// prefix was re-prefilled. It is process-local (not persisted across sessions).
 	cacheEpoch cacheEpochCounter
 
+	// compactionMetrics tracks compaction frequency and cost for observability.
+	// Count() is surfaced via trace-inspect so operators can see how often
+	// compaction fires and what it costs.
+	compactionMetrics compactionMetrics
+
 	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
 	DisablePrefixEpoch bool
 
@@ -900,6 +905,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
 				a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+				a.compactionMetrics.record(res.SummaryCost) // M3: track compaction frequency + cost
 				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
 				// the model no longer holds those files' contents — force a
@@ -950,6 +956,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
 	a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+	a.compactionMetrics.record(0) // M3: deterministic compaction has no LLM cost
 	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
 	a.Tools.FileTracker().Clear()
@@ -2696,3 +2703,22 @@ type cacheEpochCounter struct {
 func (e *cacheEpochCounter) value() int                { return e.n }
 func (e *cacheEpochCounter) afterCompaction()          { e.n++ }
 func (e *cacheEpochCounter) afterTurnNoCompaction() {} // no-op
+
+// compactionMetrics tracks compaction frequency and cost for observability.
+// Count() is surfaced via trace-inspect so operators can see how often
+// compaction fires and what it costs. Process-local (not persisted).
+type compactionMetrics struct {
+	count       int
+	lastCostCNY float64
+}
+
+func (m *compactionMetrics) record(costCNY float64) {
+	m.count++
+	m.lastCostCNY = costCNY
+}
+
+// CompactionCount returns the number of compactions that have occurred.
+func (m *compactionMetrics) CompactionCount() int { return m.count }
+
+// CompactionLastCost returns the cost (CNY) of the most recent compaction.
+func (m *compactionMetrics) CompactionLastCost() float64 { return m.lastCostCNY }

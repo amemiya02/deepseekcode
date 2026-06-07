@@ -86,6 +86,22 @@ export interface StreamHandlers {
   onError?: (err: Event) => void
 }
 
+// UploadedFile is one saved chat attachment: `path` is workspace-relative and
+// is what the prompt should reference so the agent's root-confined tools can
+// read the file.
+export interface UploadedFile { name: string; path: string }
+
+// uploadFiles persists chat attachments into the workspace via POST /v1/upload
+// (multipart, repeatable "file" parts) and returns the saved paths.
+export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
+  const form = new FormData()
+  for (const f of files) form.append('file', f, f.name)
+  const res = await fetch('/v1/upload', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.files ?? []) as UploadedFile[]
+}
+
 export async function submitPrompt(prompt: string, sessionId?: string): Promise<string> {
   const body: Record<string, string> = { prompt }
   if (sessionId) body.session_id = sessionId

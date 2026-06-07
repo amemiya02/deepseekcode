@@ -200,6 +200,8 @@ export const zhCN: Record<string, string> = {
   'approval.deny': '拒绝',
   'approval.hint': '回车接受 · 退格拒绝',
   'composer.steerHint': '回车引导 · Esc 停止',
+  'composer.sendFailed': '消息发送失败:',
+  'composer.uploadFailed': '附件上传失败:',
   'model.context': '上下文窗口',
   'model.cap.reasoning': '推理',
   'model.cap.tools': '工具',

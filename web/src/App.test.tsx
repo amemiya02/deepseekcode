@@ -62,6 +62,7 @@ vi.mock('./lib/api', async (orig) => {
     ...actual,
     submitPrompt: vi.fn().mockResolvedValue('sess-1'),
     steerTurn: vi.fn().mockResolvedValue(undefined),
+    uploadFiles: vi.fn().mockResolvedValue([{ name: 'notes.txt', path: '.deepseek/uploads/notes.txt' }]),
     respondPermission: vi.fn().mockResolvedValue(undefined),
     respondAnswer: vi.fn().mockResolvedValue(undefined),
     cancelTurn: vi.fn().mockResolvedValue(undefined),
@@ -95,14 +96,35 @@ describe('App — Wave 4 wiring', () => {
     vi.clearAllMocks()
   })
 
-  it('shows a PermissionModal on permission_request and routes the decision', async () => {
+  it('shows the inline ApprovalGate on permission_request and routes the decision', async () => {
     const api = await import('./lib/api')
     const user = userEvent.setup()
     render(<App />)
     await startTurn(user)
     captured.onPermissionRequest({ id: 'perm-1', tool: 'bash', args: { command: 'ls' }, options: [] })
-    await user.click(await screen.findByTestId('perm-once'))
+    // Non-edit tools render the inline command card — never a blocking modal.
+    expect(await screen.findByTestId('approval-cmd')).toBeInTheDocument()
+    expect(screen.queryByTestId('perm-backdrop')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-once'))
     expect(api.respondPermission).toHaveBeenCalledWith('perm-1', 'once')
+  })
+
+  it('uploads attachments, references the saved paths in the prompt, and pills the user message', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' })
+    // The attach input is hidden; drive it directly with a change event.
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [file] } })
+    await user.type(screen.getByTestId('composer-input'), 'read my file')
+    await user.click(screen.getByTestId('send-stop'))
+    await waitFor(() => expect(api.submitPrompt).toHaveBeenCalled())
+    expect(api.uploadFiles).toHaveBeenCalledWith([file])
+    const prompt = (api.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(prompt).toContain('read my file')
+    expect(prompt).toContain('.deepseek/uploads/notes.txt')
+    // The transcript's user message carries the attachment as a pill.
+    expect((await screen.findAllByText('notes.txt')).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows an AskCard on ask_request and routes the answer', async () => {

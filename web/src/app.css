@@ -363,16 +363,25 @@ button { font-family: inherit; }
   margin: 0 var(--s-3) var(--s-3);
   padding: var(--s-2) var(--s-2) var(--s-1);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-xl);
   background: color-mix(in oklch, var(--surface) 88%, transparent);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--shadow-2);
-  transition: border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+  box-shadow: var(--shadow-pop);
+  transition: border-color var(--motion-standard) var(--ease-standard), box-shadow var(--motion-standard) var(--ease-standard);
+}
+.composer-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at top left, rgba(77,107,254,0.06), transparent 28%);
+  pointer-events: none;
+  z-index: 0;
 }
 .composer-wrap:focus-within {
-  border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
-  box-shadow: var(--shadow-2), var(--glow-accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-pop), var(--glow-accent);
 }
 .composer__input { width: 100%; resize: none; min-height: 44px; max-height: 240px; background: transparent; border: none; color: var(--text); font: var(--type-body); padding: 8px 6px; }
 .composer__input:focus { outline: none; }

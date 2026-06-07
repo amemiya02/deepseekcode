@@ -1,0 +1,88 @@
+.panel {
+  background: var(--bg-secondary, #f5f5f5);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon {
+  color: var(--accent, #3b82f6);
+  flex-shrink: 0;
+}
+
+.text {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.state {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stateActive {
+  background: var(--success-bg, #dcfce7);
+  color: var(--success-text, #166534);
+}
+
+.statePaused {
+  background: var(--warning-bg, #fef3c7);
+  color: var(--warning-text, #92400e);
+}
+
+.stateCompleted {
+  background: var(--info-bg, #dbeafe);
+  color: var(--info-text, #1e40af);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border, #e0e0e0);
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 6px;
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-secondary, #666666);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:hover {
+  background: var(--bg-hover, #f9f9f9);
+  border-color: var(--border-hover, #d0d0d0);
+}
+
+.btnComplete {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #ffffff;
+}
+
+.btnComplete:hover {
+  background: var(--accent-hover, #2563eb);
+  border-color: var(--accent-hover, #2563eb);
+}

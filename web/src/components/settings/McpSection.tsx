@@ -5,6 +5,7 @@ import { StateView } from '../StateViews'
 import { BrandedSelect } from '../BrandedSelect'
 import { McpDiscovery } from '../McpDiscovery'
 import { fetchMcpServers, saveMcpServer, deleteMcpServer, toggleMcpServer, type McpServer } from '../../lib/system'
+import { mcpSearch, mcpCall, type McpToolResult } from '../../lib/api'
 import styles from './McpSection.module.css'
 
 type Editing = { name: string; transport: string; command: string; url: string; args: string } | null
@@ -19,6 +20,16 @@ export function McpSection() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Editing>(null)
   const [error, setError] = useState('')
+  const [discoveryResults, setDiscoveryResults] = useState<McpToolResult[]>([])
+
+  async function onDiscoverySearch(query: string) {
+    if (!query.trim()) { setDiscoveryResults([]); return }
+    try { setDiscoveryResults(await mcpSearch(query)) } catch {}
+  }
+
+  async function onDiscoveryCall(server: string, tool: string) {
+    try { await mcpCall(server, tool) } catch {}
+  }
 
   async function load() {
     setLoading(true)
@@ -82,7 +93,7 @@ export function McpSection() {
     <div>
       <details>
         <summary>{t('mcp.discover', 'Discover tools')}</summary>
-        <McpDiscovery results={[]} onSearch={() => {}} onCall={() => {}} />
+        <McpDiscovery results={discoveryResults} onSearch={onDiscoverySearch} onCall={onDiscoveryCall} />
       </details>
       <div className={styles.header}>
         <div>

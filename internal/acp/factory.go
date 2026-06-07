@@ -70,6 +70,10 @@ func realAgentFactoryFrom(cfg config.Config, workingDir string) (AgentRunner, er
 
 	a := agent.New(client, reg, pol, model)
 
+	// §3.4: wire cache alignment unit from config so buildEpochComponents
+	// can pad the static prefix to a cache-unit boundary.
+	a.SetCacheUnit(cfg.Cache.AlignUnit)
+
 	// Wire TodoWrite.PlanPublisher to publish EventPlanUpdate on the agent bus.
 	// Map completed→done to match the Contract-2 status vocabulary.
 	if t, ok := reg.Get("todo_write"); ok {

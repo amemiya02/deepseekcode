@@ -6,6 +6,8 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
+	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
 func testTools() []llm.Tool {
@@ -374,5 +376,49 @@ func TestEpochSwitchNoBusNoPanic(t *testing.T) {
 	epoch := m.SwitchEpoch("no bus", changedComps)
 	if epoch == nil {
 		t.Error("SwitchEpoch should return epoch even without bus")
+	}
+}
+
+func TestSetCacheUnit_IntegratedAlignment(t *testing.T) {
+	// Verify that SetCacheUnit flows through buildEpochComponents so the
+	// frozen system prompt is padded to a unit boundary.
+	a := New(nil, tools.New(), nil, "deepseek-v4-flash")
+	a.System = "You are a coding agent."
+	const unit = 128
+	a.SetCacheUnit(unit)
+
+	comps := a.buildEpochComponents()
+
+	// When the tokenizer is available, the padded system should end on a
+	// unit boundary. When unavailable, the code falls through without
+	// padding (unit > 0 but Count returns 0 → PadText returns "").
+	if tokenizer.Available() {
+		n := tokenizer.Count(comps.StaticSystem)
+		if n%unit != 0 {
+			t.Fatalf("padded system prompt token count = %d, not a multiple of %d", n, unit)
+		}
+		// The padded system should differ from the unpadded one.
+		unpadded := a.staticSystem()
+		if comps.StaticSystem == unpadded {
+			t.Fatal("buildEpochComponents should pad the system when unit > 0")
+		}
+	}
+
+	// Verify that identical inputs produce identical padded output (byte-stable).
+	comps2 := a.buildEpochComponents()
+	if comps.StaticSystem != comps2.StaticSystem {
+		t.Fatal("buildEpochComponents should be deterministic for identical inputs")
+	}
+}
+
+func TestSetCacheUnit_ZeroIsNoop(t *testing.T) {
+	// Verify that cacheUnit=0 does NOT change the system prompt.
+	a := New(nil, tools.New(), nil, "deepseek-v4-flash")
+	a.System = "You are a coding agent."
+	a.SetCacheUnit(0)
+
+	comps := a.buildEpochComponents()
+	if comps.StaticSystem != a.staticSystem() {
+		t.Fatalf("cacheUnit=0 should not change the system prompt\n  got:  %q\n  want: %q", comps.StaticSystem, a.staticSystem())
 	}
 }

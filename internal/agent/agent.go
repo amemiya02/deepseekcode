@@ -405,6 +405,12 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 // cleanly during shutdown.
 func (a *Agent) Events() <-chan Event { return a.eventsCompat }
 
+// SetCacheUnit sets the DeepSeek cache block size in tokens. When non-zero,
+// buildEpochComponents pads the static system prompt so the frozen prefix
+// ends on a cache-unit boundary (§3.4). Must be called before the first Run.
+// Zero (the default) disables padding entirely.
+func (a *Agent) SetCacheUnit(unit int) { a.cacheUnit = unit }
+
 // Bus returns the agent's event bus. Additional consumers (loggers,
 // parity recorders, future daemons) subscribe via Bus().Subscribe
 // to receive versioned EventEnvelope values. The primary consumer
@@ -1090,10 +1096,11 @@ func (a *Agent) buildEpochComponents() EpochComponents {
 	// is inside the frozen, fingerprinted prefix and stays byte-stable across
 	// turns. unit comes from a cacheprobe measurement; 0 (default) = disabled, in
 	// which case staticSystem is exactly a.staticSystem() — zero behavior change.
+	// PadTextConcat measures the full concatenated string (not count(A)+count(B)),
+	// so it is correct even when the tokenizer merges boundary tokens.
 	staticSystem := a.staticSystem()
 	if a.cacheUnit > 0 {
-		pre := tokenizer.Count(staticSystem)
-		staticSystem += cacheunit.PadText(pre, a.cacheUnit, tokenizer.Count)
+		staticSystem += cacheunit.PadTextConcat(staticSystem, a.cacheUnit, tokenizer.Count)
 	}
 
 	return EpochComponents{

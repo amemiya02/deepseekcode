@@ -3,7 +3,7 @@ import { ReviewPanel } from './components/ReviewPanel'
 import { TelemetryStrip } from './components/TelemetryStrip'
 import { SessionRail } from './components/SessionRail'
 import { StatusBarLive } from './components/StatusBarLive'
-import { RuntimeBanner } from './components/RuntimeBanner'
+
 import { SettingsView } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -39,7 +39,7 @@ import {
   cancelTurn,
   renameSession,
   fetchModelState,
-  fetchRuntimeInfo,
+
   setModel as apiSetModel,
   setEffort as apiSetEffort,
   EFFORT_LEVELS,
@@ -148,8 +148,6 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
-  const [runtimeInfo, setRuntimeInfo] = useState<{ version?: string }>({})
-
   const clientRef = useRef(new GatewayClient())
 
   // Window-level Cmd/Ctrl+K opens the palette.
@@ -168,11 +166,6 @@ function AppInner() {
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
-
-  // Fetch runtime info (version, etc.) once on mount. Errors are swallowed.
-  useEffect(() => {
-    fetchRuntimeInfo().then(setRuntimeInfo).catch(() => {})
-  }, [])
 
   // First-run onboarding + update check. Both fail closed/quiet: a failed fetch
   // simply leaves the overlay/banner hidden.
@@ -497,7 +490,6 @@ function AppInner() {
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>
             <div data-testid="hero-statusbar">
-              <RuntimeBanner model={model || undefined} version={runtimeInfo.version} />
               <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
             </div>
           </div>

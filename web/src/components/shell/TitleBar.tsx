@@ -35,6 +35,7 @@ export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent 
           current={branch}
           branches={[branch]}
           onSelect={() => {}}
+          compact
         />
       </div>
 

@@ -10,10 +10,13 @@ export function GitBranchPicker({
   current,
   branches,
   onSelect,
+  compact = false,
 }: {
   current: string
   branches: string[]
   onSelect: (branch: string) => void
+  /** Compact mode for titlebar — smaller trigger, no min-width. */
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState<number>(-1)
@@ -154,7 +157,7 @@ export function GitBranchPicker({
       <button
         ref={triggerRef}
         type="button"
-        className={styles.trigger}
+        className={`${styles.trigger}${compact ? ` ${styles.triggerCompact}` : ''}`}
         data-testid="branch-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}

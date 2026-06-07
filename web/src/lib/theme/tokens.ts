@@ -300,7 +300,6 @@ export function buildTokens(input: TokenInput): Record<string, string> {
     '--r-lg': '22px',
     '--r-xl': '28px',
     // Chat surface (SP2) — mode-independent layout rhythm
-    '--measure': '760px',
     '--avatar-size': '26px',
     '--turn-gap': '28px',
     '--turn-pad': '6px',

@@ -27,18 +27,10 @@ describe('Transcript', () => {
     expect(container.querySelector('.transcript')).toBeInTheDocument()
   })
 
-  it('renders MessageTimeline when tool items are present', () => {
+  it('never duplicates tool calls into a bottom timeline (tools render inline only)', () => {
     render(<LocaleProvider><Transcript items={items} /></LocaleProvider>)
-    expect(screen.getByTestId('message-timeline')).toBeInTheDocument()
-    expect(screen.getByTestId('block-tool')).toBeInTheDocument()
-  })
-
-  it('does not render MessageTimeline when no tool items are present', () => {
-    const noTools: TranscriptItem[] = [
-      { type: 'user', text: 'hello' },
-      { type: 'assistant', text: 'hi', streaming: false },
-    ]
-    render(<LocaleProvider><Transcript items={noTools} /></LocaleProvider>)
     expect(screen.queryByTestId('message-timeline')).not.toBeInTheDocument()
+    // The tool renders exactly once, as its inline ToolCard.
+    expect(screen.getAllByText('read_file')).toHaveLength(1)
   })
 })

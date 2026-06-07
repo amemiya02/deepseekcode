@@ -90,8 +90,8 @@ button { font-family: inherit; }
 .fold__body { margin: 0; padding: var(--s-2); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 320px; overflow: auto; }
 
 /* Messages — SP2 turn layout */
-/* (a) Lane */
-.transcript__lane { width: 100%; max-width: var(--measure); margin-inline: auto; display: flex; flex-direction: column; gap: var(--turn-gap); }
+/* (a) Lane — fills the conversation zone; a modest inline pad keeps text off the edges. */
+.transcript__lane { width: 100%; padding-inline: var(--s-4); display: flex; flex-direction: column; gap: var(--turn-gap); }
 
 /* (b) Turn layout (avatar + main) */
 .msg { display: grid; grid-template-columns: var(--avatar-size) 1fr; gap: var(--s-2); align-items: start; }
@@ -205,6 +205,13 @@ button { font-family: inherit; }
 /* Inline diff approval gate (§5) — the diff island IS the gate; the action bar reads
    as its obsidian footer (reuses the P3.1 --island-* tokens). */
 .approval { display: flex; flex-direction: column; margin: var(--s-2) 0; outline: none; }
+/* Non-edit approvals: a contained command card that mirrors the diff island. */
+.approval__card { border: 1px solid var(--island-line); border-radius: var(--r-md); background: var(--island-card); box-shadow: var(--shadow-1); overflow: hidden; }
+.approval__head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3); background: var(--island-header); border-bottom: 1px solid var(--island-line-soft); color: var(--island-ink-2); }
+.approval__head svg { color: var(--island-accent); flex: none; }
+.approval__tool { font: var(--type-mono); font-weight: 600; color: var(--island-ink); }
+.approval__label { font: var(--type-label); color: var(--island-ink-3); }
+.approval__cmd { margin: 0; padding: var(--s-2) var(--s-3); font: var(--type-mono); color: var(--island-ink); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
 .approval__actions {
   display: flex; align-items: center; gap: var(--s-2);
   padding: 8px var(--s-2);
@@ -601,27 +608,6 @@ button { font-family: inherit; }
 .ds-card { transition: transform var(--motion-standard) var(--ease-standard), background var(--motion-micro) var(--ease-standard); }
 .ds-card:hover { transform: var(--lift); }
 .ds-pressable:active { transform: var(--press); }
-/* ── MessageTimeline blocks ─────────────────────────────────────────── */
-.message-timeline { display: flex; flex-direction: column; gap: var(--s-1); }
-.tl-block { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); border-radius: var(--radius-sm); font: var(--type-ui); }
-.tl-block__icon { color: var(--text-2); flex-shrink: 0; }
-.tl-block--reasoning { color: var(--text-2); font-style: italic; padding: 0 var(--s-1); }
-.tl-block__text { white-space: pre-wrap; }
-.tl-block--tool { border: 1px solid var(--border); background: var(--surface-2); }
-.tl-block--tool-running { border-color: var(--accent-dim); }
-.tl-block--tool-error { border-color: var(--danger); }
-.tl-block__name { font: var(--type-mono); font-weight: 600; color: var(--accent); }
-.tl-block__subject { color: var(--text-2); font: var(--type-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.tl-block__status { margin-left: auto; }
-.tl-block--command { flex-direction: column; align-items: stretch; border: 1px solid var(--border); background: var(--surface-2); }
-.tl-block__cmd-head { display: flex; align-items: center; gap: var(--s-2); }
-.tl-block__cmd { font: var(--type-mono); font-weight: 600; color: var(--accent); }
-.tl-block__output { margin: var(--s-1) 0 0; padding: var(--s-1) var(--s-2); border-top: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 200px; overflow: auto; }
-.tl-block--file-change { border: 1px solid var(--border); background: var(--surface-2); }
-.tl-block__path { font: var(--type-mono); color: var(--text); }
-.tl-block__counts { margin-left: auto; display: flex; gap: var(--s-1); }
-.tl-block__added { color: var(--ok); font: var(--type-mono); }
-.tl-block__removed { color: var(--danger); font: var(--type-mono); }
 .ico { vertical-align: middle; }
 .ico--ok { color: var(--ok); }
 .ico--err { color: var(--danger); }

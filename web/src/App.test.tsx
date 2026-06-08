@@ -145,6 +145,19 @@ describe('App — Wave 4 wiring', () => {
     expect((await screen.findAllByText('notes.txt')).length).toBeGreaterThanOrEqual(1)
   })
 
+  it('passes the selected composer mode to submitPrompt (yolo reaches the gateway)', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByTestId('mode-trigger'))
+    await user.click(screen.getByTestId('mode-option-yolo'))
+    await user.type(screen.getByTestId('composer-input'), 'run it')
+    await user.click(screen.getByTestId('send-stop'))
+    await waitFor(() => expect(api.submitPrompt).toHaveBeenCalled())
+    const call = (api.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(call[2]).toBe('yolo')
+  })
+
   it('shows an AskCard on ask_request and routes the answer', async () => {
     const api = await import('./lib/api')
     const user = userEvent.setup()

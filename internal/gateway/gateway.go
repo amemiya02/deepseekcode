@@ -200,6 +200,9 @@ func (h *Handler) handleCache(w http.ResponseWriter, r *http.Request) {
 type promptRequest struct {
 	Prompt    string `json:"prompt"`
 	SessionID string `json:"session_id,omitempty"`
+	// Mode is the composer's permission mode for this turn
+	// (ask | auto-edit | plan | yolo). Empty keeps the agent's current mode.
+	Mode string `json:"mode,omitempty"`
 }
 
 // promptResponse is the POST /v1/prompt response body.
@@ -263,6 +266,17 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	h.activeTurns[sessionID] = true
 	h.activeMu.Unlock()
+
+	// Apply the composer's current selections to the session's agent BEFORE the
+	// run goroutine launches (no run is active here, so plain field writes are
+	// safe — see acp.SettingsApplier). Model/effort come from the gateway state
+	// the /v1/model and /v1/effort chips mutate; the permission mode rides on
+	// the prompt itself. Without this, those endpoints only changed display
+	// state and the agent kept its construction-time config (Yolo still asked).
+	h.models.mu.Lock()
+	ts := acp.TurnSettings{Model: h.models.active, Effort: h.models.effort, PermissionMode: req.Mode}
+	h.models.mu.Unlock()
+	h.sm.ApplySettings(sessionID, ts)
 
 	// Register/refresh UI metadata so the session rail reflects sessions started
 	// by a bare prompt (previously only POST /v1/sessions registered meta, so a

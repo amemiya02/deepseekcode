@@ -256,7 +256,7 @@ function AppInner() {
 
     let sid: string
     try {
-      sid = await submitPrompt(prompt, sessionId ?? undefined)
+      sid = await submitPrompt(prompt, sessionId ?? undefined, payload.mode)
     } catch (e) {
       setStreaming(false)
       clientRef.current.close()

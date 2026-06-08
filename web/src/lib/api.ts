@@ -102,9 +102,12 @@ export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
   return (data.files ?? []) as UploadedFile[]
 }
 
-export async function submitPrompt(prompt: string, sessionId?: string): Promise<string> {
+export async function submitPrompt(prompt: string, sessionId?: string, mode?: string): Promise<string> {
   const body: Record<string, string> = { prompt }
   if (sessionId) body.session_id = sessionId
+  // Composer permission mode (ask | auto-edit | plan | yolo) — the gateway
+  // applies it to the session's agent before the turn starts.
+  if (mode) body.mode = mode
   const res = await fetch('/v1/prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -109,6 +109,24 @@ describe('App — Wave 4 wiring', () => {
     expect(api.respondPermission).toHaveBeenCalledWith('perm-1', 'once')
   })
 
+  it('queues concurrent permission requests and routes each decision in arrival order', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    await startTurn(user)
+    // The agent executes one step's tool calls in parallel — two requests can
+    // arrive back-to-back. The first must stay answerable; the second follows.
+    captured.onPermissionRequest({ id: 'perm-1', tool: 'bash', args: { command: 'cmd-one' }, options: [] })
+    captured.onPermissionRequest({ id: 'perm-2', tool: 'bash', args: { command: 'cmd-two' }, options: [] })
+    expect(await screen.findByText('cmd-one')).toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-once'))
+    expect(api.respondPermission).toHaveBeenCalledWith('perm-1', 'once')
+    // The second request surfaces as the next gate.
+    expect(await screen.findByText('cmd-two')).toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-deny'))
+    expect(api.respondPermission).toHaveBeenCalledWith('perm-2', 'deny')
+  })
+
   it('uploads attachments, references the saved paths in the prompt, and pills the user message', async () => {
     const api = await import('./lib/api')
     const user = userEvent.setup()

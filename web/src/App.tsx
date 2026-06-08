@@ -75,7 +75,7 @@ function AppInner() {
     if (!name) return
     import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels, sessionsFixture, permissionFixtures }) => {
       if (fixtures[name]) setItems(fixtures[name])
-      if (permissionFixtures[name]) setPendingPermission(permissionFixtures[name])
+      if (permissionFixtures[name]) setPendingPermissions([permissionFixtures[name]])
       setSlashCommands(demoCommands)
       setModels(demoModels)
       setModel('deepseek-chat')
@@ -124,8 +124,11 @@ function AppInner() {
     return () => { live = false }
   }, [workspaceRefreshKey])
 
-  // Wave-4 state
-  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
+  // Wave-4 state. Permissions are a QUEUE, not a single value: the agent runs
+  // one step's tool calls in parallel, so two permission_request frames can
+  // arrive back-to-back — a single value would let the second overwrite the
+  // first, orphaning its reply forever (tool spinner with nothing to click).
+  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([])
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
 
@@ -231,10 +234,14 @@ function AppInner() {
         dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
         clientRef.current.close()
         setStreaming(false)
+        // Any still-queued permission requests are moot once the turn ends
+        // (the agent is no longer parked on them) — drop them so no stale
+        // gate lingers into the next turn.
+        setPendingPermissions([])
         setWorkspaceRefreshKey((k) => k + 1)
         void loadSessions()
       },
-      onPermissionRequest: (req: PermissionRequest) => setPendingPermission(req),
+      onPermissionRequest: (req: PermissionRequest) => setPendingPermissions((q) => [...q, req]),
       onAskRequest: (req: AskRequest) => setPendingAsk(req),
       onPlanUpdate: (u: PlanUpdateEvent) => setPlanItems(u.items),
     }
@@ -270,8 +277,9 @@ function AppInner() {
   }
 
   async function onPermissionDecision(d: PermissionDecision) {
-    const req = pendingPermission
-    setPendingPermission(null)
+    const req = pendingPermissions[0]
+    // Pop the head; the next queued request (if any) becomes the visible gate.
+    setPendingPermissions((q) => q.slice(1))
     if (req) await respondPermission(req.id, d)
   }
 
@@ -292,6 +300,9 @@ function AppInner() {
       // cancellation do not fire into stale component state.
       clientRef.current.close()
       setStreaming(false)
+      // Cancellation unparks the agent from any pending gate (ctx.Done) — the
+      // queued requests can no longer be answered meaningfully.
+      setPendingPermissions([])
     }
   }
 
@@ -449,8 +460,8 @@ function AppInner() {
       <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
       <PlanTodoPanel items={planItems} onDismiss={() => setPlanItems([])} />
       {pendingAsk && <AskCard request={pendingAsk} onAnswer={onAskAnswer} onDismiss={onAskDismiss} />}
-      {pendingPermission && (
-        <ApprovalGate request={pendingPermission} onDecide={onPermissionDecision} />
+      {pendingPermissions.length > 0 && (
+        <ApprovalGate request={pendingPermissions[0]} onDecide={onPermissionDecision} />
       )}
       <Composer
         streaming={streaming}

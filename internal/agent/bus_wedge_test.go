@@ -8,13 +8,14 @@ import (
 )
 
 // Regression: the GUI gateway consumes the Bus directly (acp adapter) and never
-// calls Events(). The legacy compat bridge used to subscribe unconditionally in
-// New() and forward into the buffered eventsCompat channel with a BLOCKING send;
-// once ~512 events accumulated with no Events() consumer, the bridge goroutine
-// parked forever, its subscription buffer filled, and the next reply-carrying
-// publish (EventPermissionAsk — delivered blocking to EVERY subscriber) wedged
-// the agent goroutine. Symptom: ask-mode tool approval spins forever in the GUI
-// with no approval UI anywhere.
+// calls Events(). The compat bridge used to forward into the buffered
+// eventsCompat channel with a BLOCKING send; once ~512 events accumulated with
+// no Events() consumer, the bridge goroutine parked forever, its subscription
+// buffer filled, and the next reply-carrying publish (EventPermissionAsk —
+// delivered blocking to EVERY subscriber) wedged the agent goroutine. Symptom:
+// ask-mode tool approval spins forever in the GUI with no approval UI anywhere.
+// The bridge now forwards with ring semantics (drop-oldest when full) so it can
+// never park.
 func TestPermissionPublishWithoutEventsConsumer(t *testing.T) {
 	a := New(nil, tools.New(), nil, "")
 
@@ -44,10 +45,10 @@ func TestPermissionPublishWithoutEventsConsumer(t *testing.T) {
 	}
 }
 
-// The lazy bridge must preserve the legacy contract: a consumer that calls
-// Events() (TUI / CLI / spawn drainer) still receives every event published
+// The ring bridge must preserve the legacy contract: a consumer that calls
+// Events() (TUI / CLI / spawn drainer) still receives events published
 // after the call.
-func TestEventsCompatStillDeliversAfterLazySubscribe(t *testing.T) {
+func TestEventsCompatStillDelivers(t *testing.T) {
 	a := New(nil, tools.New(), nil, "")
 	ch := a.Events()
 	a.Bus().Publish(EventInfo{Text: "hello"})
@@ -59,5 +60,22 @@ func TestEventsCompatStillDeliversAfterLazySubscribe(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Events() compat bridge delivered nothing")
+	}
+}
+
+// Construction-time capture: events published BEFORE the first Events() call
+// are buffered and delivered (several agent tests and consumers read Events()
+// only after acting). This is the contract a lazily-installed bridge broke.
+func TestEventsCompatCapturesPrePublishedEvents(t *testing.T) {
+	a := New(nil, tools.New(), nil, "")
+	a.Bus().Publish(EventInfo{Text: "early"})
+	select {
+	case ev := <-a.Events():
+		inf, ok := ev.(EventInfo)
+		if !ok || inf.Text != "early" {
+			t.Fatalf("Events() delivered %#v, want EventInfo{early}", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("event published before the first Events() call was lost")
 	}
 }

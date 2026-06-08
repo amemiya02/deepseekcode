@@ -53,12 +53,6 @@ type Agent struct {
 	// streaming token bursts don't block the model goroutine; capacity
 	// matched to ~4 seconds of fast SSE token rate.
 	eventsCompat chan Event
-	// eventsOnce lazily installs the Events() compat bridge on first call.
-	// Embeddings that consume the Bus directly (the GUI gateway via the acp
-	// adapter) never call Events(); installing the bridge unconditionally
-	// used to wedge reply-event publishes once the unconsumed compat buffers
-	// filled (ask-mode permission hang).
-	eventsOnce sync.Once
 
 	// bus is the multi-consumer fan-out hub. The agent publishes all
 	// events through the bus; Events() returns a compatibility channel
@@ -399,6 +393,42 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 	a.bus = NewBus()
 	a.epochMgr.SetBus(a.bus)
 
+	// Events() compat bridge. Installed at construction so events published
+	// before the first Events() call are still captured (several consumers and
+	// tests rely on that). The forward into eventsCompat is NON-BLOCKING with
+	// ring semantics — when the buffer is full (an Events() consumer that fell
+	// 256 behind, or an embedding like the GUI gateway that never consumes
+	// Events() at all), the OLDEST buffered event is dropped to admit the new
+	// one. The bridge therefore never parks, its bus subscription never fills,
+	// and the blocking delivery of reply-carrying events (EventPermissionAsk /
+	// EventQuestionAsk) can never wedge the agent goroutine — the bug that froze
+	// ask-mode tool approvals in the GUI forever.
+	def := a.bus.Subscribe(256)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("agent: unpack goroutine panic: %v", r)
+			}
+		}()
+		for env := range def.C {
+			select {
+			case a.eventsCompat <- env.Event:
+			default:
+				// Full: drop the oldest to keep the newest. A consumer may race
+				// us between the pop and the push; losing that race just means
+				// the new event is dropped instead — still non-blocking either way.
+				select {
+				case <-a.eventsCompat:
+				default:
+				}
+				select {
+				case a.eventsCompat <- env.Event:
+				default:
+				}
+			}
+		}
+	}()
+
 	return a
 }
 
@@ -406,32 +436,10 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 // Consume from one goroutine; the agent guarantees in-order delivery.
 // The channel is never closed by the agent — multiple Run calls share
 // it. Consumers should select against their own ctx.Done() to exit
-// cleanly during shutdown.
-//
-// The bridge from the Bus into this channel is installed lazily on the
-// FIRST call: embeddings that consume the Bus directly (the GUI gateway)
-// never call Events(), and an unconsumed bridge is not just dead weight —
-// once its buffers fill, the blocking delivery of reply-carrying events
-// (EventPermissionAsk / EventQuestionAsk) would wedge the agent goroutine
-// forever. Callers that do use Events() (TUI, CLI, spawn drainers) call it
-// before the run starts, so they observe the same behavior as the old
-// constructor-installed bridge.
-func (a *Agent) Events() <-chan Event {
-	a.eventsOnce.Do(func() {
-		def := a.bus.Subscribe(256)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("agent: unpack goroutine panic: %v", r)
-				}
-			}()
-			for env := range def.C {
-				a.eventsCompat <- env.Event
-			}
-		}()
-	})
-	return a.eventsCompat
-}
+// cleanly during shutdown. Delivery is best-effort once a consumer falls
+// more than the buffer capacity behind (oldest events are dropped first);
+// embeddings that consume the Bus directly may ignore this channel entirely.
+func (a *Agent) Events() <-chan Event { return a.eventsCompat }
 
 // SetCacheUnit sets the DeepSeek cache block size in tokens. When non-zero,
 // buildEpochComponents pads the static system prompt so the frozen prefix

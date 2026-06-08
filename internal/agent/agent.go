@@ -53,6 +53,12 @@ type Agent struct {
 	// streaming token bursts don't block the model goroutine; capacity
 	// matched to ~4 seconds of fast SSE token rate.
 	eventsCompat chan Event
+	// eventsOnce lazily installs the Events() compat bridge on first call.
+	// Embeddings that consume the Bus directly (the GUI gateway via the acp
+	// adapter) never call Events(); installing the bridge unconditionally
+	// used to wedge reply-event publishes once the unconsumed compat buffers
+	// filled (ask-mode permission hang).
+	eventsOnce sync.Once
 
 	// bus is the multi-consumer fan-out hub. The agent publishes all
 	// events through the bus; Events() returns a compatibility channel
@@ -392,17 +398,6 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 
 	a.bus = NewBus()
 	a.epochMgr.SetBus(a.bus)
-	def := a.bus.Subscribe(256)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("agent: unpack goroutine panic: %v", r)
-			}
-		}()
-		for env := range def.C {
-			a.eventsCompat <- env.Event
-		}
-	}()
 
 	return a
 }
@@ -412,7 +407,31 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 // The channel is never closed by the agent — multiple Run calls share
 // it. Consumers should select against their own ctx.Done() to exit
 // cleanly during shutdown.
-func (a *Agent) Events() <-chan Event { return a.eventsCompat }
+//
+// The bridge from the Bus into this channel is installed lazily on the
+// FIRST call: embeddings that consume the Bus directly (the GUI gateway)
+// never call Events(), and an unconsumed bridge is not just dead weight —
+// once its buffers fill, the blocking delivery of reply-carrying events
+// (EventPermissionAsk / EventQuestionAsk) would wedge the agent goroutine
+// forever. Callers that do use Events() (TUI, CLI, spawn drainers) call it
+// before the run starts, so they observe the same behavior as the old
+// constructor-installed bridge.
+func (a *Agent) Events() <-chan Event {
+	a.eventsOnce.Do(func() {
+		def := a.bus.Subscribe(256)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("agent: unpack goroutine panic: %v", r)
+				}
+			}()
+			for env := range def.C {
+				a.eventsCompat <- env.Event
+			}
+		}()
+	})
+	return a.eventsCompat
+}
 
 // SetCacheUnit sets the DeepSeek cache block size in tokens. When non-zero,
 // buildEpochComponents pads the static system prompt so the frozen prefix

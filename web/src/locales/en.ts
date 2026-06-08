@@ -202,6 +202,8 @@ export const en: Record<string, string> = {
   'approval.deny': 'Reject',
   'approval.hint': 'Enter to accept · Backspace to reject',
   'composer.steerHint': 'Enter to steer · Esc to stop',
+  'composer.sendFailed': 'Could not send message: ',
+  'composer.uploadFailed': 'Could not upload attachments: ',
   'model.context': 'context window',
   'model.cap.reasoning': 'reasoning',
   'model.cap.tools': 'tools',

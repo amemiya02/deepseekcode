@@ -1,5 +1,5 @@
 // Adapted from deepseek-reasonix (MIT) — SettingsPanel.tsx (nav-rail + active tab + section switch).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { t } from '../../lib/i18n'
 import {
   IconPalette, IconCommand, IconModel, IconCoins, IconKey,
@@ -22,6 +22,8 @@ import { DuetSection } from './DuetSection'
 import { PermissionsSection } from './PermissionsSection'
 import { EditorSection } from './EditorSection'
 import { SessionsSection } from './SessionsSection'
+import { CapabilitiesView } from '../CapabilitiesView'
+import { fetchCapabilities } from '../../lib/api'
 import styles from './SettingsWindow.module.css'
 
 export type SettingsGroup = 'personal' | 'modelsCost' | 'coding' | 'integrations' | 'workspace' | 'system'
@@ -61,6 +63,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'network', labelKey: 'settings.network', fallback: 'Network / Proxy', group: 'integrations', icon: IconNetwork },
   { id: 'sessions', labelKey: 'settings.sessions', fallback: 'Sessions & Storage', group: 'workspace', icon: IconSessions },
   { id: 'doctor', labelKey: 'settings.doctor', fallback: 'Doctor', group: 'system', icon: IconActivity },
+  { id: 'capabilities', labelKey: 'settings.capabilities', fallback: 'Capabilities', group: 'system', icon: IconActivity },
   { id: 'about', labelKey: 'settings.about', fallback: 'About', group: 'system', icon: IconInfo },
 ]
 
@@ -132,6 +135,12 @@ export function SettingsView({ onClose }: SettingsViewProps) {
   )
 }
 
+function CapabilitiesSection() {
+  const [caps, setCaps] = useState<Record<string, boolean>>({})
+  useEffect(() => { fetchCapabilities().then(setCaps).catch(() => {}) }, [])
+  return <CapabilitiesView caps={caps} />
+}
+
 function renderSection(active: string, section: SettingsSection | undefined) {
   switch (active) {
     case 'appearance':
@@ -162,6 +171,8 @@ function renderSection(active: string, section: SettingsSection | undefined) {
       return <SessionsSection />
     case 'doctor':
       return <DoctorView />
+    case 'capabilities':
+      return <CapabilitiesSection />
     case 'about':
       return <AboutSection />
     default:

@@ -62,6 +62,12 @@ type Policy struct {
 	SecretPathPatterns []string
 	Rules              *RuleEngine // rule-based overrides (Phase 7); nil = no rules
 
+	// ConfirmEdits downgrades ModeDefault's "safe write inside cwd" auto-allow
+	// to Ask so every write_file/edit_file is confirmed. It is the GUI's "Ask"
+	// composer mode (auto-edit = ModeDefault with this off); other modes and
+	// the rule engine are unaffected.
+	ConfirmEdits bool
+
 	bashAllowlist []string // patterns like "git status *"
 }
 
@@ -156,8 +162,12 @@ func (p *Policy) Decide(c Check) (Decision, string) {
 				return Ask, "path outside cwd"
 			}
 		}
-		// Write/edit tools with all paths inside cwd and non-secret → auto-allow.
+		// Write/edit tools with all paths inside cwd and non-secret → auto-allow,
+		// unless the user chose to confirm each edit (GUI Ask mode).
 		if c.Tool.Name() == "write_file" || c.Tool.Name() == "edit_file" {
+			if p.ConfirmEdits {
+				return Ask, "ask mode: confirm each edit"
+			}
 			return Allow, "safe write inside cwd"
 		}
 	}

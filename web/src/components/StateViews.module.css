@@ -15,8 +15,14 @@
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation: none; }
 }
+.empty {
+  background: var(--elevated, transparent);
+  border-radius: var(--r-md, 8px);
+  padding: var(--s-8, 32px) var(--s-6, 24px);
+}
+.emptyIcon { color: var(--text-3); opacity: 0.7; }
 .title { color: var(--text); font: var(--type-title); margin: 0; }
-.hint { color: var(--text-3); font: var(--type-body); margin: 0; }
+.hint { color: var(--text-3); font: var(--type-body); margin: 0; margin-top: var(--s-1, 4px); }
 .error { color: var(--danger); }
 .error .msg { color: var(--danger); font: var(--type-body); margin: 0; }
 .retry {

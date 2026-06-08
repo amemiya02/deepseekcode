@@ -80,6 +80,15 @@ type EventStepFinish struct {
 	Model  string
 }
 
+// EventCacheReceipt carries the structured cache attribution for one turn.
+// The TUI accumulates these into MissCauses for the four-cause HUD.
+type EventCacheReceipt struct {
+	HitTokens   int
+	MissTokens  int
+	ResidualEst int
+	Dominant    string // "cold_first", "prefix_mut", "compact_reset", "steady"
+}
+
 // EventInfo is an out-of-band notice (retry attempt, validator
 // skipped, tool-call rate warning). Surfaced as a chat line.
 type EventInfo struct{ Text string }
@@ -184,6 +193,7 @@ func (EventTextDelta) isAgentEvent()        {}
 func (EventToolCallStart) isAgentEvent()    {}
 func (EventToolCallResult) isAgentEvent()   {}
 func (EventStepFinish) isAgentEvent()       {}
+func (EventCacheReceipt) isAgentEvent()     {}
 func (EventInfo) isAgentEvent()             {}
 func (EventBudget) isAgentEvent()           {}
 func (EventPermissionDenied) isAgentEvent() {}

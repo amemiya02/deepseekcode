@@ -102,7 +102,7 @@ describe('buildTokens', () => {
 
   it('anchors the brand light palette to the exact spec §3.2 hex', () => {
     const t = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo' })
-    expect(t['--bg']).toBe('#f5f6f8')
+    expect(t['--bg']).toBe('#f8f9fb')
     expect(t['--surface']).toBe('#ffffff')
     expect(t['--text']).toBe('#0d1016')
     expect(t['--border']).toBe('#e4e7ec')
@@ -114,7 +114,7 @@ describe('buildTokens', () => {
 
   it('anchors the dark terminal-island palette to the exact spec §3.3 hex', () => {
     const t = buildTokens({ theme: 'graphite', mode: 'dark', density: 'comfortable', accent: 'indigo' })
-    expect(t['--bg']).toBe('#0b0d13')
+    expect(t['--bg']).toBe('#0e1018')
     expect(t['--surface']).toBe('#11141d')
     expect(t['--text']).toBe('#d6dae4')
     expect(t['--border']).toBe('#1d2230')
@@ -127,8 +127,8 @@ describe('buildTokens', () => {
     expect(parseFloat(comp['--s-4'])).toBeLessThan(parseFloat(comf['--s-4']))
   })
 
-  it('emits a fixed obsidian island palette identical in every mode (spec §3 material rule)', () => {
-    const ISLAND: Record<string, string> = {
+  it('dark/HC island keeps obsidian; light island uses a light surface', () => {
+    const DARK_ISLAND: Record<string, string> = {
       '--island-bg': '#0b0d13',
       '--island-header': '#0f1320',
       '--island-card': '#11141d',
@@ -143,12 +143,20 @@ describe('buildTokens', () => {
       '--island-add-fg': '#7fe3b4',
       '--island-del-fg': '#f2a3a1',
     }
-    for (const mode of modes) {
+    // dark and HC keep the obsidian palette
+    for (const mode of ['dark', 'hc'] as const) {
       const tok = buildTokens({ theme: 'graphite', mode, density: 'comfortable', accent: 'indigo' })
-      for (const [k, v] of Object.entries(ISLAND)) {
+      for (const [k, v] of Object.entries(DARK_ISLAND)) {
         expect(tok[k], `${mode} ${k}`).toBe(v)
       }
     }
+    // light uses a light code surface (not obsidian)
+    const lightTok = buildTokens({ theme: 'graphite', mode: 'light', density: 'comfortable', accent: 'indigo' })
+    expect(lightTok['--island-bg']).toBe('#f7f8fa')
+    expect(lightTok['--island-header']).toBe('#eef0f4')
+    expect(lightTok['--island-ink']).toBe('#0d1016')
+    expect(lightTok['--island-line']).toBe('#e4e7ec')
+    expect(lightTok['--island-dot']).toBe('#4d6bfe')
   })
 
   it('high-contrast mode strengthens the border token vs dark', () => {

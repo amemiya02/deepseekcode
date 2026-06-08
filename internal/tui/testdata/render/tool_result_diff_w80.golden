@@ -1,10 +1,2 @@
-  ▌ ✓ bash: git diff (9 lines)                                              12ms
-  diff --git a/internal/agent/agent.go b/internal/agent/agent.go
-  index abc1234..def5678 100644
-  --- a/internal/agent/agent.go
-  +++ b/internal/agent/agent.go
-  @@ -10,7 +10,9 @@ func (a *Agent) runStep() {
-     10     old := a.compute()
-     10     new := a.compute()
-     11     a.foldCacheUsage(new)
-     12     return nil
+  ● bash git diff
+│ diff --git a/internal/agent/agent.go b/internal/agent/agent.go\nindex abc…

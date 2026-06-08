@@ -18,7 +18,7 @@ export function AssistantMessage({ text, streaming }: { text: string; streaming:
         </div>
         <div className="msg__body">
           {streaming ? (
-            <div className="msg__stream">{text}<span className="cursor" /></div>
+            <div className="msg__stream ds-streaming-text">{text}<span className="cursor" /></div>
           ) : (
             <Markdown text={text} />
           )}

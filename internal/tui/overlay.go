@@ -24,6 +24,9 @@ const (
 	modeMCP                  // /mcp — MCP server status overlay
 	modeLSP                  // /lsp — LSP server status overlay
 	modePermissions          // /permissions — effective policy overlay
+	modeEffort               // /effort — reasoning-effort picker (filterable)
+	modeQuitConfirm          // quit-confirm y/n dialog
+	modeFilePicker           // file-picker dialog (filterable)
 )
 
 // Named help-tab indices. They index a switch inside renderHelp, not an
@@ -56,7 +59,9 @@ type Overlay struct {
 	mcpServers   []McpServerRow
 	lspServers   []LspServerRow
 	permRows     []PermissionRow
-	filter       filterableList
+	efforts       []string // reasoning-effort rows: low, medium, high, max
+	filePickerPaths []string // file paths for the file-picker dialog
+	filter        filterableList
 }
 
 // McpServerRow is one row in the /mcp status overlay.
@@ -180,7 +185,7 @@ func (o *Overlay) PrevHelpTab() { o.SetHelpTab((o.helpTab - 1 + helpTabCount) % 
 // keys. modeTape and modeHelp are not filterable.
 func (o *Overlay) Filterable() bool {
 	switch o.mode {
-	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP:
+	case modeModels, modeSessions, modePalette, modeThemes, modeMCP, modeLSP, modeEffort, modeFilePicker:
 		return true
 	}
 	return false
@@ -293,6 +298,60 @@ func (o *Overlay) SelectedThemeID() string {
 // Themes returns the picker rows (read-only).
 func (o *Overlay) Themes() []themeOption { return o.themes }
 
+// OpenEffort switches to the reasoning-effort picker. The filterableList is
+// seeded with the four effort levels; the cursor lands on the row that matches
+// current, falling back to 0 if no match.
+func (o *Overlay) OpenEffort(current string) {
+	o.efforts = []string{"low", "medium", "high", "max"}
+	o.mode = modeEffort
+	o.cursor = 0
+	labels := make([]string, len(o.efforts))
+	copy(labels, o.efforts)
+	o.filter.SetRows(labels)
+	for i, e := range o.efforts {
+		if e == current {
+			o.cursorTo(i)
+			break
+		}
+	}
+}
+
+// SelectedEffort returns the effort level under the cursor (mapped through the
+// filter), or "" when nothing matches.
+func (o *Overlay) SelectedEffort() string {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.efforts) {
+		return o.efforts[i]
+	}
+	return ""
+}
+
+// Efforts returns the effort picker rows (read-only).
+func (o *Overlay) Efforts() []string { return o.efforts }
+
+// OpenFilePicker switches to the file-picker dialog. The filterableList is
+// seeded with the supplied repo-relative paths; the cursor lands on the first
+// row.
+func (o *Overlay) OpenFilePicker(paths []string) {
+	o.filePickerPaths = paths
+	o.mode = modeFilePicker
+	o.cursor = 0
+	labels := make([]string, len(paths))
+	copy(labels, paths)
+	o.filter.SetRows(labels)
+}
+
+// SelectedFile returns the file path under the cursor (mapped through the
+// filter), or "" when nothing matches.
+func (o *Overlay) SelectedFile() string {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.filePickerPaths) {
+		return o.filePickerPaths[i]
+	}
+	return ""
+}
+
+// FilePickerPaths returns the file-picker rows (read-only).
+func (o *Overlay) FilePickerPaths() []string { return o.filePickerPaths }
+
 // OpenMCP switches to the /mcp status overlay.
 func (o *Overlay) OpenMCP(rows []McpServerRow) {
 	o.mcpServers = rows
@@ -336,6 +395,42 @@ func (o *Overlay) OpenPermissions(rows []PermissionRow) {
 
 // Permissions returns the permission rows (read-only).
 func (o *Overlay) Permissions() []PermissionRow { return o.permRows }
+
+// quitDecision is the outcome of the quit-confirm dialog.
+type quitDecision int
+
+const (
+	quitNone quitDecision = iota
+	quitConfirmed
+	quitCancel
+)
+
+// OpenQuitConfirm switches to the quit-confirm dialog (y/n prompt).
+func (o *Overlay) OpenQuitConfirm() {
+	o.mode = modeQuitConfirm
+	o.cursor = 0
+}
+
+// QuitConfirmResolve processes a key press in the quit-confirm dialog.
+// "y"/"Y" confirms quit, "n"/"N"/"esc" cancels, anything else is ignored.
+func (o *Overlay) QuitConfirmResolve(key string) quitDecision {
+	switch key {
+	case "y", "Y":
+		o.Close()
+		return quitConfirmed
+	case "n", "N", "esc":
+		o.Close()
+		return quitCancel
+	default:
+		return quitNone
+	}
+}
+
+// renderQuitConfirm draws the quit-confirm dialog as a small centered y/n card.
+func renderQuitConfirm(t Theme, width, height int) string {
+	body := t.Hint.Render("y") + "  quit  " + t.Hint.Render("n") + "  cancel"
+	return wrapPane(t, "quit", "confirm?", body, width, height)
+}
 
 // modelOption is one row in the /models picker.
 type modelOption struct {
@@ -546,6 +641,67 @@ func renderThemesPicker(t Theme, rows []themeOption, visible []int, cursor int, 
 	}
 	header := fmt.Sprintf("%d themes · type to filter · ⏎ apply · esc cancel", len(rows))
 	return wrapPane(t, "/theme", header, b.String(), width, height)
+}
+
+// renderEffortPicker draws the reasoning-effort picker overlay. Each row is
+// simply the effort level name. The active effort is marked with *, the cursor
+// row uses selectedRow. Mirrors renderModelsPicker's structure.
+func renderEffortPicker(t Theme, efforts []string, visible []int, cursor int, filter, activeEffort string, width, height int) string {
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no effort levels match the filter)"))
+	}
+	for vi, idx := range visible {
+		effort := efforts[idx]
+		active := " "
+		if effort == activeEffort {
+			active = "*"
+		}
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s %s", active, effort)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			marker := " "
+			if effort == activeEffort {
+				marker = t.StatusGood.Render("*")
+			}
+			line := fmt.Sprintf("  %s %s", marker, t.StatusModel.Render(effort))
+			b.WriteString(line + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d levels · type to filter · ⏎ apply · esc cancel", len(efforts))
+	return wrapPane(t, "/effort", header, b.String(), width, height)
+}
+
+// renderFilePicker draws the file-picker dialog overlay. Each row shows a
+// repo-relative file path. Mirrors renderEffortPicker's structure.
+func renderFilePicker(t Theme, paths []string, visible []int, cursor int, filter string, width, height int) string {
+	rowW := width - 4
+	if rowW < 20 {
+		rowW = 20
+	}
+	var b strings.Builder
+	b.WriteString(filterLine(t, filter) + "\n\n")
+	if len(visible) == 0 {
+		b.WriteString(t.Hint.Render("(no files match the filter)"))
+	}
+	for vi, idx := range visible {
+		path := paths[idx]
+		if vi == cursor {
+			text := fmt.Sprintf("▶ %s", path)
+			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
+		} else {
+			line := fmt.Sprintf("  %s", t.StatusModel.Render(path))
+			b.WriteString(truncateCells(line, rowW) + "\n")
+		}
+	}
+	header := fmt.Sprintf("%d files · type to filter · ⏎ select · esc cancel", len(paths))
+	return wrapPane(t, "file", header, b.String(), width, height)
 }
 
 // renderSessionsPicker draws the /sessions picker overlay. visible is the

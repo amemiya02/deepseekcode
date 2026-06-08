@@ -40,6 +40,164 @@ const (
 // wider numbers simply overflow the column without breaking layout.
 const diffGutterWidth = 5
 
+// splitMinWidth is the terminal column threshold at which renderDiffAuto
+// switches from unified to side-by-side split rendering.
+const splitMinWidth = 120
+
+// renderDiffAuto renders a unified diff, automatically choosing between
+// side-by-side split layout (width >= splitMinWidth) and standard unified
+// layout (narrower terminals). The cache key includes the layout mode so
+// both variants can coexist.
+func renderDiffAuto(t Theme, src, lang string, width int) string {
+	if src == "" {
+		return ""
+	}
+	split := width >= splitMinWidth
+	if c, ok := diffCacheGet(t, src, lang, width, split); ok {
+		return c
+	}
+	var out string
+	if split {
+		out = renderSplitUncached(t, src, lang, width)
+	} else {
+		out = renderDiffUncached(t, src, lang, width)
+	}
+	diffCachePut(t, src, lang, width, split, out)
+	return out
+}
+
+// renderSplit renders a unified diff in side-by-side layout: each hunk line
+// pair is displayed as left (context + deletions) and right (context +
+// additions) columns joined by " | ". Context lines appear on both sides.
+// Meta and hunk header lines span the full width as in unified mode.
+func renderSplit(t Theme, src, lang string, width int) string {
+	if src == "" {
+		return ""
+	}
+	if c, ok := diffCacheGet(t, src, lang, width, true); ok {
+		return c
+	}
+	out := renderSplitUncached(t, src, lang, width)
+	diffCachePut(t, src, lang, width, true, out)
+	return out
+}
+
+// renderSplitUncached is the uncached implementation of renderSplit.
+func renderSplitUncached(t Theme, src, lang string, width int) string {
+	lines := strings.Split(strings.TrimRight(src, "\n"), "\n")
+
+	// Each side gets half the available width, minus the separator " | ".
+	sep := " | "
+	sideWidth := (width - len(t.Gutter()) - len(sep)) / 2
+	if sideWidth < 10 {
+		sideWidth = 10
+	}
+
+	var oldLine, newLine int
+	var b strings.Builder
+
+	for _, raw := range lines {
+		kind := classifyDiffLine(raw)
+
+		switch kind {
+		case diffHunk:
+			oldLine, newLine = parseHunkHeader(raw)
+			b.WriteString(renderHunkHeader(t, raw, width))
+			b.WriteString("\n")
+			continue
+		case diffMeta:
+			b.WriteString(renderMetaLine(t, raw, width))
+			b.WriteString("\n")
+			continue
+		}
+
+		code := stripMarker(raw)
+
+		switch kind {
+		case diffAdd:
+			// Right side shows the addition; left side is blank.
+			num := newLine
+			newLine++
+			leftPad := renderSplitBlank(t, sideWidth)
+			rightCell := renderSplitCodeCell(t, diffAdd, num, code, lang, sideWidth)
+			b.WriteString(t.Gutter() + leftPad + sep + rightCell)
+			b.WriteString("\n")
+		case diffDel:
+			// Left side shows the deletion; right side is blank.
+			num := oldLine
+			oldLine++
+			leftCell := renderSplitCodeCell(t, diffDel, num, code, lang, sideWidth)
+			rightPad := renderSplitBlank(t, sideWidth)
+			b.WriteString(t.Gutter() + leftCell + sep + rightPad)
+			b.WriteString("\n")
+		default: // diffEqual
+			// Context line appears on both sides.
+			oldNum := oldLine
+			newNum := newLine
+			oldLine++
+			newLine++
+			leftCell := renderSplitCodeCell(t, diffEqual, oldNum, code, lang, sideWidth)
+			rightCell := renderSplitCodeCell(t, diffEqual, newNum, code, lang, sideWidth)
+			b.WriteString(t.Gutter() + leftCell + sep + rightCell)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// renderSplitCodeCell renders one side of a split diff row: a line number
+// gutter followed by background-filled code text, padded to codeWidth.
+func renderSplitCodeCell(t Theme, kind diffLineKind, num int, code, lang string, codeWidth int) string {
+	bandFg, bandBg := diffBandColors(t, kind)
+
+	numWidth := 4 // Narrower gutter for split view
+	label := strconv.Itoa(num)
+	if num <= 0 {
+		label = ""
+	}
+	if len(label) < numWidth {
+		label = strings.Repeat(" ", numWidth-len(label)) + label
+	}
+
+	numStyle := lipgloss.NewStyle().Foreground(t.FgFaint)
+	if fillsEnabled(t) {
+		numStyle = numStyle.Background(t.BgWell)
+	}
+	numPart := numStyle.Render(label)
+
+	sep := " "
+	codeAreaWidth := codeWidth - numWidth - len(sep)
+	if codeAreaWidth < 1 {
+		codeAreaWidth = 1
+	}
+	codeCell := renderCodeCell(t, code, lang, bandFg, bandBg, codeAreaWidth, nil)
+
+	return numPart + sep + codeCell
+}
+
+// renderSplitBlank renders an empty side of a split diff row: a blank gutter
+// and blank code area, background-filled to match context/equal lines.
+func renderSplitBlank(t Theme, codeWidth int) string {
+	_, bg := diffBandColors(t, diffEqual)
+	numWidth := 4
+	numStyle := lipgloss.NewStyle().Foreground(t.FgFaint)
+	if fillsEnabled(t) {
+		numStyle = numStyle.Background(t.BgWell)
+	}
+	numPart := numStyle.Render(strings.Repeat(" ", numWidth))
+
+	sep := " "
+	codeAreaWidth := codeWidth - numWidth - len(sep)
+	if codeAreaWidth < 1 {
+		codeAreaWidth = 1
+	}
+	padStyle := lipgloss.NewStyle()
+	if fillsEnabled(t) {
+		padStyle = padStyle.Background(bg)
+	}
+	return numPart + sep + padStyle.Render(strings.Repeat(" ", codeAreaWidth))
+}
+
 // renderDiff renders src (a unified diff) for the given theme at the given
 // total width. The returned string is a sequence of "\n"-joined lines, each
 // already prefixed with the shared 2-cell gutter so it aligns with other
@@ -51,11 +209,11 @@ func renderDiff(t Theme, src, lang string, width int) string {
 	if src == "" {
 		return ""
 	}
-	if c, ok := diffCacheGet(t, src, lang, width); ok {
+	if c, ok := diffCacheGet(t, src, lang, width, false); ok {
 		return c
 	}
 	out := renderDiffUncached(t, src, lang, width)
-	diffCachePut(t, src, lang, width, out)
+	diffCachePut(t, src, lang, width, false, out)
 	return out
 }
 
@@ -552,20 +710,20 @@ func highlightLineOnBg(t Theme, line, lang string, bg color.Color) string {
 // the scrollback clears.
 var diffCache = NewRenderCache(64)
 
-func diffCacheKey(t Theme, src, lang string, width int) string {
+func diffCacheKey(t Theme, src, lang string, width int, split bool) string {
 	// Theme identity for the key: name + the two flags that change fills +
 	// the band colors (so a theme swap invalidates). Hash the content to keep
-	// the key bounded.
+	// the key bounded. "split" distinguishes split vs unified renders.
 	sum := sha256.Sum256([]byte(src))
 	var h uint64 = binary.BigEndian.Uint64(sum[:8])
-	return fmt.Sprintf("diff:%s:%t:%t:%s:%d:%016x:%d",
-		t.Name, t.Transparent(), t.Truecolor(), lang, width, h, len(src))
+	return fmt.Sprintf("diff:%s:%t:%t:%s:%d:%t:%016x:%d",
+		t.Name, t.Transparent(), t.Truecolor(), lang, width, split, h, len(src))
 }
 
-func diffCacheGet(t Theme, src, lang string, width int) (string, bool) {
-	return diffCache.Get(diffCacheKey(t, src, lang, width))
+func diffCacheGet(t Theme, src, lang string, width int, split bool) (string, bool) {
+	return diffCache.Get(diffCacheKey(t, src, lang, width, split))
 }
 
-func diffCachePut(t Theme, src, lang string, width int, rendered string) {
-	diffCache.Put(diffCacheKey(t, src, lang, width), rendered)
+func diffCachePut(t Theme, src, lang string, width int, split bool, rendered string) {
+	diffCache.Put(diffCacheKey(t, src, lang, width, split), rendered)
 }

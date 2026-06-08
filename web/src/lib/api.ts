@@ -86,9 +86,28 @@ export interface StreamHandlers {
   onError?: (err: Event) => void
 }
 
-export async function submitPrompt(prompt: string, sessionId?: string): Promise<string> {
+// UploadedFile is one saved chat attachment: `path` is workspace-relative and
+// is what the prompt should reference so the agent's root-confined tools can
+// read the file.
+export interface UploadedFile { name: string; path: string }
+
+// uploadFiles persists chat attachments into the workspace via POST /v1/upload
+// (multipart, repeatable "file" parts) and returns the saved paths.
+export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
+  const form = new FormData()
+  for (const f of files) form.append('file', f, f.name)
+  const res = await fetch('/v1/upload', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.files ?? []) as UploadedFile[]
+}
+
+export async function submitPrompt(prompt: string, sessionId?: string, mode?: string): Promise<string> {
   const body: Record<string, string> = { prompt }
   if (sessionId) body.session_id = sessionId
+  // Composer permission mode (ask | auto-edit | plan | yolo) — the gateway
+  // applies it to the session's agent before the turn starts.
+  if (mode) body.mode = mode
   const res = await fetch('/v1/prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -354,4 +373,107 @@ export async function fetchBalance(): Promise<Balance> {
   const res = await fetch('/v1/balance')
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   return res.json() as Promise<Balance>
+}
+
+// ---- MCP Discovery (B1) ----
+
+export interface McpToolResult {
+  server: string
+  tool: string
+  desc: string
+}
+
+export interface McpToolDetail {
+  server: string
+  tool: string
+  desc: string
+  input_schema?: Record<string, unknown>
+}
+
+export async function mcpSearch(query: string): Promise<McpToolResult[]> {
+  const res = await fetch('/v1/mcp/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.results ?? []) as McpToolResult[]
+}
+
+export async function mcpDescribe(server: string, tool: string): Promise<McpToolDetail> {
+  const res = await fetch('/v1/mcp/describe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server, tool }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<McpToolDetail>
+}
+
+export async function mcpCall(server: string, tool: string, args?: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch('/v1/mcp/call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ server, tool, args: args ?? {} }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json()
+}
+
+// ---- Wave 5: Capabilities introspection + Runtime info (B4) ----
+
+export interface RuntimeInfo {
+  model: string
+  version: string
+  caps: Record<string, boolean>
+}
+
+export async function fetchCapabilities(): Promise<Record<string, boolean>> {
+  const res = await fetch('/v1/capabilities')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  const data = await res.json()
+  return (data.caps ?? {}) as Record<string, boolean>
+}
+
+export async function fetchRuntimeInfo(): Promise<RuntimeInfo> {
+  const res = await fetch('/v1/runtime')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<RuntimeInfo>
+}
+
+// ---- Git branch introspection (B-suffix) ----
+
+export interface GitBranch {
+  name: string
+  current: boolean
+}
+
+export interface GitBranchesResult {
+  branches: GitBranch[]
+  current: string
+}
+
+export interface CheckoutResult {
+  branch: string
+  success: boolean
+  error?: string
+}
+
+/** GET /v1/git/branches — list local branches and the current branch name. */
+export async function fetchBranches(): Promise<GitBranchesResult> {
+  const res = await fetch('/v1/git/branches')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<GitBranchesResult>
+}
+
+/** POST /v1/git/checkout — switch to the given local branch. */
+export async function checkoutBranch(branch: string): Promise<CheckoutResult> {
+  const res = await fetch('/v1/git/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<CheckoutResult>
 }

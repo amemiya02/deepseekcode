@@ -162,6 +162,11 @@ func (h *Handler) handleChanged(w http.ResponseWriter, r *http.Request) {
 				}
 				code := rec[:2]
 				path := rec[3:]
+				// Chat attachments (.deepseek/uploads) are app-managed scratch,
+				// not user changes — keep them out of the review pane.
+				if strings.HasPrefix(path, ".deepseek/") || path == ".deepseek" {
+					continue
+				}
 				entries = append(entries, changedEntry{
 					Path:    filepath.ToSlash(path),
 					Status:  strings.TrimSpace(code),

@@ -25,10 +25,14 @@ beforeEach(() => {
 })
 
 describe('AppShell', () => {
-  it('renders rail + conversation always; workspace only with content', () => {
+  it('renders rail + conversation always; workspace only when pin is open', () => {
+    // Default reviewPin is 'closed' — workspace hidden even with content
     renderShell({ workspaceHasContent: true })
     expect(screen.getByTestId('zone-sessions')).toBeInTheDocument()
     expect(screen.getByTestId('zone-conversation')).toBeInTheDocument()
+    expect(screen.queryByTestId('zone-workspace')).toBeNull()
+    // Toggle to open reveals workspace
+    act(() => { useLayoutStore.getState().toggleRight(true) })
     expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
   })
 
@@ -38,8 +42,11 @@ describe('AppShell', () => {
     expect(screen.getByTestId('app-shell').getAttribute('data-workspace-collapsed')).toBe('true')
   })
 
-  it('auto-reveals the review pane when changes appear', () => {
-    renderShell({ workspaceHasContent: true })
+  it('auto-reveals the review pane when pin=open', () => {
+    renderShell({ workspaceHasContent: false })
+    expect(screen.queryByTestId('zone-workspace')).toBeNull()
+    // Toggle to open reveals workspace even without content
+    act(() => { useLayoutStore.getState().toggleRight(false) })
     expect(screen.getByTestId('zone-workspace')).toBeInTheDocument()
     expect(screen.getByTestId('app-shell').getAttribute('data-workspace-collapsed')).toBe('false')
   })

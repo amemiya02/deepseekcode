@@ -125,13 +125,35 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 		innerW = 30
 	}
 	tool := p.pending.Check.Tool.Name()
-	args := oneline(string(p.pending.Check.Args), innerW-10)
+	argsRaw := string(p.pending.Check.Args)
+	args := oneline(argsRaw, innerW-10)
 
 	// Gradient "/// permission required" accent header, with a warn glyph.
 	gradHead := ApplyBoldForegroundGrad(lipgloss.NewStyle(), "/// permission required", t.BrandDeep, t.BrandLight)
 	header := t.PermPrompt.Render("⚠ ") + gradHead
 	toolLine := t.AssistantText.Render("  tool  ") + t.StatusModel.Render(tool)
 	argsLine := t.AssistantText.Render("  args  ") + t.Hint.Render(args)
+
+	// Diff preview for edit/write tools: extract the diff payload and
+	// render it inline so the user can inspect the change before approving.
+	var diffBlock string
+	switch tool {
+	case "edit_file", "multi_edit", "apply_patch":
+		if diff := extractJSONString(argsRaw, "diff"); diff != "" {
+			diffBlock = renderDiffAuto(t, diff, "diff", innerW)
+		}
+	case "write_file":
+		if diff := extractJSONString(argsRaw, "content"); diff != "" {
+			// Derive a syntax language from the file extension.
+			lang := ""
+			if path := extractJSONString(argsRaw, "path"); path != "" {
+				if idx := strings.LastIndex(path, "."); idx >= 0 {
+					lang = path[idx+1:]
+				}
+			}
+			diffBlock = renderDiffAuto(t, diff, lang, innerW)
+		}
+	}
 
 	const btnW = 20
 	btns := []struct{ key, label string }{
@@ -161,11 +183,12 @@ func (p *PermissionFlow) Render(t Theme, width int) string {
 		header,
 		toolLine,
 		argsLine,
-		"",
-		row1,
-		row2,
-		hint,
 	}
+	if diffBlock != "" {
+		lines = append(lines, "")
+		lines = append(lines, strings.TrimRight(diffBlock, "\n"))
+	}
+	lines = append(lines, "", row1, row2, hint)
 
 	// Warn-colored left bar down the card interior: one bar glyph per line,
 	// rendered in the warn token, to flag the destructive ask.

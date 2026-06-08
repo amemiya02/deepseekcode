@@ -6,6 +6,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
 )
 
@@ -27,11 +28,57 @@ type agentIface interface {
 // and unsubscribes after Run returns.
 type AgentAdapter struct {
 	a agentIface
+
+	// real is the concrete agent when one was supplied (nil for test stubs).
+	// ApplySettings mutates it directly — the same between-turns field-write
+	// pattern the TUI's /models switch uses (cmd/dsc: a.Model = m).
+	real *agent.Agent
 }
 
 // NewAgentAdapter wraps an *agent.Agent as an AgentRunner.
 func NewAgentAdapter(a *agent.Agent) *AgentAdapter {
-	return &AgentAdapter{a: a}
+	return &AgentAdapter{a: a, real: a}
+}
+
+// ApplySettings implements SettingsApplier: it pushes the composer's
+// model/effort selection and permission mode onto the wrapped agent. Empty or
+// unrecognised values keep the agent's current state. Must only be called
+// while no run is active (the gateway applies it before launching a turn).
+func (ad *AgentAdapter) ApplySettings(ts TurnSettings) {
+	if ad.real == nil {
+		return
+	}
+	if ts.Model != "" {
+		ad.real.Model = ts.Model
+	}
+	if ts.Effort != "" {
+		if e, ok := llm.ParseReasoningEffort(ts.Effort); ok {
+			ad.real.ReasoningEffort = e
+		}
+	}
+	if ts.PermissionMode != "" && ad.real.Permissions != nil {
+		if mode, confirmEdits, ok := permissionModeFrom(ts.PermissionMode); ok {
+			ad.real.Permissions.Mode = mode
+			ad.real.Permissions.ConfirmEdits = confirmEdits
+		}
+	}
+}
+
+// permissionModeFrom maps the GUI composer vocabulary to a policy mode.
+// ask = tiered defaults with per-edit confirmation; auto-edit = plain tiered
+// defaults (safe cwd edits auto-apply); plan = read-only; yolo = allow all.
+func permissionModeFrom(ui string) (mode permissions.Mode, confirmEdits, ok bool) {
+	switch ui {
+	case "ask":
+		return permissions.ModeDefault, true, true
+	case "auto-edit":
+		return permissions.ModeDefault, false, true
+	case "plan":
+		return permissions.ModePlan, false, true
+	case "yolo":
+		return permissions.ModeYolo, false, true
+	}
+	return 0, false, false
 }
 
 // Steer forwards a mid-turn instruction to the wrapped agent.

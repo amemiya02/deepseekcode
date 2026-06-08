@@ -50,3 +50,15 @@ dsc 直接硬编码定价表（不依赖外部 pricing API），且当前数值�
 - 未在 `Prices` 表中的模型，`Cost()` 返回 0。
 - HUD（CLI 和 TUI）对未知模型显示 `¥?` 而非 `¥0.0000`。
 - NVIDIA-NIM 风格模型（如 `deepseek-ai/deepseek-v4-pro`）使用精确 map 查找，前缀不匹配天然 miss → 显示 `¥?`。
+
+## Cache block unit
+
+DeepSeek V4 的 prompt cache 以 128-token 块为单位命中，由经验测量确认（非推测）。
+
+**测量日期**: 2026-06-07
+**测量方法**: `go run ./bench/cmd/cacheprobe -model deepseek-v4-flash -min 900 -max 1300 -step 16`
+**二次确认**: `go run ./bench/cmd/cacheprobe -model deepseek-v4-flash -min 1800 -max 2100 -step 16`
+
+**结果**: `prompt_cache_hit_tokens` 在 0→128→256 之间阶梯跳变，每次增量恰好 128，证明缓存块粒度为 **128 tokens**。
+
+这与理论预测 `lcm(4, 128) = 128` 一致。该值馈入 `internal/cacheunit.AlignPadding` 用于前缀对齐。

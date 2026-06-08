@@ -145,6 +145,24 @@ type AgentRunner interface {
 // AgentFactory creates a new AgentRunner for the given working directory.
 type AgentFactory func(workingDir string) (AgentRunner, error)
 
+// TurnSettings carries the per-turn runtime knobs the UI can change between
+// turns: the active model, reasoning effort, and the composer's permission
+// mode ("ask" / "auto-edit" / "plan" / "yolo"). Empty fields mean "keep the
+// agent's current value".
+type TurnSettings struct {
+	Model          string
+	Effort         string
+	PermissionMode string
+}
+
+// SettingsApplier is an optional interface an AgentRunner may implement to
+// accept TurnSettings. Callers must only apply settings while no run is
+// active for the session (the gateway does so right before launching a turn),
+// so implementations may use plain field writes.
+type SettingsApplier interface {
+	ApplySettings(TurnSettings)
+}
+
 // session holds the state for a single ACP session.
 //
 // ctx/cancel are owned by the SessionManager and parented to the manager's
@@ -251,6 +269,21 @@ func (sm *SessionManager) Steer(id, text string) {
 	sm.mu.Unlock()
 	if ok {
 		s.runner.Steer(text)
+	}
+}
+
+// ApplySettings forwards TurnSettings to the session's runner when it
+// implements SettingsApplier; otherwise (stub runners) it is a no-op. Callers
+// must ensure no run is active for the session (see SettingsApplier).
+func (sm *SessionManager) ApplySettings(id string, ts TurnSettings) {
+	sm.mu.Lock()
+	s, ok := sm.sessions[id]
+	sm.mu.Unlock()
+	if !ok {
+		return
+	}
+	if ap, ok := s.runner.(SettingsApplier); ok {
+		ap.ApplySettings(ts)
 	}
 }
 

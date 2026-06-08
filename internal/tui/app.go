@@ -649,6 +649,18 @@ func (a *App) dispatchAgentEvent(ev agent.Event) []tea.Cmd {
 		a.status.costKnown = llm.CostKnown(a.model)
 		a.scrollback.AppendStepFinish(e.Reason.String(), e.Usage, a.model)
 		a.refreshView()
+	case agent.EventCacheReceipt:
+		// Accumulate per-cause miss tokens for the four-cause HUD.
+		switch e.Dominant {
+		case "cold_first":
+			a.status.missAccum.ColdTokens += e.MissTokens
+		case "prefix_mut":
+			a.status.missAccum.MutTokens += e.MissTokens
+		case "compact_reset":
+			a.status.missAccum.ResetTokens += e.MissTokens
+		default: // "steady" — residual is the structural floor
+			a.status.missAccum.ResidualTokens += e.ResidualEst
+		}
 	case agent.EventCompaction:
 		a.status.compactionCount++
 		a.scrollback.AppendInfo(fmt.Sprintf("compacted %d message(s)", e.RemovedCount))
@@ -943,6 +955,15 @@ func (a *App) renderOverlay() string {
 	case modePermissions:
 		body = renderPermissions(a.theme, a.overlay.Permissions(), a.width, h)
 		footerText = "esc close"
+	case modeQuitConfirm:
+		body = renderQuitConfirm(a.theme, a.width, h)
+		footerText = "y quit · n/cancel"
+	case modeEffort:
+		body = renderEffortPicker(a.theme, a.overlay.Efforts(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), string(a.agent.ReasoningEffort), a.width, h)
+		footerText = "type to filter · ⏎ apply · esc close"
+	case modeFilePicker:
+		body = renderFilePicker(a.theme, a.overlay.FilePickerPaths(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
+		footerText = "type to filter · ⏎ select · esc close"
 	}
 	return body + "\n" + overlayFooter(a.theme, footerText, a.width)
 }
@@ -1063,10 +1084,8 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch km.String() {
 	case "ctrl+c":
 		// While a run is active, ctrl+c cancels it immediately (unchanged
-		// behavior). When idle, ctrl+c is a guarded quit (G9/§6.6): the first
-		// press arms quit and shows a toast, a second press within the window
-		// quits, and a disarm tick drops the arm so a lone stray ^C never kills
-		// an idle session.
+		// behavior). When idle, ctrl+c opens the quit-confirm overlay so the
+		// user gets an explicit y/n prompt instead of an armed double-tap.
 		a.runMu.Lock()
 		running := a.running
 		cancel := a.runCancel
@@ -1085,19 +1104,19 @@ func (a *App) handleKey(km tea.KeyPressMsg) (tea.Cmd, bool) {
 			// returns a toast Cmd reporting the drop (nil when nothing queued).
 			return a.clearQueue(), true
 		}
-		if a.quitArmed {
-			return tea.Quit, true
-		}
-		a.quitArmed = true
-		a.quitSeq++
-		seq := a.quitSeq
-		toastCmd := a.toast(BadgeWarn, "press ^C again to quit")
-		disarm := tea.Tick(quitArmWindow, func(time.Time) tea.Msg {
-			return disarmQuitMsg{seq: seq}
-		})
-		return tea.Batch(toastCmd, disarm), true
+		a.overlay.OpenQuitConfirm()
+		return nil, true
 	case "ctrl+d":
-		return tea.Quit, true
+		// When idle, ctrl+d opens the quit-confirm overlay (same as ctrl+c).
+		a.overlay.OpenQuitConfirm()
+		return nil, true
+	case "ctrl+f":
+		// File picker overlay — browse and filter repo files.
+		if a.completions.Active() {
+			return nil, true
+		}
+		a.overlay.OpenFilePicker(a.fileIndex)
+		return nil, true
 	case "ctrl+p":
 		// Command palette (G5) — from both Insert and Normal mode. ctrl+p is
 		// otherwise unbound; this never collides with the reasoning folds on
@@ -1616,13 +1635,12 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		a.overlay.OpenModels(a.model)
 	case "/effort":
 		if len(fields) < 2 {
-			// Show current effort and allowed values.
+			// Open the effort picker overlay.
 			cur := a.agent.ReasoningEffort
 			if !cur.Valid() {
 				cur = llm.ReasoningEffortMax
 			}
-			a.scrollback.AppendInfo(fmt.Sprintf("effort: %s (allowed: low, medium, high, max)", cur))
-			a.refreshView()
+			a.overlay.OpenEffort(string(cur))
 			return nil
 		}
 		// Reject while running.
@@ -1975,12 +1993,25 @@ func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 		return a.handleFilterableOverlayKey(km)
 	}
 
+	// modeQuitConfirm has its own y/n/esc semantics; delegate before the
+	// generic esc/q close so "q" is not auto-quit here.
+	if a.overlay.Mode() == modeQuitConfirm {
+		switch a.overlay.QuitConfirmResolve(km.String()) {
+		case quitConfirmed:
+			return tea.Quit
+		case quitCancel:
+			return nil
+		}
+		return nil // quitNone: ignore unrecognized keys
+	}
+
 	switch km.String() {
 	case "esc", "q":
 		a.overlay.Close()
 		return nil
 	case "ctrl+c":
-		return tea.Quit
+		a.overlay.OpenQuitConfirm()
+		return nil
 	case "tab", "right", "l":
 		if a.overlay.Mode() == modeHelp {
 			a.overlay.NextHelpTab()
@@ -2012,7 +2043,8 @@ func (a *App) handleOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 func (a *App) handleFilterableOverlayKey(km tea.KeyPressMsg) tea.Cmd {
 	switch km.String() {
 	case "ctrl+c":
-		return tea.Quit
+		a.overlay.OpenQuitConfirm()
+		return nil
 	case "esc":
 		if a.overlay.FilterClear() {
 			// Filter was non-empty and is now cleared; re-preview the current
@@ -2090,6 +2122,26 @@ func (a *App) acceptOverlaySelection() tea.Cmd {
 		a.overlay.Close()
 		if id != "" {
 			return a.applyThemeSwitch(id)
+		}
+	case modeEffort:
+		effort := a.overlay.SelectedEffort()
+		a.overlay.Close()
+		if effort != "" {
+			newEffort, ok := llm.ParseReasoningEffort(effort)
+			if ok {
+				old := a.agent.ReasoningEffort
+				a.agent.ReasoningEffort = newEffort
+				a.status.reasoningEffort = newEffort
+				a.scrollback.AppendInfo(fmt.Sprintf("effort: %s -> %s", old, newEffort))
+				a.refreshView()
+			}
+		}
+	case modeFilePicker:
+		path := a.overlay.SelectedFile()
+		a.overlay.Close()
+		if path != "" {
+			a.scrollback.AppendInfo("selected: " + path)
+			a.refreshView()
 		}
 	}
 	return nil

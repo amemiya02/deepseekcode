@@ -3,6 +3,7 @@ import { ReviewPanel } from './components/ReviewPanel'
 import { TelemetryStrip } from './components/TelemetryStrip'
 import { SessionRail } from './components/SessionRail'
 import { StatusBarLive } from './components/StatusBarLive'
+
 import { SettingsView } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -23,36 +24,37 @@ import { fetchOnboarding, fetchUpdate, type UpdateInfo } from './lib/system'
 import { fetchChanged } from './lib/workspace'
 import { Transcript } from './components/Transcript'
 import { Composer, type ComposerPayload } from './components/Composer'
-import { PermissionModal } from './components/PermissionModal'
 import { ApprovalGate } from './components/ApprovalGate'
 import { AskCard } from './components/AskCard'
 import { PlanTodoPanel } from './components/PlanTodoPanel'
+
 import {
   GatewayClient,
   submitPrompt,
   steerTurn,
+  uploadFiles,
   respondPermission,
   respondAnswer,
   cancelTurn,
   renameSession,
   fetchModelState,
+
   setModel as apiSetModel,
   setEffort as apiSetEffort,
   EFFORT_LEVELS,
 } from './lib/api'
 import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, PlanItem, ToolStartEvent, ToolDeltaEvent, ToolEndEvent, RoutingEvent, DuetEvent, TurnDoneEvent, PlanUpdateEvent, ModelInfo } from './lib/api'
-import { isEditApproval } from './lib/approval'
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
 import type { AutonomyMode } from './lib/autonomy'
+import { useGitBranches } from './lib/useGitBranches'
 import styles from './components/shell/index.module.css'
-
-const EMPTY_PERMISSION: PermissionRequest = { id: '', tool: '', args: {}, options: [] }
 
 // AppInner lives under LocaleProvider so hooks (useT/useLocale) have their context.
 function AppInner() {
   const t = useT()
   const { locale, setLocale } = useLocale()
+  const git = useGitBranches()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Turn state
@@ -75,7 +77,7 @@ function AppInner() {
     if (!name) return
     import('./lib/devFixtures').then(({ fixtures, demoCommands, demoModels, sessionsFixture, permissionFixtures }) => {
       if (fixtures[name]) setItems(fixtures[name])
-      if (permissionFixtures[name]) setPendingPermission(permissionFixtures[name])
+      if (permissionFixtures[name]) setPendingPermissions([permissionFixtures[name]])
       setSlashCommands(demoCommands)
       setModels(demoModels)
       setModel('deepseek-chat')
@@ -124,10 +126,14 @@ function AppInner() {
     return () => { live = false }
   }, [workspaceRefreshKey])
 
-  // Wave-4 state
-  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
+  // Wave-4 state. Permissions are a QUEUE, not a single value: the agent runs
+  // one step's tool calls in parallel, so two permission_request frames can
+  // arrive back-to-back — a single value would let the second overwrite the
+  // first, orphaning its reply forever (tool spinner with nothing to click).
+  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([])
   const [pendingAsk, setPendingAsk] = useState<AskRequest | null>(null)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
+
 
   // Wave-3 state: sessions zone
   const sessions = useSessionStore((s) => s.sessions)
@@ -138,11 +144,10 @@ function AppInner() {
   const removeSession = useSessionStore((s) => s.remove)
   const setActiveSession = useSessionStore((s) => s.setActive)
 
-  // Wave-6 state: settings / onboarding / update banner
+  // Wave-6 state: settings / onboarding / update banner / runtime info
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
-
   const clientRef = useRef(new GatewayClient())
 
   // Window-level Cmd/Ctrl+K opens the palette.
@@ -178,13 +183,39 @@ function AppInner() {
   }, [])
 
   async function handleSubmit(payload: ComposerPayload) {
+    // Attachments: persist them into the workspace FIRST (the agent's tools are
+    // root-confined, so only files under the workspace root are readable), then
+    // reference the saved paths in the prompt. The transcript shows the original
+    // text plus one pill per attachment; the model sees the paths.
+    let prompt = payload.text
+    const pills = [...payload.pills]
+    if (payload.files.length > 0) {
+      let saved: Awaited<ReturnType<typeof uploadFiles>>
+      try {
+        saved = await uploadFiles(payload.files)
+      } catch (e) {
+        pushToast({
+          kind: 'danger',
+          message: t('composer.uploadFailed', 'Could not upload attachments: ') + (e instanceof Error ? e.message : String(e)),
+        })
+        return
+      }
+      pills.push(...saved.map((f) => f.name))
+      prompt = (
+        prompt +
+        '\n\n[Attached files — saved inside the workspace. Read them with the read_file tool' +
+        ' (or bash for binary formats such as PDF):]\n' +
+        saved.map((f) => `- ${f.path}`).join('\n')
+      ).trim()
+    }
+
     if (streaming && sessionId) {
       // Mid-turn steering: redirect the live turn instead of starting a new one.
-      void steerTurn(sessionId, payload.text).catch(() => {})
-      dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+      void steerTurn(sessionId, prompt).catch(() => {})
+      dispatch({ kind: 'user', text: payload.text, pills })
       return
     }
-    dispatch({ kind: 'user', text: payload.text, pills: payload.pills })
+    dispatch({ kind: 'user', text: payload.text, pills })
     setStreaming(true)
 
     // The stream handlers are identical regardless of when we connect; extract
@@ -205,10 +236,14 @@ function AppInner() {
         dispatch({ kind: 'turn_done', stop_reason: e.stop_reason })
         clientRef.current.close()
         setStreaming(false)
+        // Any still-queued permission requests are moot once the turn ends
+        // (the agent is no longer parked on them) — drop them so no stale
+        // gate lingers into the next turn.
+        setPendingPermissions([])
         setWorkspaceRefreshKey((k) => k + 1)
         void loadSessions()
       },
-      onPermissionRequest: (req: PermissionRequest) => setPendingPermission(req),
+      onPermissionRequest: (req: PermissionRequest) => setPendingPermissions((q) => [...q, req]),
       onAskRequest: (req: AskRequest) => setPendingAsk(req),
       onPlanUpdate: (u: PlanUpdateEvent) => setPlanItems(u.items),
     }
@@ -223,7 +258,7 @@ function AppInner() {
 
     let sid: string
     try {
-      sid = await submitPrompt(payload.text, sessionId ?? undefined)
+      sid = await submitPrompt(prompt, sessionId ?? undefined, payload.mode)
     } catch (e) {
       setStreaming(false)
       clientRef.current.close()
@@ -244,8 +279,9 @@ function AppInner() {
   }
 
   async function onPermissionDecision(d: PermissionDecision) {
-    const req = pendingPermission
-    setPendingPermission(null)
+    const req = pendingPermissions[0]
+    // Pop the head; the next queued request (if any) becomes the visible gate.
+    setPendingPermissions((q) => q.slice(1))
     if (req) await respondPermission(req.id, d)
   }
 
@@ -266,6 +302,9 @@ function AppInner() {
       // cancellation do not fire into stale component state.
       clientRef.current.close()
       setStreaming(false)
+      // Cancellation unparks the agent from any pending gate (ctx.Done) — the
+      // queued requests can no longer be answered meaningfully.
+      setPendingPermissions([])
     }
   }
 
@@ -409,8 +448,6 @@ function AppInner() {
     </div>
   )
 
-  const editApproval = isEditApproval(pendingPermission)
-
   // Capability-driven effort: derive the active model's effort descriptor and
   // the levels to pass to Composer (→ EffortSwitcher). kind 'none' → [] hides
   // the effort chip; otherwise use the model's advertised levels, falling back
@@ -425,8 +462,8 @@ function AppInner() {
       <Transcript items={items} rewindHandlers={{ onRewind, onFork, onSummarize }} />
       <PlanTodoPanel items={planItems} onDismiss={() => setPlanItems([])} />
       {pendingAsk && <AskCard request={pendingAsk} onAnswer={onAskAnswer} onDismiss={onAskDismiss} />}
-      {pendingPermission && editApproval && (
-        <ApprovalGate request={pendingPermission} onDecide={onPermissionDecision} />
+      {pendingPermissions.length > 0 && (
+        <ApprovalGate request={pendingPermissions[0]} onDecide={onPermissionDecision} />
       )}
       <Composer
         streaming={streaming}
@@ -442,11 +479,6 @@ function AppInner() {
         effortLevels={effortLevels}
         onModelChange={onModelChange}
         onEffortChange={onEffortChange}
-      />
-      <PermissionModal
-        open={pendingPermission !== null && !editApproval}
-        request={pendingPermission ?? EMPTY_PERMISSION}
-        onDecide={onPermissionDecision}
       />
     </div>
   )
@@ -466,7 +498,7 @@ function AppInner() {
         ) : (
           <div className={styles.appRoot}>
             {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
-            <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} workspaceHasContent={hasChanges} />
+            <TitleBar branch={git.current || 'main'} branches={git.branches} onBranchSelect={git.checkout} onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} workspaceHasContent={hasChanges} />
             <div className={styles.appBody}>
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>

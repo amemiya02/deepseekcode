@@ -13,7 +13,8 @@
   align-items: center;
   gap: 6px;
   padding: 3px 6px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -22,9 +23,6 @@
   border-radius: 4px;
   color: var(--text);
   transition: background 0.1s;
-}
-.row:hover {
-  background: var(--elevated, rgba(0,0,0,0.06));
 }
 .row[aria-current='true'] {
   background: color-mix(in oklch, var(--accent, #4d6bfe) 12%, var(--surface, #fff));
@@ -79,6 +77,50 @@
   color: var(--danger);
   font-size: 0.72rem;
   flex-shrink: 0;
+}
+.rowWrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 0;
+  border-radius: 4px;
+}
+.rowWrap:hover {
+  background: var(--elevated, rgba(0,0,0,0.06));
+}
+.reviewBadge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badgeApproved {
+  color: var(--success, #22c55e);
+  background: color-mix(in oklch, var(--success, #22c55e) 12%, transparent);
+}
+.badgeRejected {
+  color: var(--danger, #ef4444);
+  background: color-mix(in oklch, var(--danger, #ef4444) 12%, transparent);
+}
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  color: var(--text-3, #888);
+  transition: background 0.1s, color 0.1s;
+}
+.actionBtn:hover {
+  background: var(--elevated, rgba(0,0,0,0.08));
+  color: var(--text);
 }
 .empty,
 .error {

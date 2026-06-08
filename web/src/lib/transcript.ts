@@ -50,6 +50,10 @@ function closeOpenThinking(items: TranscriptItem[], at: number): TranscriptItem[
   return items
 }
 
+// Strip cache/cost telemetry lines that the backend appends to message deltas.
+// Pattern: "turn=N epoch=N cause=... hit=N miss=N residual=N cost=¥X saved=¥X"
+const TELEMETRY_RE = /\s*turn=\d+\s+epoch=\d+\s+cause=\S+\s+hit=\d+\s+miss=\d+\s+residual=\d+\s+cost=¥[\d.]+\s+saved=¥[\d.]+.*$/
+
 export function applyEvent(
   items: TranscriptItem[],
   e: TranscriptEvent,
@@ -60,14 +64,16 @@ export function applyEvent(
     case 'user':
       return [...closeOpenThinking(items, now()), { type: 'user', text: e.text, pills: e.pills }]
     case 'message_delta': {
+      const clean = e.text.replace(TELEMETRY_RE, '')
+      if (!clean) return items
       const base = closeOpenThinking(items, now())
       const tail = base[base.length - 1]
       if (tail && tail.type === 'assistant' && tail.streaming) {
         const updated = base.slice()
-        updated[updated.length - 1] = { ...tail, text: tail.text + e.text }
+        updated[updated.length - 1] = { ...tail, text: tail.text + clean }
         return updated
       }
-      return [...base, { type: 'assistant', text: e.text, streaming: true }]
+      return [...base, { type: 'assistant', text: clean, streaming: true }]
     }
     case 'thinking_delta':
       if (last && last.type === 'thinking' && last.endedAt == null) {

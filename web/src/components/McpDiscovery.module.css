@@ -1,0 +1,71 @@
+.container { display: flex; flex-direction: column; gap: var(--s-3, 12px); }
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface);
+}
+
+.searchBox input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: var(--type-body);
+}
+
+.searchBox input::placeholder { color: var(--text-3); }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  background: var(--surface);
+}
+
+.rowMain { flex: 1; min-width: 0; }
+
+.rowHeader { display: flex; align-items: center; gap: 8px; }
+
+.toolName { color: var(--text); font: var(--type-ui); font-weight: 500; }
+
+.serverBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--r-sm, 4px);
+  background: var(--elevated);
+  color: var(--text-3);
+  font: var(--type-label);
+  font-family: var(--type-mono-family);
+}
+
+.desc { color: var(--text-3); font: var(--type-label); margin-top: 2px; }
+
+.callBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+  font: var(--type-ui);
+  flex-shrink: 0;
+}
+
+.callBtn:hover {
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+}

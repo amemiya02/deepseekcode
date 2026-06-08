@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { Composer, type ComposerPayload } from './Composer'
@@ -31,6 +31,31 @@ describe('Composer', () => {
     expect(sent).toHaveLength(1)
     expect(sent[0].text).toBe('fix the bug')
     expect((input as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('IME: Enter during composition or right after compositionend never sends; a later Enter does', async () => {
+    const sent: ComposerPayload[] = []
+    wrap(<Composer streaming={false} mode="ask" commands={commands} onSend={(p) => sent.push(p)} onCancel={() => {}} onModeChange={() => {}} />)
+    const input = screen.getByTestId('composer-input')
+    await userEvent.type(input, 'hello')
+
+    // Chrome path: keydown arrives with isComposing/229 while composing.
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229, isComposing: true })
+    expect(sent).toHaveLength(0)
+
+    // WebKit path: compositionend fires FIRST, then the confirming Enter lands
+    // with isComposing already false — it must still be swallowed.
+    fireEvent.compositionStart(input)
+    fireEvent.keyDown(input, { key: 'Enter' }) // mid-composition (composingRef)
+    fireEvent.compositionEnd(input)
+    fireEvent.keyDown(input, { key: 'Enter' }) // confirm keystroke (time window)
+    expect(sent).toHaveLength(0)
+
+    // A genuinely separate Enter (well past the window) sends.
+    await new Promise((r) => setTimeout(r, 90))
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(sent).toHaveLength(1)
+    expect(sent[0].text).toBe('hello')
   })
 
   it('streaming: the send control becomes Stop and fires onCancel', async () => {

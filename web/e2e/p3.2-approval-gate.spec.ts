@@ -3,14 +3,15 @@
  *
  * Asserts the spec §5 routing: an EDIT permission request (edit_file / write_file /
  * apply_patch) renders as an INLINE obsidian diff approval gate in the conversation,
- * while a non-edit request (bash command) keeps the generic PermissionModal.
+ * while a non-edit request (bash command) renders the INLINE command card — there is
+ * no blocking PermissionModal anywhere anymore (Codex/Claude-style inline approvals).
  *
  * Two fixtures are exercised in BOTH light AND dark app modes:
  *   1. ?fixture=approval      — edit_file → [data-testid="approval-gate"] containing a
  *      `.island` whose computed background is obsidian rgb(11, 13, 19); shows the path
- *      `src/parser.ts`; approve-once / approve-deny buttons present; NO PermissionModal.
- *   2. ?fixture=approval-cmd  — bash → NO inline approval-gate; the PermissionModal
- *      (role="dialog" aria-label="permission request") IS shown.
+ *      `src/parser.ts`; approve-once / approve-deny buttons present; NO modal.
+ *   2. ?fixture=approval-cmd  — bash → the same approval-gate, now containing the
+ *      [data-testid="approval-cmd"] command card with the bare command; NO modal.
  *
  * Mirrors the harness established in sp5-review.spec.ts / p3.1-island-material.spec.ts:
  *   - No webServer block — requires `npm run dev` on :5173
@@ -92,21 +93,28 @@ for (const mode of ['light', 'dark'] as const) {
     await page.screenshot({ path: path.join(DIR, `approval-gate-${mode}.png`), fullPage: false })
   })
 
-  // ── Command approval: keeps the PermissionModal, no inline gate ───────────
-  test(`approval ${mode} — bash command keeps the PermissionModal`, async ({ page }) => {
+  // ── Command approval: the same inline gate, with the command card ─────────
+  test(`approval ${mode} — bash command renders the inline command card`, async ({ page }) => {
     await setup(page, mode)
     await page.goto('/?fixture=approval-cmd')
 
-    // The PermissionModal dialog must be shown for a non-edit (bash) request.
-    const dialog = page.locator('[role="dialog"][aria-label="permission request"]')
-    await expect(dialog).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByTestId('perm-backdrop')).toBeVisible()
+    // The inline gate mounts with the command preview card (never a modal).
+    const gate = page.getByTestId('approval-gate')
+    await expect(gate).toBeVisible({ timeout: 15_000 })
+    await expect(gate.getByTestId('approval-cmd')).toBeVisible()
+    await expect(gate.locator('.approval__tool')).toHaveText('bash')
+    await expect(gate.locator('.approval__cmd')).toHaveText('rm -rf build/')
 
-    // The inline approval gate must NOT render for a command request.
-    expect(await page.$('[data-testid="approval-gate"]')).toBeNull()
+    // The action bar exposes allow-once + reject directly.
+    await expect(gate.getByTestId('approve-once')).toBeVisible()
+    await expect(gate.getByTestId('approve-deny')).toBeVisible()
 
-    // Let the modal mount/transition settle so the PNG captures the rendered dialog.
+    // The screen-blanking PermissionModal is gone for every tool.
+    expect(await page.$('[data-testid="perm-backdrop"]')).toBeNull()
+    expect(await page.$('[role="dialog"][aria-label="permission request"]')).toBeNull()
+
+    // Let the mount/transition settle so the PNG captures the rendered card.
     await page.waitForTimeout(400)
-    await page.screenshot({ path: path.join(DIR, `approval-modal-${mode}.png`), fullPage: false })
+    await page.screenshot({ path: path.join(DIR, `approval-cmd-${mode}.png`), fullPage: false })
   })
 }

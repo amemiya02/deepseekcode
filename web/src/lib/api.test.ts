@@ -14,6 +14,19 @@ describe('submitPrompt', () => {
       expect.objectContaining({ method: 'POST' }),
     )
   })
+
+  it('sends the composer permission mode in the body', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ session_id: 'sess-1' }),
+    }) as unknown as typeof fetch
+    await submitPrompt('hello', undefined, 'yolo')
+    const body = JSON.parse(
+      (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string,
+    )
+    expect(body.mode).toBe('yolo')
+    expect(body.session_id).toBeUndefined()
+  })
 })
 
 // A fake EventSource that fires every event type whose name is a key of `fire`.

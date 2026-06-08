@@ -42,7 +42,7 @@ export function AskCard({
     onAnswer?.({ id: request.id, questionIndex: qi, text: drafts[qi] ?? '' })
 
   return (
-    <div className={styles.card} role="group" aria-label={t('ask.aria', 'agent question')}>
+    <div className={`${styles.card} ds-card`} role="group" aria-label={t('ask.aria', 'agent question')}>
       {request.questions.map((q: AskQuestion, qi: number) => (
         <div className={styles.q} key={qi}>
           {q.header && <div className={styles.header}>{q.header}</div>}

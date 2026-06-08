@@ -2,10 +2,11 @@
   display: flex;
   align-items: center;
   gap: var(--s-2, 8px);
-  padding: var(--s-1, 4px) var(--s-3, 12px);
-  background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+  padding: 2px var(--s-3, 12px);
+  background: color-mix(in oklch, var(--elevated) 80%, transparent);
+  backdrop-filter: blur(var(--glass-blur, 12px));
+  border-top: 1px solid var(--glass-edge, color-mix(in oklch, var(--text) 6%, transparent));
   color: var(--text-2);
-  border-bottom: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border));
   font: var(--type-label);
 }
 .text { flex: 1; }

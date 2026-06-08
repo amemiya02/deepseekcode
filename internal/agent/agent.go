@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/agents"
+	"github.com/amemiya02/deepseekcode/internal/cache"
 	"github.com/amemiya02/deepseekcode/internal/cacheunit"
 	"github.com/amemiya02/deepseekcode/internal/gitctx"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
@@ -156,6 +157,22 @@ type Agent struct {
 
 	prefixMon *llm.PrefixMonitor
 	epochMgr  *EpochManager
+
+	// prevStaticPrefix tracks the previous turn's StaticPrefix for cache
+	// attribution (cache.Attribute). nil on the first turn → CauseColdFirst.
+	prevStaticPrefix *llm.StaticPrefix
+	// prevCacheEpoch tracks the previous turn's compaction epoch number for
+	// cache attribution. 0 until the first turn completes.
+	prevCacheEpoch cache.Epoch
+	// cacheEpoch is a monotonic counter bumped ONLY at compaction — the single
+	// deliberate cache-reset point. A change between two turns means the whole
+	// prefix was re-prefilled. It is process-local (not persisted across sessions).
+	cacheEpoch cacheEpochCounter
+
+	// compactionMetrics tracks compaction frequency and cost for observability.
+	// Count() is surfaced via trace-inspect so operators can see how often
+	// compaction fires and what it costs.
+	compactionMetrics compactionMetrics
 
 	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
 	DisablePrefixEpoch bool
@@ -375,6 +392,17 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 
 	a.bus = NewBus()
 	a.epochMgr.SetBus(a.bus)
+
+	// Events() compat bridge. Installed at construction so events published
+	// before the first Events() call are still captured (several consumers and
+	// tests rely on that). The forward into eventsCompat is NON-BLOCKING with
+	// ring semantics — when the buffer is full (an Events() consumer that fell
+	// 256 behind, or an embedding like the GUI gateway that never consumes
+	// Events() at all), the OLDEST buffered event is dropped to admit the new
+	// one. The bridge therefore never parks, its bus subscription never fills,
+	// and the blocking delivery of reply-carrying events (EventPermissionAsk /
+	// EventQuestionAsk) can never wedge the agent goroutine — the bug that froze
+	// ask-mode tool approvals in the GUI forever.
 	def := a.bus.Subscribe(256)
 	go func() {
 		defer func() {
@@ -383,7 +411,21 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 			}
 		}()
 		for env := range def.C {
-			a.eventsCompat <- env.Event
+			select {
+			case a.eventsCompat <- env.Event:
+			default:
+				// Full: drop the oldest to keep the newest. A consumer may race
+				// us between the pop and the push; losing that race just means
+				// the new event is dropped instead — still non-blocking either way.
+				select {
+				case <-a.eventsCompat:
+				default:
+				}
+				select {
+				case a.eventsCompat <- env.Event:
+				default:
+				}
+			}
 		}
 	}()
 
@@ -394,8 +436,16 @@ func New(client *llm.Client, reg *tools.Registry, pol *permissions.Policy, model
 // Consume from one goroutine; the agent guarantees in-order delivery.
 // The channel is never closed by the agent — multiple Run calls share
 // it. Consumers should select against their own ctx.Done() to exit
-// cleanly during shutdown.
+// cleanly during shutdown. Delivery is best-effort once a consumer falls
+// more than the buffer capacity behind (oldest events are dropped first);
+// embeddings that consume the Bus directly may ignore this channel entirely.
 func (a *Agent) Events() <-chan Event { return a.eventsCompat }
+
+// SetCacheUnit sets the DeepSeek cache block size in tokens. When non-zero,
+// buildEpochComponents pads the static system prompt so the frozen prefix
+// ends on a cache-unit boundary (§3.4). Must be called before the first Run.
+// Zero (the default) disables padding entirely.
+func (a *Agent) SetCacheUnit(unit int) { a.cacheUnit = unit }
 
 // Bus returns the agent's event bus. Additional consumers (loggers,
 // parity recorders, future daemons) subscribe via Bus().Subscribe
@@ -881,6 +931,8 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+				a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+				a.compactionMetrics.record(res.SummaryCost) // M3: track compaction frequency + cost
 				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
 				// the model no longer holds those files' contents — force a
@@ -930,6 +982,8 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
+	a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+	a.compactionMetrics.record(0) // M3: deterministic compaction has no LLM cost
 	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
 	a.Tools.FileTracker().Clear()
@@ -1082,10 +1136,11 @@ func (a *Agent) buildEpochComponents() EpochComponents {
 	// is inside the frozen, fingerprinted prefix and stays byte-stable across
 	// turns. unit comes from a cacheprobe measurement; 0 (default) = disabled, in
 	// which case staticSystem is exactly a.staticSystem() — zero behavior change.
+	// PadTextConcat measures the full concatenated string (not count(A)+count(B)),
+	// so it is correct even when the tokenizer merges boundary tokens.
 	staticSystem := a.staticSystem()
 	if a.cacheUnit > 0 {
-		pre := tokenizer.Count(staticSystem)
-		staticSystem += cacheunit.PadText(pre, a.cacheUnit, tokenizer.Count)
+		staticSystem += cacheunit.PadTextConcat(staticSystem, a.cacheUnit, tokenizer.Count)
 	}
 
 	return EpochComponents{
@@ -1401,6 +1456,47 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// the prior ratio untouched.
 	a.calibrateCharsPerToken(req.Messages, sr.usage)
 	a.learnStaticResidual(sr.usage.PromptTokens, req.Messages)
+
+	// Cache attribution: classify why this turn's cache behaved as it did.
+	// Defensive copy of tools slice so later mutation cannot retroactively
+	// change what we compare against on the next turn (same pattern as
+	// PrefixMonitor.pin).
+	curStaticPrefix := llm.StaticPrefix{System: staticSys}
+	if len(req.Tools) > 0 {
+		curStaticPrefix.Tools = append([]llm.Tool(nil), req.Tools...)
+	}
+	// M3: the compaction epoch is a process-local counter bumped ONLY at
+	// compaction. After the LLM call (and any compaction it triggered),
+	// a.cacheEpoch.value() reflects whether the prefix was rewritten this turn.
+	curCacheEpoch := cache.Epoch(a.cacheEpoch.value())
+	// TailTokens: the conversation messages' token count (the post-prefix
+	// tail). When Unit > 0, ResidualEst = TailTokens % Unit gives the
+	// structural floor of wasted tokens in the incomplete tail block.
+	tailTokens := EstimateInputTokens(a.Messages, a.charsPerToken)
+	receipt := cache.Attribute(cache.Input{
+		Turn:       a.turnsSeen,
+		Model:      respModel,
+		Prev:       a.prevStaticPrefix,
+		Cur:        curStaticPrefix,
+		PrevEpoch:  a.prevCacheEpoch,
+		CurEpoch:   curCacheEpoch,
+		Unit:       a.cacheUnit,
+		TailTokens: tailTokens,
+		Usage:      sr.usage,
+	})
+	// Publish the structured receipt so the TUI can accumulate per-cause
+	// miss tokens for the four-cause HUD.
+	a.bus.Publish(EventCacheReceipt{
+		HitTokens:   receipt.HitTokens,
+		MissTokens:  receipt.MissTokens,
+		ResidualEst: receipt.ResidualEst,
+		Dominant:    string(receipt.Dominant),
+	})
+	// NOTE: this fires every turn. If noise becomes a problem, gate behind
+	// a verbose/debug flag when one is added to Agent.
+	a.EmitInfo(cache.ReceiptLine(receipt))
+	a.prevStaticPrefix = &curStaticPrefix
+	a.prevCacheEpoch = curCacheEpoch
 
 	return StepRecord{
 		FinishReason:      sr.finish,
@@ -2637,3 +2733,36 @@ func (a *Agent) Close() {
 
 var _ tools.JobController = (*Agent)(nil)
 var _ tools.JobStatusController = (*Agent)(nil)
+
+// cacheEpochCounter is a monotonic counter bumped ONLY at compaction — the
+// single deliberate cache-reset point. A change between two turns means the
+// whole prefix was re-prefilled. It is process-local (not persisted across
+// sessions), so it always starts at 0 in a fresh agent.
+type cacheEpochCounter struct {
+	n int
+}
+
+func (e *cacheEpochCounter) value() int                { return e.n }
+func (e *cacheEpochCounter) afterCompaction()          { e.n++ }
+func (e *cacheEpochCounter) afterTurnNoCompaction() {} // no-op
+
+// compactionMetrics tracks compaction frequency and cost for observability.
+// Count() is surfaced via trace-inspect so operators can see how often
+// compaction fires and what it costs. Process-local (not persisted).
+type compactionMetrics struct {
+	count       int
+	lastCostCNY float64
+}
+
+func (m *compactionMetrics) record(costCNY float64) {
+	m.count++
+	m.lastCostCNY = costCNY
+}
+
+// CompactionCount returns the number of compactions that have occurred.
+// Must be called from the Run goroutine (not concurrency-safe).
+func (m *compactionMetrics) CompactionCount() int { return m.count }
+
+// CompactionLastCost returns the cost (CNY) of the most recent compaction.
+// Must be called from the Run goroutine (not concurrency-safe).
+func (m *compactionMetrics) CompactionLastCost() float64 { return m.lastCostCNY }

@@ -4,7 +4,7 @@
 import type { PermissionRequest } from './api'
 
 // The file-mutating tools whose approval renders as an inline diff gate. Everything
-// else (bash/command/read_file/destructive) keeps the PermissionModal.
+// else (bash/command/read_file/destructive) renders the inline command card instead.
 export const EDIT_TOOLS = ['edit_file', 'write_file', 'apply_patch'] as const
 
 export function isEditApproval(req: PermissionRequest | null | undefined): boolean {

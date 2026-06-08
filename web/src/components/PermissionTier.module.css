@@ -1,0 +1,38 @@
+.group {
+  display: inline-flex;
+  gap: 0;
+  border-radius: var(--r-sm, 6px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  font-size: var(--type-label, 0.8rem);
+}
+
+.btn {
+  padding: 3px 10px;
+  background: var(--surface);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-3, #888);
+  transition: background 0.1s, color 0.1s;
+  white-space: nowrap;
+}
+
+.btn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--elevated, rgba(0,0,0,0.04));
+}
+
+.btn.active {
+  background: color-mix(in oklch, var(--accent, #4d6bfe) 14%, var(--surface));
+  color: var(--accent, #4d6bfe);
+  font-weight: 600;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

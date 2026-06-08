@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { App } from './App'
 import { useThemeStore, DEFAULT_THEME_SETTINGS } from './lib/theme/store'
+import { useLayoutStore } from './lib/layoutStore'
 import * as system from './lib/system'
 import * as api from './lib/api'
 
@@ -12,9 +13,9 @@ beforeEach(() => {
 })
 
 describe('App shell composition', () => {
-  it('renders the three workspace zones', async () => {
-    // Stub fetch so /v1/changed returns a non-empty working tree, causing
-    // hasChanges=true and the workspace zone to auto-reveal.
+  it('renders the three workspace zones when review pane is open', async () => {
+    // Default reviewPin is 'closed' — workspace hidden. Open it first.
+    useLayoutStore.getState().toggleRight(false)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
@@ -37,7 +38,7 @@ describe('App shell composition', () => {
   it('applies theme tokens to :root via ThemeProvider', () => {
     render(<App />)
     // Brand light default (spec §3.2): --bg is the exact brand hex, not OKLCH.
-    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f5f6f8')
+    expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#f8f9fb')
   })
 
   it('no longer renders the titlebar command-palette pill', () => {
@@ -61,6 +62,7 @@ vi.mock('./lib/api', async (orig) => {
     ...actual,
     submitPrompt: vi.fn().mockResolvedValue('sess-1'),
     steerTurn: vi.fn().mockResolvedValue(undefined),
+    uploadFiles: vi.fn().mockResolvedValue([{ name: 'notes.txt', path: '.deepseek/uploads/notes.txt' }]),
     respondPermission: vi.fn().mockResolvedValue(undefined),
     respondAnswer: vi.fn().mockResolvedValue(undefined),
     cancelTurn: vi.fn().mockResolvedValue(undefined),
@@ -94,14 +96,66 @@ describe('App — Wave 4 wiring', () => {
     vi.clearAllMocks()
   })
 
-  it('shows a PermissionModal on permission_request and routes the decision', async () => {
+  it('shows the inline ApprovalGate on permission_request and routes the decision', async () => {
     const api = await import('./lib/api')
     const user = userEvent.setup()
     render(<App />)
     await startTurn(user)
     captured.onPermissionRequest({ id: 'perm-1', tool: 'bash', args: { command: 'ls' }, options: [] })
-    await user.click(await screen.findByTestId('perm-once'))
+    // Non-edit tools render the inline command card — never a blocking modal.
+    expect(await screen.findByTestId('approval-cmd')).toBeInTheDocument()
+    expect(screen.queryByTestId('perm-backdrop')).not.toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-once'))
     expect(api.respondPermission).toHaveBeenCalledWith('perm-1', 'once')
+  })
+
+  it('queues concurrent permission requests and routes each decision in arrival order', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    await startTurn(user)
+    // The agent executes one step's tool calls in parallel — two requests can
+    // arrive back-to-back. The first must stay answerable; the second follows.
+    captured.onPermissionRequest({ id: 'perm-1', tool: 'bash', args: { command: 'cmd-one' }, options: [] })
+    captured.onPermissionRequest({ id: 'perm-2', tool: 'bash', args: { command: 'cmd-two' }, options: [] })
+    expect(await screen.findByText('cmd-one')).toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-once'))
+    expect(api.respondPermission).toHaveBeenCalledWith('perm-1', 'once')
+    // The second request surfaces as the next gate.
+    expect(await screen.findByText('cmd-two')).toBeInTheDocument()
+    await user.click(screen.getByTestId('approve-deny'))
+    expect(api.respondPermission).toHaveBeenCalledWith('perm-2', 'deny')
+  })
+
+  it('uploads attachments, references the saved paths in the prompt, and pills the user message', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' })
+    // The attach input is hidden; drive it directly with a change event.
+    fireEvent.change(screen.getByTestId('attach-input'), { target: { files: [file] } })
+    await user.type(screen.getByTestId('composer-input'), 'read my file')
+    await user.click(screen.getByTestId('send-stop'))
+    await waitFor(() => expect(api.submitPrompt).toHaveBeenCalled())
+    expect(api.uploadFiles).toHaveBeenCalledWith([file])
+    const prompt = (api.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(prompt).toContain('read my file')
+    expect(prompt).toContain('.deepseek/uploads/notes.txt')
+    // The transcript's user message carries the attachment as a pill.
+    expect((await screen.findAllByText('notes.txt')).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('passes the selected composer mode to submitPrompt (yolo reaches the gateway)', async () => {
+    const api = await import('./lib/api')
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByTestId('mode-trigger'))
+    await user.click(screen.getByTestId('mode-option-yolo'))
+    await user.type(screen.getByTestId('composer-input'), 'run it')
+    await user.click(screen.getByTestId('send-stop'))
+    await waitFor(() => expect(api.submitPrompt).toHaveBeenCalled())
+    const call = (api.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(call[2]).toBe('yolo')
   })
 
   it('shows an AskCard on ask_request and routes the answer', async () => {
@@ -155,6 +209,8 @@ describe('App — Wave 4 wiring', () => {
 describe('App workspace zone (SP5)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Default reviewPin is 'closed' — open it for workspace tests
+    useLayoutStore.setState((s) => ({ layout: { ...s.layout, reviewPin: 'open' as const } }))
     // Route fetch calls: changed files → entries; diff → patch; file → content.
     vi.stubGlobal(
       'fetch',
@@ -207,6 +263,8 @@ describe('App workspace zone (SP5)', () => {
 describe('App — full shell integration (Wave 0)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Default reviewPin is 'closed' — open it for workspace tests
+    useLayoutStore.setState((s) => ({ layout: { ...s.layout, reviewPin: 'open' as const } }))
     // Fail-closed by default: no onboarding, no update — keeps overlays hidden
     // unless a test opts in.
     vi.spyOn(system, 'fetchOnboarding').mockResolvedValue({

@@ -61,7 +61,9 @@
   gap: var(--s-3);
   height: 40px;
   padding: 0 var(--s-3);
-  background: linear-gradient(var(--surface), var(--bg));
+  background: var(--topbar-grad);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid var(--border);
   color: var(--text-2);
   -webkit-app-region: drag;
@@ -116,7 +118,9 @@
   left: 50%;
   transform: translateX(-50%);
   width: min(560px, 92vw);
-  background: var(--elevated);
+  background: color-mix(in oklch, var(--elevated) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: 0 16px 48px oklch(0 0 0 / 0.4);
@@ -164,7 +168,9 @@
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-2) var(--s-3);
-  background: var(--elevated);
+  background: color-mix(in oklch, var(--elevated) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   color: var(--text);
   border: 1px solid var(--border);
   border-left: 3px solid var(--info);
@@ -217,3 +223,4 @@
 
 /* Workspace zone — Review hero (ReviewPanel) above a compact TelemetryStrip. */
 .workspaceZone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+

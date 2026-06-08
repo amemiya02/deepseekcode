@@ -18,14 +18,21 @@ body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
 }
+/* Body glaze — a subtle directional-light overlay so the whole page reads as
+   top-lit. Pointer-events: none keeps it purely decorative. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--glaze);
+  pointer-events: none;
+  z-index: 0;
+}
 #app { height: 100%; }
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 button { font-family: inherit; }
 .plain-code, .code, code {
   font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
-}
-@media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* Markdown + ThinkingBlock — superseded by SP2 rules in the Messages block above */
@@ -83,8 +90,8 @@ button { font-family: inherit; }
 .fold__body { margin: 0; padding: var(--s-2); white-space: pre-wrap; word-break: break-word; font: var(--type-mono); color: var(--text-2); max-height: 320px; overflow: auto; }
 
 /* Messages — SP2 turn layout */
-/* (a) Lane */
-.transcript__lane { width: 100%; max-width: var(--measure); margin-inline: auto; display: flex; flex-direction: column; gap: var(--turn-gap); }
+/* (a) Lane — fills the conversation zone; a modest inline pad keeps text off the edges. */
+.transcript__lane { width: 100%; padding-inline: var(--s-4); display: flex; flex-direction: column; gap: var(--turn-gap); }
 
 /* (b) Turn layout (avatar + main) */
 .msg { display: grid; grid-template-columns: var(--avatar-size) 1fr; gap: var(--s-2); align-items: start; }
@@ -198,6 +205,13 @@ button { font-family: inherit; }
 /* Inline diff approval gate (§5) — the diff island IS the gate; the action bar reads
    as its obsidian footer (reuses the P3.1 --island-* tokens). */
 .approval { display: flex; flex-direction: column; margin: var(--s-2) 0; outline: none; }
+/* Non-edit approvals: a contained command card that mirrors the diff island. */
+.approval__card { border: 1px solid var(--island-line); border-radius: var(--r-md); background: var(--island-card); box-shadow: var(--shadow-1); overflow: hidden; }
+.approval__head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-3); background: var(--island-header); border-bottom: 1px solid var(--island-line-soft); color: var(--island-ink-2); }
+.approval__head svg { color: var(--island-accent); flex: none; }
+.approval__tool { font: var(--type-mono); font-weight: 600; color: var(--island-ink); }
+.approval__label { font: var(--type-label); color: var(--island-ink-3); }
+.approval__cmd { margin: 0; padding: var(--s-2) var(--s-3); font: var(--type-mono); color: var(--island-ink); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
 .approval__actions {
   display: flex; align-items: center; gap: var(--s-2);
   padding: 8px var(--s-2);
@@ -227,7 +241,8 @@ button { font-family: inherit; }
 .approval__menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 5;
   display: flex; flex-direction: column; min-width: 168px;
-  background: var(--island-card); border: 1px solid var(--island-line);
+  background: color-mix(in oklch, var(--island-card) 88%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--island-line);
   border-radius: var(--r-sm); box-shadow: var(--shadow-2); overflow: hidden;
 }
 .approval__menuitem { text-align: left; padding: 7px 12px; background: none; border: none; color: var(--island-ink); font: var(--type-label); cursor: pointer; }
@@ -243,8 +258,8 @@ button { font-family: inherit; }
 .markdown-body .hljs-attribute, .markdown-body .hljs-variable, .markdown-body .hljs-template-variable { color: #9a5b00; }
 .markdown-body .hljs-tag { color: var(--text-2); }
 
-/* (e) Inline code chip */
-.markdown-body code.md-code { font: var(--type-mono); background: var(--accent-weak); color: var(--accent); border: 1px solid var(--border-hair); border-radius: var(--r-sm); padding: 0 4px; }
+/* (e) Inline code chip — neutral mono on subtle bg; accent reserved for actionable */
+.md-code { font-family: var(--type-mono-family); font-size: 12px; background: var(--elevated); color: var(--text); border-radius: var(--r-sm); padding: 1px 6px; }
 
 /* (f) Reasoning disclosure — a quiet inline line that belongs to the turn,
    indented to align with the assistant prose (avatar column + gap). No pill. */
@@ -306,8 +321,8 @@ button { font-family: inherit; }
 .context-pill__remove { background: none; border: none; color: var(--text-3); cursor: pointer; display: inline-flex; padding: 0; }
 .context-pill__remove:hover { color: var(--danger); }
 
-/* SlashMenu / FileMenu (shared .slashmenu container) */
-.slashmenu { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
+/* SlashMenu / FileMenu (shared .slashmenu container) — frosted glass dropdown */
+.slashmenu { display: flex; flex-direction: column; max-height: 280px; overflow-y: auto; background: color-mix(in oklch, var(--elevated) 85%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); }
 .slashmenu__item { display: flex; align-items: center; gap: 8px; padding: 4px var(--s-2); background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); }
 .slashmenu__item--active { background: var(--accent-weak); }
 .slashmenu__name { font: var(--type-mono); color: var(--accent); }
@@ -327,7 +342,7 @@ button { font-family: inherit; }
 .modelsw { position: relative; display: inline-flex; }
 .modelsw__trigger { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--text-2); font: var(--type-label); cursor: pointer; padding: 2px 4px; }
 .modelsw__backdrop { position: fixed; inset: 0; z-index: 10; }
-.modelsw__menu { position: absolute; bottom: 100%; left: 0; z-index: 11; min-width: 160px; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); padding: 4px; }
+.modelsw__menu { position: absolute; bottom: 100%; left: 0; z-index: 11; min-width: 160px; background: color-mix(in oklch, var(--elevated) 85%, transparent); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); padding: 4px; }
 .modelsw__item { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; background: none; border: none; cursor: pointer; text-align: left; color: var(--text); font: var(--type-ui); padding: 4px var(--s-2); border-radius: var(--r-sm); }
 .modelsw__item--current { color: var(--accent); }
 .modelsw__empty { color: var(--text-3); font: var(--type-label); padding: 4px var(--s-2); }
@@ -355,20 +370,46 @@ button { font-family: inherit; }
   margin: 0 var(--s-3) var(--s-3);
   padding: var(--s-2) var(--s-2) var(--s-1);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-2);
-  transition: border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+  border-radius: var(--r-xl);
+  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--shadow-pop);
+  transition: border-color var(--motion-standard) var(--ease-standard), box-shadow var(--motion-standard) var(--ease-standard);
+}
+.composer-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(circle at top left, rgba(77,107,254,0.06), transparent 28%);
+  pointer-events: none;
+  z-index: 0;
 }
 .composer-wrap:focus-within {
-  border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
-  box-shadow: var(--shadow-2), var(--glow-accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-pop), var(--glow-accent);
 }
 .composer__input { width: 100%; resize: none; min-height: 44px; max-height: 240px; background: transparent; border: none; color: var(--text); font: var(--type-body); padding: 8px 6px; }
 .composer__input:focus { outline: none; }
 .composer__input::placeholder { color: var(--text-3); }
 /* Mid-turn steer hint — shown below textarea when streaming and text is present */
 .composer__steer-hint { font: var(--type-label); color: var(--text-3); padding: 0 6px 2px; pointer-events: none; }
+.composer__files { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.composer__file-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px; border-radius: var(--r-sm);
+  background: var(--accent-weak); color: var(--accent-text);
+  font: var(--type-label);
+}
+.composer__file-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer__file-remove {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border: none; background: none;
+  color: var(--accent-text); cursor: pointer; font-size: 12px; line-height: 1;
+  border-radius: 50%; opacity: 0.7;
+}
+.composer__file-remove:hover { opacity: 1; background: color-mix(in oklch, var(--accent) 20%, transparent); }
 /* Composer action bar (SP3) — one row: tools left, send right */
 .composer-bar { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 /* Chips wrap to a second row when the conversation lane is narrow (wide review
@@ -548,4 +589,34 @@ button { font-family: inherit; }
 }
 .fold__toggle:hover {
   color: var(--text, #0d1016);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   P0.1 — Systematic motion language (lift / press / pulse / shimmer)
+   Brand-neutral ds-* utility classes. Timings from motion.ts contract.
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes ds-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes ds-shiny { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+.ds-status-dot { animation: ds-pulse 1800ms ease-in-out infinite; }
+.ds-streaming-text {
+  background: linear-gradient(90deg, var(--text-2) 30%, var(--text) 50%, var(--text-2) 70%);
+  background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
+  animation: ds-shiny 2400ms linear infinite;
+}
+.ds-card { transition: transform var(--motion-standard) var(--ease-standard), background var(--motion-micro) var(--ease-standard); }
+.ds-card:hover { transform: var(--lift); }
+.ds-pressable:active { transform: var(--press); }
+.ico { vertical-align: middle; }
+.ico--ok { color: var(--ok); }
+.ico--err { color: var(--danger); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cursor { display: inline-block; width: 2px; height: 1em; background: var(--text); margin-left: 2px; animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }

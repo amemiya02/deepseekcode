@@ -72,6 +72,31 @@ describe('ReviewPanel', () => {
     wrap(<ReviewPanel />)
     await waitFor(() => expect(screen.getByTestId('review-hero')).toBeInTheDocument())
   })
+
+  it('exposes per-file approve and reject', async () => {
+    wrap(<ReviewPanel />)
+    await waitFor(() => expect(screen.getByText('main.go')).toBeInTheDocument())
+    expect(screen.getByTestId('approve-src/main.go')).toBeInTheDocument()
+    expect(screen.getByTestId('reject-src/main.go')).toBeInTheDocument()
+  })
+
+  it('clicking approve marks the file as approved', async () => {
+    wrap(<ReviewPanel />)
+    await waitFor(() => expect(screen.getByText('main.go')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('approve-src/main.go'))
+    await waitFor(() => {
+      expect(screen.getByTestId('file-status-src/main.go')).toHaveTextContent(/approved/i)
+    })
+  })
+
+  it('clicking reject marks the file as rejected', async () => {
+    wrap(<ReviewPanel />)
+    await waitFor(() => expect(screen.getByText('main.go')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('reject-src/main.go'))
+    await waitFor(() => {
+      expect(screen.getByTestId('file-status-src/main.go')).toHaveTextContent(/rejected/i)
+    })
+  })
 })
 
 test('ReviewPanel exposes a draggable list|diff splitter', () => {

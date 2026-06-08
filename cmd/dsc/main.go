@@ -472,6 +472,10 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	applyRoutingConfig(a, cfg)
 	applyVerifyCmd(a, mf.verifyCmd)
 
+	// §3.4: wire cache alignment unit from config so buildEpochComponents
+	// can pad the static prefix to a cache-unit boundary.
+	a.SetCacheUnit(cfg.Cache.AlignUnit)
+
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait
 	// for publishDiagnostics. If the server reports diagnostics after
@@ -991,6 +995,10 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	registerSkillRead(reg, skillStore)
 	applyRoutingConfig(a, cfg)
 	applyVerifyCmd(a, mf.verifyCmd)
+
+	// §3.4: wire cache alignment unit from config so buildEpochComponents
+	// can pad the static prefix to a cache-unit boundary.
+	a.SetCacheUnit(cfg.Cache.AlignUnit)
 
 	// Wire post-edit LSP diagnostics feedback. This reads only
 	// diagnostics already cached by the LSP client — no bounded wait

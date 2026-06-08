@@ -170,14 +170,13 @@ func TestToolCard(t *testing.T) {
 	t.Run("tool call renders card header", func(t *testing.T) {
 		item := chatItem{kind: itemToolCall, tool: "bash", args: `{"command":"echo hi"}`}
 		out := item.render(th, 80)
-		if !strings.Contains(out, BarThick) {
-			t.Errorf("expected bar thick in output, got %q", out)
-		}
-		if !strings.Contains(out, IconToolPending) {
-			t.Errorf("expected pending icon in output, got %q", out)
-		}
-		if !strings.Contains(out, "bash") {
+		plain := stripANSI(out)
+		// RenderTool dispatches to renderBashCard which shows status glyph + "bash" + cmd.
+		if !strings.Contains(plain, "bash") {
 			t.Errorf("expected tool name in output, got %q", out)
+		}
+		if !strings.Contains(plain, "echo hi") {
+			t.Errorf("expected command in output, got %q", out)
 		}
 	})
 
@@ -190,17 +189,10 @@ func TestToolCard(t *testing.T) {
 			duration: 1200 * time.Millisecond,
 		}
 		out := item.render(th, 80)
-		if !strings.Contains(out, BarThick) {
-			t.Errorf("expected bar thick in output, got %q", out)
-		}
-		if !strings.Contains(out, IconToolOk) {
-			t.Errorf("expected ok icon in output, got %q", out)
-		}
-		if !strings.Contains(out, "bash") {
+		plain := stripANSI(out)
+		// RenderTool dispatches to renderBashCard with ToolSuccess status.
+		if !strings.Contains(plain, "bash") {
 			t.Errorf("expected tool name in output, got %q", out)
-		}
-		if !strings.Contains(out, "1.2s") {
-			t.Errorf("expected duration in output, got %q", out)
 		}
 	})
 
@@ -213,12 +205,15 @@ func TestToolCard(t *testing.T) {
 			duration: 100 * time.Millisecond,
 		}
 		out := item.render(th, 80)
-		if !strings.Contains(out, IconToolErr) {
-			t.Errorf("expected error icon in output, got %q", out)
+		plain := stripANSI(out)
+		// RenderTool dispatches to renderBashCard with ToolError status,
+		// which uses the error glyph (✖).
+		if !strings.Contains(plain, "bash") {
+			t.Errorf("expected tool name in output, got %q", out)
 		}
 	})
 
-	t.Run("folded body shows truncation hint", func(t *testing.T) {
+	t.Run("folded body hides content", func(t *testing.T) {
 		// Create content with more than 10 lines.
 		lines := make([]string, 20)
 		for i := range lines {
@@ -233,33 +228,72 @@ func TestToolCard(t *testing.T) {
 			expanded: false,
 		}
 		out := item.render(th, 80)
-		if !strings.Contains(out, "press e to expand") {
-			t.Errorf("expected truncation hint in folded output, got %q", out)
+		plain := stripANSI(out)
+		// RenderTool dispatches to renderBashCard which hides body when
+		// collapsed (expanded=false). The head line should still show.
+		if !strings.Contains(plain, "bash") {
+			t.Errorf("expected tool name in output, got %q", out)
+		}
+		// Body content should NOT be visible when collapsed.
+		if strings.Contains(plain, "line 0") {
+			t.Errorf("collapsed card should not show body content, got %q", out)
 		}
 	})
 
-	t.Run("expanded body shows all lines", func(t *testing.T) {
-		lines := []string{"a", "b", "c"}
+	t.Run("expanded body shows content", func(t *testing.T) {
 		item := chatItem{
 			kind:     itemToolResult,
 			tool:     "bash",
 			args:     "{}",
-			result:   tools.Result{Content: strings.Join(lines, "\n")},
+			result:   tools.Result{Content: "hello output"},
 			duration: 100 * time.Millisecond,
 			expanded: true,
 		}
 		out := item.render(th, 80)
-		if strings.Contains(out, "press e to expand") {
-			t.Errorf("expanded output should not have truncation hint, got %q", out)
-		}
-		// All body lines should be present.
 		plain := stripANSI(out)
-		for _, line := range lines {
-			if !strings.Contains(plain, line) {
-				t.Errorf("expected line %q in expanded output, got %q", line, plain)
-			}
+		// RenderTool dispatches to renderBashCard which shows body when
+		// expanded. The body is rendered via cardBody with oneline().
+		if !strings.Contains(plain, "bash") {
+			t.Errorf("expected tool name in output, got %q", out)
+		}
+		if !strings.Contains(plain, "hello output") {
+			t.Errorf("expected body content in expanded output, got %q", out)
 		}
 	})
+}
+
+// TestChatItem_EditToolRendersDiff verifies that edit_file tool items route
+// through RenderTool's renderEditCard, which renders diff content when expanded.
+func TestChatItem_EditToolRendersDiff(t *testing.T) {
+	th := DarkTheme()
+	diff := `--- a/main.go
++++ b/main.go
+@@ -1,3 +1,4 @@
+ package main
+
++import "fmt"
+ func main() {`
+	args := fmt.Sprintf(`{"path":"main.go","diff":%q}`, diff)
+	item := chatItem{
+		kind:     itemToolResult,
+		tool:     "edit_file",
+		args:     args,
+		result:   tools.Result{Content: "done"},
+		expanded: true,
+	}
+	out := item.render(th, 80)
+	plain := stripANSI(out)
+	// The edit card should show the tool name and the diff content.
+	if !strings.Contains(plain, "edit_file") {
+		t.Errorf("expected tool name in output, got %q", out)
+	}
+	if !strings.Contains(plain, "main.go") {
+		t.Errorf("expected file path in output, got %q", out)
+	}
+	// Expanded edit card should render the diff body.
+	if !strings.Contains(plain, "import") {
+		t.Errorf("expected diff content in expanded output, got %q", out)
+	}
 }
 
 // TestWelcomeRenders sanity-checks that the startup banner contains

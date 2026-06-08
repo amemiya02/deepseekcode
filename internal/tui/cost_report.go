@@ -17,6 +17,7 @@ type CostReportInput struct {
 	ContextLimit int
 	CostKnown    bool
 	Balance      string
+	MissCauses   *MissCauses // optional four-cause breakdown; nil disables
 }
 
 // RenderCostReport returns deterministic plain text summarizing the
@@ -29,6 +30,11 @@ func RenderCostReport(in CostReportInput) string {
 	hit := llm.CacheHitRate(in.Usage) * 100
 	fmt.Fprintf(&b, "cache %.1f%% | hit %d | miss %d | out %d\n",
 		hit, in.Usage.PromptCacheHitTokens, in.Usage.PromptCacheMissTokens, in.Usage.CompletionTokens)
+
+	if mc := in.MissCauses; mc != nil {
+		fmt.Fprintf(&b, "miss cause: cold %d | mut %d | residual %d | reset %d\n",
+			mc.ColdTokens, mc.MutTokens, mc.ResidualTokens, mc.ResetTokens)
+	}
 
 	if in.CostKnown || llm.CostKnown(in.Model) {
 		fmt.Fprintf(&b, "cost ¥%.6f | saved ¥%.6f\n", in.CostYuan, in.SavedYuan)

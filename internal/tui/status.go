@@ -41,6 +41,10 @@ type statusState struct {
 	mcpTools int  // total tools across connected MCP servers; 0 hides the sub-part
 	lspReady bool // at least one LSP server attached
 	skills   int  // loaded skill count; 0 hides the sub-part
+
+	// missAccum accumulates per-cause miss tokens from CacheReceipt events
+	// for the four-cause HUD chip.
+	missAccum MissCauses
 }
 
 // render returns the one-line status string. When in Normal (scroll)
@@ -93,6 +97,12 @@ func (s statusState) render(t Theme) string {
 		cacheStyle = lipgloss.NewStyle().Foreground(t.WarnColor)
 	}
 	cacheChip := cacheStyle.Render(fmt.Sprintf("cache %.0f%%", hit))
+	// Four-cause breakdown when we have miss data.
+	if mc := s.missAccum; mc.ColdTokens+mc.MutTokens+mc.ResidualTokens+mc.ResetTokens > 0 {
+		fourCause := fmt.Sprintf("[cold %d·mut %d·res %d·rst %d]",
+			mc.ColdTokens, mc.MutTokens, mc.ResidualTokens, mc.ResetTokens)
+		cacheChip += " " + label.Render(fourCause)
+	}
 
 	// Context fill bar with accent-colored filled cells. Built locally (not
 	// via RenderHUD) so the filled cells can carry the brand accent while the

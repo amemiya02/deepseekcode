@@ -17,7 +17,7 @@ describe('Transcript', () => {
     render(<LocaleProvider><Transcript items={items} /></LocaleProvider>)
     expect(screen.getByText('do it')).toBeInTheDocument()
     expect(screen.getByTestId('thinking-toggle')).toBeInTheDocument()
-    expect(screen.getByText('read_file')).toBeInTheDocument()
+    expect(screen.getAllByText('read_file').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('pro')).toBeInTheDocument()
     expect(screen.getByText('done')).toBeInTheDocument()
   })
@@ -25,5 +25,12 @@ describe('Transcript', () => {
   it('renders an empty container for no items', () => {
     const { container } = render(<LocaleProvider><Transcript items={[]} /></LocaleProvider>)
     expect(container.querySelector('.transcript')).toBeInTheDocument()
+  })
+
+  it('never duplicates tool calls into a bottom timeline (tools render inline only)', () => {
+    render(<LocaleProvider><Transcript items={items} /></LocaleProvider>)
+    expect(screen.queryByTestId('message-timeline')).not.toBeInTheDocument()
+    // The tool renders exactly once, as its inline ToolCard.
+    expect(screen.getAllByText('read_file')).toHaveLength(1)
   })
 })

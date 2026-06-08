@@ -4,17 +4,20 @@ import { useThemeStore, setThemeSettings } from '../../lib/theme/store'
 import { useLayoutStore } from '../../lib/layoutStore'
 import { isReviewOpen } from './layout'
 import { Logo } from '../Logo'
+import { GitBranchPicker } from '../GitBranchPicker'
 import styles from './index.module.css'
 
 export interface TitleBarProps {
   branch?: string
+  branches?: string[]
+  onBranchSelect?: (branch: string) => void
   onOpenPalette?: () => void
   onOpenSettings?: () => void
   /** Drives the review-pane toggle pressed state under reviewPin='auto'. */
   workspaceHasContent?: boolean
 }
 
-export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent = false }: TitleBarProps) {
+export function TitleBar({ branch = 'main', branches, onBranchSelect, onOpenSettings, workspaceHasContent = false }: TitleBarProps) {
   const t = useT()
   const settings = useThemeStore((s) => s.settings)
   const isDark = settings.mode === 'dark'
@@ -30,10 +33,12 @@ export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent 
       <div className={styles.titlebarLeft}>
         <Logo size={20} className={styles.titlebarLogo} />
         <span className={styles.appName}>DeepSeekCode</span>
-        <span className={styles.branch} title={t('titlebar.branch')}>
-          <IconGitBranch size={14} />
-          {branch}
-        </span>
+        <GitBranchPicker
+          current={branch}
+          branches={branches ?? [branch]}
+          onSelect={onBranchSelect ?? (() => {})}
+          compact
+        />
       </div>
 
       <div className={styles.titlebarRight}>

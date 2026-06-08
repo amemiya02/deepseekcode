@@ -141,6 +141,9 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 	h.mux.HandleFunc("/v1/summarize", h.handleSummarize)
 	// Wave 5: add-to-chat (workspace READS /v1/files,/v1/file,/v1/changed are Wave 1).
 	h.mux.HandleFunc("/v1/add-to-chat", h.handleAddToChat)
+	// Git branch introspection and checkout.
+	h.mux.HandleFunc("/v1/git/branches", h.handleBranches)
+	h.mux.HandleFunc("/v1/git/checkout", h.handleCheckout)
 	// Wave 6: settings round-trip.
 	h.mux.HandleFunc("/v1/config", h.handleConfig)
 	h.mux.HandleFunc("/v1/onboarding", h.handleOnboarding)

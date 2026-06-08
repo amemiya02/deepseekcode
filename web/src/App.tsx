@@ -47,12 +47,14 @@ import type { PermissionRequest, PermissionDecision, AskRequest, AskAnswer, Plan
 import { applyEvent } from './lib/transcript'
 import type { TranscriptItem } from './lib/transcript'
 import type { AutonomyMode } from './lib/autonomy'
+import { useGitBranches } from './lib/useGitBranches'
 import styles from './components/shell/index.module.css'
 
 // AppInner lives under LocaleProvider so hooks (useT/useLocale) have their context.
 function AppInner() {
   const t = useT()
   const { locale, setLocale } = useLocale()
+  const git = useGitBranches()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Turn state
@@ -496,7 +498,7 @@ function AppInner() {
         ) : (
           <div className={styles.appRoot}>
             {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
-            <TitleBar branch="main" onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} workspaceHasContent={hasChanges} />
+            <TitleBar branch={git.current || 'main'} branches={git.branches} onBranchSelect={git.checkout} onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} workspaceHasContent={hasChanges} />
             <div className={styles.appBody}>
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>

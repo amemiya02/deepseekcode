@@ -441,3 +441,39 @@ export async function fetchRuntimeInfo(): Promise<RuntimeInfo> {
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   return res.json() as Promise<RuntimeInfo>
 }
+
+// ---- Git branch introspection (B-suffix) ----
+
+export interface GitBranch {
+  name: string
+  current: boolean
+}
+
+export interface GitBranchesResult {
+  branches: GitBranch[]
+  current: string
+}
+
+export interface CheckoutResult {
+  branch: string
+  success: boolean
+  error?: string
+}
+
+/** GET /v1/git/branches — list local branches and the current branch name. */
+export async function fetchBranches(): Promise<GitBranchesResult> {
+  const res = await fetch('/v1/git/branches')
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<GitBranchesResult>
+}
+
+/** POST /v1/git/checkout — switch to the given local branch. */
+export async function checkoutBranch(branch: string): Promise<CheckoutResult> {
+  const res = await fetch('/v1/git/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch }),
+  })
+  if (!res.ok) throw new Error(`gateway error ${res.status}`)
+  return res.json() as Promise<CheckoutResult>
+}

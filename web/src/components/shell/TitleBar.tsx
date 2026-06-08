@@ -9,13 +9,15 @@ import styles from './index.module.css'
 
 export interface TitleBarProps {
   branch?: string
+  branches?: string[]
+  onBranchSelect?: (branch: string) => void
   onOpenPalette?: () => void
   onOpenSettings?: () => void
   /** Drives the review-pane toggle pressed state under reviewPin='auto'. */
   workspaceHasContent?: boolean
 }
 
-export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent = false }: TitleBarProps) {
+export function TitleBar({ branch = 'main', branches, onBranchSelect, onOpenSettings, workspaceHasContent = false }: TitleBarProps) {
   const t = useT()
   const settings = useThemeStore((s) => s.settings)
   const isDark = settings.mode === 'dark'
@@ -33,8 +35,8 @@ export function TitleBar({ branch = 'main', onOpenSettings, workspaceHasContent 
         <span className={styles.appName}>DeepSeekCode</span>
         <GitBranchPicker
           current={branch}
-          branches={[branch]}
-          onSelect={() => {}}
+          branches={branches ?? [branch]}
+          onSelect={onBranchSelect ?? (() => {})}
           compact
         />
       </div>

@@ -8,85 +8,77 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-`deepseekcode` 是面向 DeepSeek 模型和 OpenAI-compatible chat-completions
-端点的终端编码 Agent。它以单个 Go 二进制 `dsc` 分发，包含交互式 TUI、
-一次性 CLI 模式、仓库工具、SQLite 会话，以及保守的权限模型。
+面向 DeepSeek 模型的终端编码 Agent。单个 Go 二进制，三种界面（TUI / Web SPA
+/ 桌面应用），可证明的前缀缓存稳定性、真实 OS 沙箱和信号驱动的模型路由。
 
-## 为什么选择 dsc（DeepSeek 深度特化）
+## 为什么选择 dsc
 
-> **实测，而非声称。** 在一次可复现的 12 回合 `deepseek-v4-flash` 会话中，
-> dsc 维持 **94.7% 前缀缓存命中率**，而缓存不稳定的 Agent 为 **0%** ——
-> **便宜 4.5×**，每个数字都取自 DeepSeek 自己的 `prompt_cache_hit_tokens`。
-> 自行复现：`make demo-cache`（实测）或 `make demo-cache-offline`（无需 API
-> key）。证据：[bench/](bench/README.md)。
+> **实测，而非声称。** `deepseek-v4-flash` 上 94.7% 前缀缓存命中率，缓存不
+> 稳定的 Agent 为 0% —— **便宜 4.5×**。每个数字取自 DeepSeek 自己的
+> `prompt_cache_hit_tokens`。自行复现：`make demo-cache`。
+> 证据：[bench/](bench/README.md)。
 
-- **可证明的前缀缓存稳定性** — 单一 canonical 序列化器同时喂给 wire 字节
-  和缓存指纹，二者构造级一致不可能发散；`dsc trace inspect` 的 `prefixes==1`
-  可证明整次会话缓存稳定（[docs/prefix-cache.md](docs/prefix-cache.md)）。
-- **真实的信号驱动 Flash→Pro 路由** — 通过 `--auto-route` 选择启用（在歧义
-  或反复修复时自动升级），而非仅是 prompt 指令；破坏性工具调用始终触发
+- **可证明的前缀缓存稳定性** — 单一 canonical 序列化器同时喂给 wire 字节和
+  缓存指纹，构造级一致不可能发散；`dsc trace inspect` 的 `prefixes==1`
+  可证明缓存稳定（[docs/prefix-cache.md](docs/prefix-cache.md)）。
+- **信号驱动 Flash→Pro 路由** — 在歧义或反复修复时自动升级；破坏性调用触发
   Duet pro 校验器（[docs/duet.md](docs/duet.md)）。
-- **真实的 OS 沙箱** — sandbox-exec (macOS) / Landlock (Linux) 真隔离 +
-  真 PTY，不只是路径围栏（[docs/SANDBOX.md](docs/SANDBOX.md)）。
-- **自动推理强度** — 逐回合按多语言关键词自动开关 thinking，加
-  `low/medium/high/max` 推理档位，简单任务自动降档。
+- **真实 OS 沙箱** — sandbox-exec (macOS) / Landlock (Linux) 真隔离 + 真 PTY
+  （[docs/SANDBOX.md](docs/SANDBOX.md)）。
+- **自动推理强度** — 逐回合按关键词自动开关 thinking，`low/medium/high/max`
+  档位，简单任务自动降档。
 
-在工具调用基准（tau-bench-lite，8 个任务）上，dsc 在每次解题成本（~$0.00038）
-上与强 DeepSeek 原生 flash 基线**持平** —— 如实报告，不在简单任务上声称能力
-领先（[bench/taubench](bench/taubench/)）。
+## 界面
+
+| 界面 | 命令 | 说明 |
+|---|---|---|
+| **TUI** | `dsc` | 交互式 Bubble Tea 终端 UI（默认） |
+| **Web SPA** | `dsc serve --http :7432` | Svelte 单页应用，含聊天、文件树、diff 查看器、设置 |
+| **桌面应用** | `make desktop` | Wails v3 原生 macOS `.app` |
+
+构建内嵌 SPA 的二进制：`make build-web`。
 
 ## 功能
 
-- 交互式 Bubble Tea TUI，以及可脚本化的 `dsc -p "prompt"` 模式。
-- DeepSeek-first runtime，支持 thinking、`reasoning_effort` 控制、长上下文、
-  前缀缓存指标，以及 `deepseek-v4-flash` / `deepseek-v4-pro`。
-- 可配置 OpenAI-compatible provider，用于接入其他 chat-completions 端点。
-- 仓库工具覆盖文件读写、patch、shell 命令、git、grep、LSP 查询、网页抓取/搜索和用户提问。
-- 持久化项目会话，支持恢复、分支、导出 scrollback，以及用 `/undo` 撤销最近编辑 step。
-- 可通过自定义 slash 命令、`SKILL.md` 发现、MCP 工具、子 Agent 和隔离 git worktree 扩展。
-- 安全控制包括只读模式、工具前确认模式、自动批准模式、敏感路径检查、bash allowlist、可选沙箱，以及破坏性操作的 Pro 校验。
+- **14 个内置工具** — 文件读写/编辑/patch、bash、glob、grep、git
+  （diff/show/blame/log）、用户提问、todo 跟踪。
+- **子 Agent** — 在 `.deepseek/agent/<name>.md` 定义；内置 explore、implement、
+  review、autonomous profile。
+- **Skills** — 从 `.deepseek/skills/`、`.claude/skills/` 等发现 `SKILL.md`。
+  缓存安全的渐进式披露。自动提升为斜杠命令。
+- **Hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd`。
+  失败即放行。支持进程内或子进程。
+- **Memory** — 持久化 BM25 索引长期记忆，JSONL 存储，SHA 去重，近似重复对齐。
+- **CodeGraph** — Tree-sitter 知识图谱，结构化查询（调用者/被调用者/定义）。
+  可作为 MCP 服务器。
+- **MCP** — 通过配置支持 Model Context Protocol 服务器。默认不启用。
+- **快照与 /undo** — 修改前自动快照文件。`/undo` 恢复上一步。多文件 patch
+  原子回滚。
+- **权限** — 只读模式（`--read-only`）、全部确认（`--ask-all`）、
+  自动批准（`--yolo`）。bash 按模式门控。
 
 ## 安装
 
-macOS / Linux：
-
 ```sh
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/amemiya02/deepseekcode/main/install.sh | sh
-```
 
-Homebrew：
-
-```sh
+# Homebrew
 brew install amemiya02/deepseekcode/deepseekcode
-```
 
-Scoop：
-
-```sh
+# Scoop
 scoop bucket add deepseekcode https://github.com/amemiya02/deepseekcode-scoop
 scoop install deepseekcode
-```
 
-Go：
-
-```sh
+# Go
 go install github.com/amemiya02/deepseekcode/cmd/dsc@latest
+
+# 从源码构建
+git clone https://github.com/amemiya02/deepseekcode && cd deepseekcode
+make build && ./bin/dsc -version
 ```
 
-从源码构建：
-
-```sh
-git clone https://github.com/amemiya02/deepseekcode
-cd deepseekcode
-make build
-./bin/dsc -version
-```
-
-要求：
-
-- 从源码构建时，需要与 `go.mod` 匹配或更新的 Go 版本。
-- `DEEPSEEK_API_KEY`，或在 `.deepseek/config.toml` 中配置其他 provider key。
-- Git 和 language server 是可选依赖，但能提供更完整的仓库上下文。
+要求：`DEEPSEEK_API_KEY`（或已配置的 provider key）。Git 和 LSP 可选。
 
 ## 快速开始
 
@@ -94,28 +86,21 @@ make build
 export DEEPSEEK_API_KEY=sk-...
 
 dsc                              # 打开 TUI
-dsc -p "summarize this repo"     # 运行一次 prompt 后退出
-dsc --read-only                  # 只检查，不允许 write/edit/bash 工具
-dsc init                         # 创建项目初始配置
+dsc -p "summarize this repo"     # 单次 CLI
+dsc --read-only                  # 只读检查
+dsc -c                           # 继续上次会话
+dsc -r <session-id>              # 恢复指定会话
+dsc init                         # 项目配置脚手架
 dsc doctor                       # 检查本地环境
-```
-
-会话快捷参数：
-
-```sh
-dsc -c                 # 继续当前项目最近一次会话
-dsc -r <session-id>    # 恢复指定会话
-dsc -new               # 强制创建新会话
 ```
 
 ## 配置
 
-配置按内置默认值、用户配置、项目配置、CLI flags 的顺序叠加。项目配置位于
-`./.deepseek/config.toml`；用户配置位于 `~/.deepseek/config.toml`。
-
-最小 DeepSeek 配置：
+层级叠加：内置默认值 → `~/.deepseek/config.toml` → `./.deepseek/config.toml`
+→ CLI flags。
 
 ```toml
+# 最小 DeepSeek 配置
 [active]
 provider = "deepseek"
 
@@ -123,76 +108,60 @@ provider = "deepseek"
 type = "deepseek"
 base_url = "https://api.deepseek.com"
 env_var = "DEEPSEEK_API_KEY"
-first_token_timeout_ms = 45000
-chunk_stall_timeout_ms = 20000
 
 [defaults]
 model = "deepseek-v4-flash"
 thinking = true
+
+# OpenAI-compatible 端点
+# [active]
+# provider = "openai"
+#
+# [providers.openai]
+# type = "openai-compat"
+# base_url = "https://api.openai.com"
+# env_var = "OPENAI_API_KEY"
+# default_model = "gpt-4o"
 ```
 
-OpenAI-compatible 端点：
-
-```toml
-[active]
-provider = "openai"
-
-[providers.openai]
-type = "openai-compat"
-base_url = "https://api.openai.com"
-env_var = "OPENAI_API_KEY"
-default_model = "gpt-4o"
-```
-
-完整说明见 [docs/config.md](docs/config.md) 和
-[docs/PROVIDERS.md](docs/PROVIDERS.md)。
+完整参考：[docs/config.md](docs/config.md) · [docs/PROVIDERS.md](docs/PROVIDERS.md)
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | *(必填)* | DeepSeek API 密钥 |
-| `DEEPSEEKCODE_BASE_URL` | `https://api.deepseek.com` | API 基础 URL；中国大陆用户可设为镜像地址以提升访问速度 |
-| `DEEPSEEKCODE_PROXY` | *(无)* | 显式 HTTP/HTTPS 代理 URL；优先于 `HTTPS_PROXY`/`HTTP_PROXY` |
-| `DEEPSEEKCODE_LANG` | 自动检测 | UI 语言覆盖（`zh-CN`、`en`）；回退到 `LANG` 环境变量 |
+| `DEEPSEEKCODE_BASE_URL` | `https://api.deepseek.com` | API 基础 URL（大陆可设镜像） |
+| `DEEPSEEKCODE_PROXY` | *(无)* | HTTP/HTTPS 代理；优先于 `HTTPS_PROXY` |
+| `DEEPSEEKCODE_LANG` | 自动检测 | UI 语言（`zh-CN`、`en`） |
 
 ## 文档
 
-- [配置](docs/config.md)
-- [Providers](docs/PROVIDERS.md)
-- [工具](docs/tools.md)
-- [权限](docs/permissions.md)
-- [沙箱](docs/SANDBOX.md)
-- [自定义命令](docs/commands.md)
-- [Skills](docs/skills.md)
-- [MCP](docs/mcp.md)
-- [LSP](docs/lsp.md)
-- [价格](docs/pricing.md)
-- [模型兼容性](docs/MODEL_COMPATIBILITY.md)
+[配置](docs/config.md) · [Providers](docs/PROVIDERS.md) · [工具](docs/tools.md) · [权限](docs/permissions.md) · [沙箱](docs/SANDBOX.md) · [Skills](docs/skills.md) · [Hooks](docs/hooks.md) · [MCP](docs/mcp.md) · [LSP](docs/lsp.md) · [前缀缓存](docs/prefix-cache.md) · [Duet](docs/duet.md) · [价格](docs/pricing.md) · [Web SPA](docs/WEB.md)
 
 ## 开发
 
 ```sh
 make build       # 构建 ./bin/dsc
+make build-web   # 构建内嵌 web SPA 的版本
+make desktop     # 构建 macOS .app
 make test        # go test ./...
 make test-race   # go test -race ./...
 make lint        # go vet ./...
 make fmt         # gofmt -s -w .
-make run         # 构建并启动 TUI
+make ci          # SPA 测试 + Go 测试
 ```
 
-提交 pull request 前：
-
-```sh
-make fmt
-make lint
-make test
-```
+PR 检查清单：`make fmt && make lint && make test`
 
 ## 参与贡献
 
 欢迎提交 issue 和 pull request。修改 README 时，请同步更新 `README.md` 和
-`README.zh-CN.md`，并保持匹配的 `##` 结构。只记录本仓库中已经实现且可测试的功能。
+`README.zh-CN.md`，并保持匹配的 `##` 结构。只记录已实现且可测试的功能。
+
+## 致谢
+
+缓存设计参考了 [reasonix](https://github.com/esengine/deepseek-reasonix)。
 
 ## Star History
 

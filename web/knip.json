@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/main.tsx",
+    "index.html",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "e2e/**/*.spec.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": [
+    "src/lib/devFixtures.ts",
+    "src/lib/mockGateway.ts",
+    "src/components/DiffIsland.tsx"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "vitest": false,
+  "playwright": false,
+  "rules": {
+    "files": "error",
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn",
+    "enumMembers": "warn",
+    "classMembers": "warn",
+    "duplicates": "warn",
+    "unlisted": "warn",
+    "binaries": "warn",
+    "unresolved": "warn",
+    "dependencies": "warn",
+    "devDependencies": "warn"
+  }
+}

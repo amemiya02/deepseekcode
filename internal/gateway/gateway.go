@@ -127,6 +127,9 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 	h.mux.HandleFunc("/v1/model", h.handleModel)
 	h.mux.HandleFunc("/v1/effort", h.handleEffort)
 	h.mux.HandleFunc("/v1/balance", h.handleBalance)
+	// Capability/runtime introspection (web: Capabilities view + RuntimeBanner).
+	h.mux.HandleFunc("/v1/capabilities", h.handleCapabilities)
+	h.mux.HandleFunc("/v1/runtime", h.handleRuntime)
 	h.mux.HandleFunc("/v1/output-style", h.handleOutputStyle)
 	h.mux.HandleFunc("/v1/files", h.handleFiles)
 	h.mux.HandleFunc("/v1/file", h.handleFile)

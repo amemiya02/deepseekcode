@@ -7,6 +7,8 @@ import { StatusBarLive } from './components/StatusBarLive'
 import { SettingsView } from './components/settings/SettingsWindow'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { UpdateBanner } from './components/UpdateBanner'
+import { RuntimeBanner } from './components/RuntimeBanner'
+import { fetchRuntimeInfo } from './lib/api'
 import { rewind, fork, summarize, switchSession } from './lib/checkpoint'
 import type { TranscriptMessage } from './lib/checkpoint'
 import { LocaleProvider, useLocale, useT } from './lib/i18n'
@@ -68,6 +70,14 @@ function AppInner() {
   const [models, setModels] = useState<ModelInfo[]>([])
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('medium')
+
+  // Runtime info (active model + build version) for the status banner; /v1/runtime.
+  const [runtimeInfo, setRuntimeInfo] = useState<{ model?: string; version?: string }>({})
+  useEffect(() => {
+    fetchRuntimeInfo()
+      .then((r) => setRuntimeInfo({ model: r.model, version: r.version }))
+      .catch(() => {})
+  }, [])
 
   // DEV-only fixture seed: ?fixture=<name> loads a canned transcript for visual QA.
   // Dynamic import keeps the module tree-shaken out of the production bundle.
@@ -498,6 +508,7 @@ function AppInner() {
         ) : (
           <div className={styles.appRoot}>
             {updateInfo && <UpdateBanner info={updateInfo} onDismiss={() => setUpdateInfo(null)} />}
+            <RuntimeBanner model={runtimeInfo.model} version={runtimeInfo.version} />
             <TitleBar branch={git.current || 'main'} branches={git.branches} onBranchSelect={git.checkout} onOpenPalette={() => setPaletteOpen(true)} onOpenSettings={() => setSettingsOpen(true)} workspaceHasContent={hasChanges} />
             <div className={styles.appBody}>
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />

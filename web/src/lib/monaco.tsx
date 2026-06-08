@@ -61,12 +61,3 @@ export function MonacoMount(props: MonacoMountProps): ReactElement {
   )
 }
 
-// loadMonaco warms the editor module + Monaco engine ahead of first render so the
-// first diff view is instant. Safe to call multiple times (import is memoized).
-let warmed: Promise<unknown> | null = null
-export function loadMonaco(): Promise<unknown> {
-  if (!warmed) {
-    warmed = import('@monaco-editor/react').then((mod) => mod.loader.init())
-  }
-  return warmed
-}

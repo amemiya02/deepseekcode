@@ -8,17 +8,6 @@ export interface Epoch {
   compacted: boolean
 }
 
-export interface CacheReport {
-  total_usage_turns: number
-  cache_hit_tokens: number
-  cache_miss_tokens: number
-  output_tokens: number
-  cost_cny: number
-  full_body_evictions: number
-  max_miss_tokens: number
-  cache_hit_rate: number
-}
-
 // ── Shared cross-wave types (Contract 1: defined ONCE here) ──────────────────
 export interface ModelCaps { vision: boolean; tools: boolean; reasoning: boolean }
 export interface ModelEffortDesc {
@@ -127,10 +116,6 @@ export type PermissionDecision = 'deny' | 'once' | 'session' | 'always'
 // PermissionRequest is the canonical Wave-4 alias for PermissionRequestEvent (Contract 2).
 export type PermissionRequest = PermissionRequestEvent
 
-// AskOption is one selectable answer for an AskQuestion (Contract 2).
-// (PermissionOption and AskOption share the same {label,description} shape.)
-export type AskOption = PermissionOption
-
 // AskRequest is the canonical Wave-4 alias for AskRequestEvent (Contract 2).
 export type AskRequest = AskRequestEvent
 
@@ -144,10 +129,6 @@ export interface AskAnswer {
   text?: string
   chat?: boolean
 }
-
-// PlanUpdate is the canonical Wave-4 alias for PlanUpdateEvent (Contract 2). It reuses the
-// shared PlanItem/PlanStatus types already defined in this module.
-export type PlanUpdate = PlanUpdateEvent
 
 // ---- Wave 3: session & cockpit types (Contract 1 shared types) ----
 
@@ -195,14 +176,7 @@ export interface Balance {
 export type LiveCache = CacheUpdateEvent
 export type LiveCost = CostUpdateEvent
 export type RoutingHop = RoutingEvent
-export type JobStatus = JobUpdateEvent
 export type RetryStatus = RetryEvent
-
-export async function fetchCacheReport(): Promise<CacheReport> {
-  const res = await fetch('/v1/cache')
-  if (!res.ok) throw new Error(`gateway error ${res.status}`)
-  return res.json() as Promise<CacheReport>
-}
 
 async function postJSON(path: string, body: Record<string, unknown>): Promise<void> {
   const res = await fetch(path, {
@@ -383,13 +357,6 @@ export interface McpToolResult {
   desc: string
 }
 
-export interface McpToolDetail {
-  server: string
-  tool: string
-  desc: string
-  input_schema?: Record<string, unknown>
-}
-
 export async function mcpSearch(query: string): Promise<McpToolResult[]> {
   const res = await fetch('/v1/mcp/search', {
     method: 'POST',
@@ -399,16 +366,6 @@ export async function mcpSearch(query: string): Promise<McpToolResult[]> {
   if (!res.ok) throw new Error(`gateway error ${res.status}`)
   const data = await res.json()
   return (data.results ?? []) as McpToolResult[]
-}
-
-export async function mcpDescribe(server: string, tool: string): Promise<McpToolDetail> {
-  const res = await fetch('/v1/mcp/describe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ server, tool }),
-  })
-  if (!res.ok) throw new Error(`gateway error ${res.status}`)
-  return res.json() as Promise<McpToolDetail>
 }
 
 export async function mcpCall(server: string, tool: string, args?: Record<string, unknown>): Promise<unknown> {

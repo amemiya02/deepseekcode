@@ -1,0 +1,433 @@
+[
+  {
+    "file": "App.tsx",
+    "handlers": [
+      "onAnswer",
+      "onBranchSelect",
+      "onCancel",
+      "onClose",
+      "onComplete",
+      "onDecide",
+      "onDelete",
+      "onDismiss",
+      "onEffortChange",
+      "onModeChange",
+      "onModelChange",
+      "onNew",
+      "onOpenPalette",
+      "onOpenSettings",
+      "onRename",
+      "onSelect",
+      "onSend"
+    ]
+  },
+  {
+    "file": "components/ApprovalGate.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/AskCard.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/AttachmentDrop.tsx",
+    "handlers": [
+      "onDragLeave",
+      "onDragOver",
+      "onDrop"
+    ]
+  },
+  {
+    "file": "components/BrandedSelect.tsx",
+    "handlers": [
+      "onClick",
+      "onKeyDown",
+      "onMouseEnter"
+    ]
+  },
+  {
+    "file": "components/ChangedFiles.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/CodeBlock.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/CodeViewer.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/Composer.tsx",
+    "handlers": [
+      "onAttach",
+      "onCancel",
+      "onChange",
+      "onClick",
+      "onCompositionEnd",
+      "onCompositionStart",
+      "onHover",
+      "onKeyDown",
+      "onPick",
+      "onRemove",
+      "onSend"
+    ]
+  },
+  {
+    "file": "components/ContextPills.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/DiffView.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/EffortSwitcher.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/FileMenu.tsx",
+    "handlers": [
+      "onMouseDown",
+      "onMouseMove"
+    ]
+  },
+  {
+    "file": "components/FileTree.tsx",
+    "handlers": [
+      "onAddToChat",
+      "onChange",
+      "onClick",
+      "onOpen"
+    ]
+  },
+  {
+    "file": "components/GitBranchPicker.tsx",
+    "handlers": [
+      "onClick",
+      "onKeyDown",
+      "onMouseEnter"
+    ]
+  },
+  {
+    "file": "components/McpDiscovery.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/ModeMenu.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/ModelSwitcher.tsx",
+    "handlers": [
+      "onClick",
+      "onKeyDown"
+    ]
+  },
+  {
+    "file": "components/OnboardingWizard.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/PastedTextFold.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/PermissionTier.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/PlanTodoPanel.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/ReviewPanel.tsx",
+    "handlers": [
+      "onApprove",
+      "onMouseDown",
+      "onOpen",
+      "onReject"
+    ]
+  },
+  {
+    "file": "components/RewindMenu.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/SendStopButton.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/SessionItem.tsx",
+    "handlers": [
+      "onChange",
+      "onClick",
+      "onKeyDown"
+    ]
+  },
+  {
+    "file": "components/SessionList.tsx",
+    "handlers": [
+      "onDelete",
+      "onRename",
+      "onSelect"
+    ]
+  },
+  {
+    "file": "components/SessionRail.tsx",
+    "handlers": [
+      "onChange",
+      "onClick",
+      "onDelete",
+      "onKeyDown",
+      "onRename",
+      "onSelect"
+    ]
+  },
+  {
+    "file": "components/SlashMenu.tsx",
+    "handlers": [
+      "onMouseDown",
+      "onMouseMove"
+    ]
+  },
+  {
+    "file": "components/StateViews.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/Switch.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/TelemetryStrip.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/ThinkingBlock.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/ToolCard.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/Transcript.tsx",
+    "handlers": [
+      "onFork",
+      "onRewind",
+      "onSummarize"
+    ]
+  },
+  {
+    "file": "components/UpdateBanner.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/UserMessage.tsx",
+    "handlers": [
+      "onClick",
+      "onFork",
+      "onRewind",
+      "onSummarize"
+    ]
+  },
+  {
+    "file": "components/settings/AboutSection.tsx",
+    "handlers": [
+      "onClick",
+      "onRetry"
+    ]
+  },
+  {
+    "file": "components/settings/AppearanceSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick",
+      "onRetry"
+    ]
+  },
+  {
+    "file": "components/settings/BudgetSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/DoctorView.tsx",
+    "handlers": [
+      "onClick",
+      "onRetry"
+    ]
+  },
+  {
+    "file": "components/settings/DuetSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/EditorSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/ExtensionsSection.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/KeybindingsSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/McpSection.tsx",
+    "handlers": [
+      "onCall",
+      "onChange",
+      "onClick",
+      "onSearch"
+    ]
+  },
+  {
+    "file": "components/settings/ModelsSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/NetworkSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/PermissionsSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/ProvidersSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/SandboxSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/SessionsSection.tsx",
+    "handlers": [
+      "onChange",
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/settings/SettingsWindow.tsx",
+    "handlers": [
+      "onChange",
+      "onClick",
+      "onKeyDown"
+    ]
+  },
+  {
+    "file": "components/shell/AppShell.tsx",
+    "handlers": [
+      "onDoubleClick",
+      "onKeyDown",
+      "onMouseDown"
+    ]
+  },
+  {
+    "file": "components/shell/CommandPalette.tsx",
+    "handlers": [
+      "onClick",
+      "onKeyDown",
+      "onSelect",
+      "onValueChange"
+    ]
+  },
+  {
+    "file": "components/shell/ErrorBoundary.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  },
+  {
+    "file": "components/shell/TitleBar.tsx",
+    "handlers": [
+      "onClick",
+      "onSelect"
+    ]
+  },
+  {
+    "file": "components/shell/Toasts.tsx",
+    "handlers": [
+      "onClick"
+    ]
+  }
+]

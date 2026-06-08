@@ -26,6 +26,24 @@ func TestDeriveTitle(t *testing.T) {
 	}
 }
 
+// Regression: a long multi-byte (CJK) prompt used to PANIC deriveTitle —
+// LastIndexByte's BYTE index was used to slice the RUNE slice. A long Chinese
+// first message then 500'd POST /v1/prompt.
+func TestDeriveTitleUTF8NoPanic(t *testing.T) {
+	in := strings.Repeat("你好", 15) + " " + strings.Repeat("世界", 15) // 61 runes, space at rune 30
+	got := deriveTitle(in)
+	if got == "" {
+		t.Fatal("deriveTitle returned empty for CJK prompt")
+	}
+	if want := strings.Repeat("你好", 15); got != want {
+		t.Errorf("deriveTitle(CJK) = %q, want word-truncated %q", got, want)
+	}
+	// Pure-CJK overflow (no spaces at all) hard-truncates at the rune cap.
+	if got := deriveTitle(strings.Repeat("测", 60)); got != strings.Repeat("测", 46) {
+		t.Errorf("deriveTitle(pure CJK) = %q, want 46-rune cut", got)
+	}
+}
+
 func TestSessionStore_RegistersPromptSession(t *testing.T) {
 	s := newSessionStore()
 	now := int64(1000)

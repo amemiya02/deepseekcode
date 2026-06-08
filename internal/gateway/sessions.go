@@ -102,10 +102,14 @@ func deriveTitle(prompt string) string {
 		return s
 	}
 	// Only word-truncate when the cut falls mid-word (next rune is not a space).
+	// The scan stays in RUNE space: a byte index from LastIndexByte must never
+	// slice the rune slice (multi-byte UTF-8 titles used to panic here).
 	r := runes[:max]
 	if runes[max] != ' ' {
-		if j := strings.LastIndexByte(string(r), ' '); j > 0 {
-			return strings.TrimRight(string(r[:j]), " ")
+		for j := len(r) - 1; j > 0; j-- {
+			if r[j] == ' ' {
+				return strings.TrimRight(string(r[:j]), " ")
+			}
 		}
 	}
 	return string(r)

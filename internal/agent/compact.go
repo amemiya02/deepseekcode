@@ -30,8 +30,10 @@ type CompactionConfig struct {
 
 	// AutoCompactInputTokens is the trigger threshold: once the
 	// estimated token count of the full message list exceeds this
-	// value, compaction fires (default 100_000; override via env
-	// DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS).
+	// value, compaction fires (default 800_000; override via env
+	// DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS). When semantic
+	// compaction is enabled this is reconciled against the ratio
+	// trigger — see reconcileCompactThreshold.
 	AutoCompactInputTokens int
 
 	// CacheUnit, when > 0, is the measured DeepSeek cache-unit boundary

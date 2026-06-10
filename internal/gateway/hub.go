@@ -171,6 +171,10 @@ func mapAgentEvent(ev acp.AgentEvent) sseEvent {
 		return sseEvent{name: "duet", data: mustJSON(map[string]any{
 			"decision": ev.Decision, "reason": ev.Reason,
 		})}
+	case acp.EventKindCompactionWarning:
+		return sseEvent{name: "compaction_warning", data: mustJSON(map[string]any{
+			"pressure": ev.Pressure, "threshold": ev.Threshold,
+		})}
 	default:
 		// EventKindInfo and any unknown kinds: emit as message_delta so the SPA
 		// can display them as prose. The legacy "step" event name is not part of

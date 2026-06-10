@@ -204,6 +204,8 @@ func (ad *AgentAdapter) Run(ctx context.Context, userPrompt string, onEvent func
 				onEvent(AgentEvent{Kind: EventKindToolDelta, ToolCallID: e.CallID, ToolDelta: e.Delta})
 			case agent.EventCompaction, agent.EventSemanticCompaction:
 				onEvent(AgentEvent{Kind: EventKindCache, Eviction: true})
+			case agent.EventCompactionWarning:
+				onEvent(AgentEvent{Kind: EventKindCompactionWarning, Pressure: e.Pressure, Threshold: e.Threshold})
 			case agent.EventPlanUpdate:
 				items := make([]PlanItem, len(e.Items))
 				for i, it := range e.Items {

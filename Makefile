@@ -1,4 +1,4 @@
-.PHONY: build build-web install install-web test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline demo-headtohead cover-cache web web-test desktop ci
+.PHONY: build build-web install install-web test lint clean run fmt vet tidy bench-case-study demo-cache demo-cache-offline demo-headtohead bench-h2h cover-cache web web-test desktop ci
 
 BIN_NAME := dsc
 BIN_DIR := bin
@@ -63,6 +63,10 @@ demo-cache-offline:
 
 demo-headtohead: ## run cache cost head-to-head (offline golden by default)
 	go run ./bench/cmd/cachedemo headtohead $(ARGS)
+
+bench-h2h: build
+	@echo "Running dsc-vs-reasonix head-to-head cache benchmark..."
+	@go run ./bench/h2h/cmd/h2h $(ARGS)
 
 cover-cache:
 	go test -cover -coverprofile=coverage-cache.out ./internal/llm/ ./internal/repair/ ./internal/routing/ ./internal/agent/

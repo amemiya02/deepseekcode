@@ -21,7 +21,7 @@ import (
 // SemanticCompactionConfig controls semantic compaction behavior.
 type SemanticCompactionConfig struct {
 	// WarnThreshold is the context ratio (0-1) at which to emit
-	// a warning and prepare pinned facts. Default: 0.80
+	// a warning and prepare pinned facts. Default: 0.50
 	WarnThreshold float64
 
 	// CompactThreshold is the context ratio at which to attempt
@@ -77,7 +77,7 @@ func ContextPressure(messages []llm.Message, maxContextTokens int, charsPerToken
 // Returns the action: "none", "warn", "compact", or "protect".
 func ShouldSemanticCompact(pressure float64, cfg SemanticCompactionConfig) string {
 	if cfg.WarnThreshold <= 0 {
-		cfg.WarnThreshold = 0.80
+		cfg.WarnThreshold = 0.50
 	}
 	if cfg.CompactThreshold <= 0 {
 		cfg.CompactThreshold = 0.90
@@ -102,7 +102,7 @@ func ShouldSemanticCompact(pressure float64, cfg SemanticCompactionConfig) strin
 // sensible defaults.
 func defaultSemanticCompactionConfig() SemanticCompactionConfig {
 	return SemanticCompactionConfig{
-		WarnThreshold:       0.80,
+		WarnThreshold:       0.50,
 		CompactThreshold:    0.90,
 		ProtectionThreshold: 0.95,
 		UsableWindowTokens:  1_000_000,

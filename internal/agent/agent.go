@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -173,6 +174,11 @@ type Agent struct {
 	// Count() is surfaced via trace-inspect so operators can see how often
 	// compaction fires and what it costs.
 	compactionMetrics compactionMetrics
+
+	// compactionWarned latches the warn-once behavior: once a warning is
+	// published for pressure in [WarnThreshold, CompactThreshold), it is
+	// not re-published until the next compaction resets the latch.
+	compactionWarned bool
 
 	// DisablePrefixEpoch disables the PrefixEpoch feature (for benchmarking).
 	DisablePrefixEpoch bool
@@ -903,7 +909,8 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		pressure := ContextPressure(a.Messages, maxCtx, a.charsPerToken)
 		action := ShouldSemanticCompact(pressure, a.SemanticCfg)
 
-		if action == "warn" {
+		if action == "warn" && !a.compactionWarned {
+			a.compactionWarned = true
 			a.bus.Publish(EventCompactionWarning{
 				Pressure:  pressure,
 				Threshold: a.SemanticCfg.WarnThreshold,
@@ -924,6 +931,11 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 			}
 			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, toolSpecs, a.SemanticCfg)
 			if res.Summary != "" {
+				if home, herr := os.UserHomeDir(); herr == nil {
+					if _, aerr := archiveCompactedMessages(filepath.Join(home, ".deepseek", "archive"), a.archiveLabel(), a.Messages[res.FromIdx:res.ToIdx]); aerr != nil {
+						a.bus.Publish(EventInfo{Text: "compaction archive failed (continuing): " + aerr.Error()})
+					}
+				}
 				if a.Persister != nil {
 					if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
 						a.bus.Publish(EventInfo{Text: "semantic compaction persistence failed: " + err.Error()})
@@ -932,6 +944,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
 				a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+				a.compactionWarned = false // reset warn latch on successful compaction
 				a.compactionMetrics.record(res.SummaryCost) // M3: track compaction frequency + cost
 				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
@@ -975,6 +988,11 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	if res.Summary == "" {
 		return
 	}
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if _, aerr := archiveCompactedMessages(filepath.Join(home, ".deepseek", "archive"), a.archiveLabel(), a.Messages[res.FromIdx:res.ToIdx]); aerr != nil {
+			a.bus.Publish(EventInfo{Text: "compaction archive failed (continuing): " + aerr.Error()})
+		}
+	}
 	if a.Persister != nil {
 		if _, err := a.Persister.ReplaceWithCompaction(ctx, res.FromIdx, res.ToIdx, res.Summary); err != nil {
 			a.bus.Publish(EventInfo{Text: "compaction persistence failed: " + err.Error()})
@@ -983,6 +1001,7 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
 	a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
+	a.compactionWarned = false // reset warn latch on successful compaction
 	a.compactionMetrics.record(0) // M3: deterministic compaction has no LLM cost
 	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
@@ -1009,6 +1028,17 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		StaticPrefixHashBefore: before,
 		StaticPrefixHashAfter:  after,
 	})
+}
+
+// archiveLabel names the per-session archive subdirectory. Falls back
+// to a fixed label when the agent has no session identifier.
+func (a *Agent) archiveLabel() string {
+	if a.Persister != nil {
+		if sid := a.Persister.SessionID(); sid != "" {
+			return sid
+		}
+	}
+	return "session"
 }
 
 // compactionPrefixHashes returns the measured static-prefix fingerprints for a

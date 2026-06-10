@@ -80,17 +80,17 @@ func TestShouldSemanticCompact_ProtectAt95Percent(t *testing.T) {
 // --- Test: Below thresholds returns none ---
 func TestShouldSemanticCompact_NoneBelowThreshold(t *testing.T) {
 	cfg := SemanticCompactionConfig{
-		WarnThreshold:       0.80,
+		WarnThreshold:       0.50,
 		CompactThreshold:    0.90,
 		ProtectionThreshold: 0.95,
 	}
-	action := ShouldSemanticCompact(0.50, cfg)
+	action := ShouldSemanticCompact(0.49, cfg)
 	if action != "none" {
-		t.Errorf("expected 'none' at 50%% pressure; got %q", action)
+		t.Errorf("expected 'none' at 49%% pressure; got %q", action)
 	}
-	action = ShouldSemanticCompact(0.79, cfg)
+	action = ShouldSemanticCompact(0.40, cfg)
 	if action != "none" {
-		t.Errorf("expected 'none' at 79%% pressure; got %q", action)
+		t.Errorf("expected 'none' at 40%% pressure; got %q", action)
 	}
 }
 
@@ -628,8 +628,8 @@ func TestSemanticCompact_EmptyWhenTooFewMessages(t *testing.T) {
 // --- Test: DefaultSemanticCompactionConfig ---
 func TestDefaultSemanticCompactionConfig(t *testing.T) {
 	cfg := defaultSemanticCompactionConfig()
-	if cfg.WarnThreshold != 0.80 {
-		t.Errorf("WarnThreshold: got %f want 0.80", cfg.WarnThreshold)
+	if cfg.WarnThreshold != 0.50 {
+		t.Errorf("WarnThreshold: got %f want 0.50", cfg.WarnThreshold)
 	}
 	if cfg.CompactThreshold != 0.90 {
 		t.Errorf("CompactThreshold: got %f want 0.90", cfg.CompactThreshold)

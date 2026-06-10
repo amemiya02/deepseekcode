@@ -49,7 +49,7 @@
     "commit": "6eb35881c0e438ffb663ddbad3a61babaa5e5d8a",
     "fix_commit": "05f1ef7bb50b8a8cb33a9dd3ba1c5b94bff0f723",
     "prompt": "The RouteHeaders middleware has a bug where an empty router (created with RouteHeaders() but with no routes added) invokes the next handler twice instead of once. Fix the double-invocation issue.",
-    "fail_to_pass": ["TestRouteHeaders", "TestPattern"],
+    "fail_to_pass": ["TestRouteHeaders"],
     "test_dir": "./middleware/...",
     "turn_cap": 30,
     "wallclock_cap_min": 20

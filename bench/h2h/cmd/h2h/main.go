@@ -78,6 +78,13 @@ func main() {
 					}
 				}
 				res.Resolved = ws.Score(task)
+				// SWE-bench convention: a run that did not finish
+				// cleanly (cap exceeded, crash) is unresolved, even if
+				// the tests happen to pass. Per-run detail keeps both
+				// flags visible.
+				if res.DNF {
+					res.Resolved = false
+				}
 				os.RemoveAll(tmp)
 				rr.Results = append(rr.Results, res)
 				log.Printf("[%s/%s#%d] resolved=%v hit=%.1f%% billable=%d err=%q",
@@ -156,11 +163,13 @@ func goldcheckTask(task h2h.TaskSpec) error {
 	if err == nil {
 		return fmt.Errorf("tests PASS at buggy commit (expected FAIL) -- task is bogus or commit is wrong")
 	}
-	// Require evidence a test actually ran and failed; a compile error
-	// of the fix-commit tests against buggy sources also exits non-zero
-	// but proves nothing about the task.
-	if !strings.Contains(output, "--- FAIL: ") {
-		return fmt.Errorf("tests did not run-and-fail at buggy commit (build error?):\n%s", tail(output, 2000))
+	// Require evidence the NAMED tests actually ran and failed; a
+	// compile error also exits non-zero but proves nothing, and an
+	// unrelated test failing must not vouch for the F2P tests.
+	for _, p := range task.FailToPass {
+		if !failedNamed(output, p) {
+			return fmt.Errorf("F2P test %q did not run-and-fail at buggy commit (build error? wrong name? passes at buggy?):\n%s", p, tail(output, 2000))
+		}
 	}
 	fmt.Printf("  NEGATIVE OK: tests run and fail at buggy commit\n")
 
@@ -180,4 +189,30 @@ func tail(s string, n int) string {
 		return s
 	}
 	return "..." + s[len(s)-n:]
+}
+
+// failedNamed reports whether the go test -v output contains a
+// "--- FAIL:" line attributable to the given fail-to-pass pattern:
+// the pattern's leaf name (last slash segment, anchors stripped) must
+// appear as a segment of the failing test's name. Wrapper-suite
+// failures report as e.g. "--- FAIL: Test/ConvertToServiceConfigSuccess/case".
+func failedNamed(output, pattern string) bool {
+	leaf := pattern[strings.LastIndex(pattern, "/")+1:]
+	leaf = strings.TrimSuffix(strings.TrimPrefix(leaf, "^"), "$")
+	for _, line := range strings.Split(output, "\n") {
+		idx := strings.Index(line, "--- FAIL: ")
+		if idx < 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[idx+len("--- FAIL: "):])
+		if i := strings.IndexByte(name, ' '); i >= 0 {
+			name = name[:i] // strip the "(0.01s)" duration suffix
+		}
+		for _, seg := range strings.Split(name, "/") {
+			if seg == leaf {
+				return true
+			}
+		}
+	}
+	return false
 }

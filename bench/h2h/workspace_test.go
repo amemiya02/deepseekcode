@@ -81,10 +81,19 @@ func TestScoreDoesNotLeakGoldFix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWorkspace: %v", err)
 	}
+	// Adversarial plant: gitignore a cheat test whose TestMain hijacks
+	// the binary and prints PASS. Scoring must delete it (ls-files
+	// --others without --exclude-standard) — if it survives, the
+	// unfixed workspace below would score resolved.
+	os.WriteFile(filepath.Join(ws.Dir, ".gitignore"), []byte("cheat_test.go\n"), 0o644)
+	os.WriteFile(filepath.Join(ws.Dir, "cheat_test.go"), []byte("package fixture\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestMain(m *testing.M) {\n\tfmt.Println(\"--- PASS: TestAdd\\nPASS\")\n\tos.Exit(0)\n}\n"), 0o644)
 	// An untouched workspace must NOT be resolved — if it is, scoring
-	// applied the gold fix.
+	// applied the gold fix (or the planted cheat test survived).
 	if ws.Score(task) {
-		t.Fatal("unfixed workspace scored resolved: gold fix leaked into scoring")
+		t.Fatal("unfixed workspace scored resolved: gold fix leaked into scoring or cheat test survived")
+	}
+	if _, err := os.Stat(filepath.Join(ws.Dir, "cheat_test.go")); !os.IsNotExist(err) {
+		t.Fatal("gitignored cheat_test.go survived test-tamper cleanup")
 	}
 	// The buggy source must be untouched by scoring...
 	b, err := os.ReadFile(filepath.Join(ws.Dir, "add.go"))

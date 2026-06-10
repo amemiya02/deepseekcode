@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,7 +56,10 @@ func splitLines(out []byte) []string {
 // solution itself and rig the score.
 func (w *Workspace) RestoreCanonicalTests(task TaskSpec) error {
 	// 1. Neutralize agent test tampering: revert tracked changes...
-	out, _ := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit).Output()
+	out, err := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit).Output()
+	if err != nil {
+		return fmt.Errorf("diff vs %s: %w", task.Commit, err)
+	}
 	for _, f := range splitLines(out) {
 		if !isTestPath(f) {
 			continue
@@ -65,7 +69,12 @@ func (w *Workspace) RestoreCanonicalTests(task TaskSpec) error {
 		}
 	}
 	// ...and delete untracked test files, which `git diff` cannot see.
-	out, _ = exec.Command("git", "-C", w.Dir, "ls-files", "--others", "--exclude-standard").Output()
+	// No --exclude-standard: an agent could gitignore a planted
+	// cheat_test.go (e.g. a TestMain that prints PASS) to hide it.
+	out, err = exec.Command("git", "-C", w.Dir, "ls-files", "--others").Output()
+	if err != nil {
+		return fmt.Errorf("ls-files: %w", err)
+	}
 	for _, f := range splitLines(out) {
 		if isTestPath(f) {
 			os.Remove(filepath.Join(w.Dir, f))
@@ -76,7 +85,7 @@ func (w *Workspace) RestoreCanonicalTests(task TaskSpec) error {
 	}
 	// 2. Bring in exactly the test files the fixing PR changed (the
 	//    fail-to-pass tests were introduced there, SWE-bench style).
-	out, err := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit, task.FixCommit).Output()
+	out, err = exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit, task.FixCommit).Output()
 	if err != nil {
 		return fmt.Errorf("diff %s..%s: %w", task.Commit, task.FixCommit, err)
 	}
@@ -104,7 +113,13 @@ func (w *Workspace) ApplyGoldFix(task TaskSpec) error {
 			continue
 		}
 		if err := exec.Command("git", "-C", w.Dir, "checkout", task.FixCommit, "--", f).Run(); err != nil {
-			// Checkout fails for files the fix commit deleted.
+			// Only treat a checkout failure as "deleted by the fix
+			// commit" when the file truly isn't there — anything else
+			// (corrupt object, transient git failure) must not silently
+			// delete a needed source file.
+			if exec.Command("git", "-C", w.Dir, "cat-file", "-e", task.FixCommit+":"+f).Run() == nil {
+				return fmt.Errorf("apply gold fix: checkout %s from %s: %w", f, task.FixCommit, err)
+			}
 			if rmErr := os.Remove(filepath.Join(w.Dir, f)); rmErr != nil {
 				return fmt.Errorf("apply gold fix %s: %w", f, err)
 			}
@@ -113,23 +128,38 @@ func (w *Workspace) ApplyGoldFix(task TaskSpec) error {
 	return nil
 }
 
-// RunFailToPass runs the task's fail-to-pass tests with patterns
-// anchored ^...$ (so TestFoo cannot match TestFooBar) and a hard
-// timeout, returning the combined output.
+// anchorPattern anchors EVERY slash segment of a -run pattern with
+// ^...$. go test splits -run on "/" and matches each level separately,
+// so "^Test/Foo$" would become ^Test + Foo$ and run every wrapper
+// suite in the package; "^Test$/^Foo$" runs only the targeted subtest
+// (and TestFoo cannot match TestFooBar).
+func anchorPattern(p string) string {
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		if !strings.HasPrefix(s, "^") {
+			s = "^" + s
+		}
+		if !strings.HasSuffix(s, "$") {
+			s = s + "$"
+		}
+		segs[i] = s
+	}
+	return strings.Join(segs, "/")
+}
+
+// RunFailToPass runs the task's fail-to-pass tests with per-segment
+// anchored patterns and a hard timeout, returning the combined output.
 func (w *Workspace) RunFailToPass(task TaskSpec) (string, error) {
 	var anchored []string
 	for _, p := range task.FailToPass {
-		if !strings.HasPrefix(p, "^") {
-			p = "^" + p
-		}
-		if !strings.HasSuffix(p, "$") {
-			p = p + "$"
-		}
-		anchored = append(anchored, p)
+		anchored = append(anchored, anchorPattern(p))
 	}
 	cmd := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", strings.Join(anchored, "|"), "-v", task.TestDir)
 	cmd.Dir = w.Dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	// Own process group so the hard kill reaps compiled test binaries,
+	// not just the go tool.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	done := make(chan struct {
 		out []byte
 		err error
@@ -145,7 +175,9 @@ func (w *Workspace) RunFailToPass(task TaskSpec) (string, error) {
 	case result := <-done:
 		return string(result.out), result.err
 	case <-time.After(11 * time.Minute):
-		cmd.Process.Kill()
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 		return "", fmt.Errorf("test run exceeded 11m hard kill")
 	}
 }

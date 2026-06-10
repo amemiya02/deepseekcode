@@ -131,6 +131,9 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 	c.mu.Unlock()
 	req, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 	if err := c.write(req); err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		return nil, err
 	}
 	var msg rpcMsg

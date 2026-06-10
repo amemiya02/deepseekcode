@@ -4,11 +4,15 @@ package h2h
 
 // TaskSpec is one pinned real-repo editing task.
 type TaskSpec struct {
-	ID              string   `json:"id"`
-	Repo            string   `json:"repo"`
-	Commit          string   `json:"commit"`     // buggy commit (checkout this)
-	FixCommit       string   `json:"fix_commit"` // fixing commit (checkout tests from here)
-	Prompt          string   `json:"prompt"`
+	ID        string `json:"id"`
+	Repo      string `json:"repo"`
+	Commit    string `json:"commit"`     // buggy commit (checkout this)
+	FixCommit string `json:"fix_commit"` // fixing commit (checkout tests from here)
+	Prompt    string `json:"prompt"`
+	// FailToPass test names; "Test/Name" means a grpctest-style wrapper
+	// suite subtest. Each slash segment is anchored ^...$ at run time,
+	// so the leaf name must be unique package-wide for goldcheck's
+	// failure attribution to work.
 	FailToPass      []string `json:"fail_to_pass"`
 	TestDir         string   `json:"test_dir"`
 	TurnCap         int      `json:"turn_cap"`

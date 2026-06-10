@@ -100,6 +100,7 @@ func TestCallErrorsWhenAgentCrashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer c.Close() // reap the exited child; error irrelevant here
 	done := make(chan error, 1)
 	go func() { done <- c.Initialize() }()
 	select {
@@ -109,5 +110,36 @@ func TestCallErrorsWhenAgentCrashes(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("call deadlocked after agent crash")
+	}
+}
+
+// scriptedStdin makes call() deterministic for the drain test: by the
+// time call() reaches its select, a response is already buffered AND
+// the client is already closed, so whichever select arm wins must
+// still return the response.
+type scriptedStdin struct{ c *Client }
+
+func (s *scriptedStdin) Write(p []byte) (int, error) {
+	s.c.pending[1] <- rpcMsg{Result: json.RawMessage(`{"ok":true}`)} // call() registered id 1 before writing
+	close(s.c.closed)
+	return len(p), nil
+}
+func (s *scriptedStdin) Close() error { return nil }
+
+// TestCallDrainsBufferedResponseAfterClose pins the closed-path drain:
+// a response delivered just before the process exit must not be
+// reported as a crash. Iterated because the select between the two
+// ready arms is randomized.
+func TestCallDrainsBufferedResponseAfterClose(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		c := &Client{pending: map[int64]chan rpcMsg{}, closed: make(chan struct{})}
+		c.stdin = &scriptedStdin{c: c}
+		res, err := c.call("x", nil)
+		if err != nil {
+			t.Fatalf("iteration %d: buffered response lost on closed path: %v", i, err)
+		}
+		if string(res) != `{"ok":true}` {
+			t.Fatalf("iteration %d: wrong result: %s", i, res)
+		}
 	}
 }

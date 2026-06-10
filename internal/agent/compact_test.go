@@ -767,6 +767,28 @@ func TestShouldCompactRespectsTailTokensFloor(t *testing.T) {
 	}
 }
 
+// TestShouldCompactSkipsUneconomicFold verifies the fold-economics gate: when the
+// foldable region [0, toIdx) is smaller than MinFoldTokens, compaction is skipped
+// because the body rewrite wouldn't save enough tokens to justify itself.
+func TestShouldCompactSkipsUneconomicFold(t *testing.T) {
+	// 12 msgs × ~205 tokens ≈ 2460 total. A high tail floor leaves a
+	// foldable sliver below MinFoldTokens → must skip; a low floor
+	// leaves a large fold → must compact.
+	msgs := make([]llm.Message, 12)
+	for i := range msgs {
+		msgs[i] = llm.Message{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: strings.Repeat("y", 800)}}}
+	}
+	cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 100,
+		TailTokensFloor: 2300, MinFoldTokens: 400}
+	if ok, _, _ := ShouldCompact(msgs, cfg, 4.0); ok {
+		t.Fatal("fold below MinFoldTokens must not compact")
+	}
+	cfg.TailTokensFloor = 800
+	if ok, _, _ := ShouldCompact(msgs, cfg, 4.0); !ok {
+		t.Fatal("economic fold must compact")
+	}
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

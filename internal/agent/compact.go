@@ -52,6 +52,11 @@ type CompactionConfig struct {
 	// inspiration: Reasonix's 16k verbatim tail (MIT). Default 16_384
 	// via DefaultCompactionConfig; 0 = message-count floor only.
 	TailTokensFloor int
+
+	// MinFoldTokens, when > 0, skips compaction if the foldable region
+	// [0, toIdx) is smaller than this — a body rewrite must pay for
+	// itself in saved tokens. Default 400.
+	MinFoldTokens int
 }
 
 // CompactionResult is what CompactSession produces. Summary == ""
@@ -376,6 +381,9 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 	if toIdx <= 0 {
 		return false, 0, 0
 	}
+	if cfg.MinFoldTokens > 0 && EstimateInputTokens(messages[:toIdx], charsPerToken) < cfg.MinFoldTokens {
+		return false, 0, 0
+	}
 	return true, 0, toIdx
 }
 
@@ -420,6 +428,7 @@ func DefaultCompactionConfig() CompactionConfig {
 		MaxEstimatedTokens:     10_000,
 		AutoCompactInputTokens: 800_000,
 		TailTokensFloor:        16_384,
+		MinFoldTokens:          400,
 	}
 	if v := os.Getenv("DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {

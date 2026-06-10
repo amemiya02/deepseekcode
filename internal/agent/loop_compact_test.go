@@ -38,6 +38,10 @@ func TestCompact_FlagTriggersCompact(t *testing.T) {
 	// messages) produces far fewer than 16k tokens, so the floor would
 	// consume the entire window and suppress compaction.
 	a.CompactionCfg.TailTokensFloor = 0
+	// Disable the fold-economics gate — the foldable region in this fixture
+	// is too small to exceed the default MinFoldTokens, so the gate would
+	// suppress compaction.
+	a.CompactionCfg.MinFoldTokens = 0
 
 	// Populate the message list with enough messages to exceed the threshold.
 	for i := 0; i < 10; i++ {

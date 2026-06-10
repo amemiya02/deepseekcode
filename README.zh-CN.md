@@ -17,6 +17,11 @@
 > 稳定的 Agent 为 0% —— **便宜 4.5×**。每个数字取自 DeepSeek 自己的
 > `prompt_cache_hit_tokens`。自行复现：`make demo-cache`。
 > 证据：[bench/](bench/README.md)。
+>
+> **正面对决 (2026-06-10)** vs Reasonix，5 个真实开源 issue（gRPC、Cobra、
+> chi）：dsc 解决 **7/10**（70%）vs Reasonix **6/10**（60%）；Reasonix 缓存
+> 命中 93.9% vs dsc 89.6%，但因超回合上限 DNF 3 次。
+> [完整结果](bench/README.md#h2h-cache-benchmark-2026-06-10)。
 
 - **可证明的前缀缓存稳定性** — 单一 canonical 序列化器同时喂给 wire 字节和
   缓存指纹，构造级一致不可能发散；`dsc trace inspect` 的 `prefixes==1`

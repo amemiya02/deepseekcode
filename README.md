@@ -18,6 +18,11 @@ sandbox, and signal-driven model routing.
 > vs 0% for a cache-naive agent — **4.5× cheaper**. Every figure from
 > DeepSeek's own `prompt_cache_hit_tokens`. Reproduce: `make demo-cache`.
 > Evidence: [bench/](bench/README.md).
+>
+> **Head-to-head (2026-06-10)** vs Reasonix on 5 real open-source issues
+> (gRPC, Cobra, chi): dsc resolved **7/10** (70%) vs Reasonix **6/10** (60%);
+> Reasonix hit 93.9% cache vs dsc 89.6% but burned 3 DNFs on turn-cap
+> overruns. [Full results](bench/README.md#h2h-cache-benchmark-2026-06-10).
 
 - **Provable prefix-cache stability** — single canonical serializer for wire
   bytes and cache fingerprint; `dsc trace inspect` shows `prefixes==1`

@@ -418,6 +418,37 @@ benchmark:
 The output shows usage turns, cache hit rate, hit/miss tokens, cost, root
 epochs, subagent epochs, and per-epoch completion state.
 
+## h2h cache benchmark — 2026-06-10
+
+Head-to-head comparison of **dsc** (`e154c0e`) vs **Reasonix** (`013d55c7…`)
+on `deepseek-v4-flash` across 5 real open-source issues (gRPC-8915, gRPC-9111,
+gRPC-8831, cobra-1781, chi-1045), each run twice (10 runs per arm).
+
+### Aggregate
+
+| arm | runs | resolved | DNF | hit rate | billable (miss+out) |
+|---|---|---|---|---|---|
+| dsc | 10 | 7 | 1 | 89.6% | 472 661 |
+| reasonix | 10 | 6 | 3 | 93.9% | 420 425 |
+
+**Win gate: false** — dsc resolved more tasks (7 vs 6) but Reasonix achieved
+higher cache hit rate (93.9% vs 89.6%). Reasonix's 3 DNFs were all turn-cap
+overruns (>30 turns); dsc had 1.
+
+### Takeaway
+
+dsc's task-resolution edge (70% vs 60%) comes from fewer turn-cap failures —
+its compaction and routing keep sessions within budget. Reasonix achieves
+tighter cache packing on the runs that complete, but pushes harder against the
+turn ceiling. Both tools are in the same cache-efficiency league (~89–94%);
+the differentiator is reliability under a fixed turn budget.
+
+### Reproduce
+
+```sh
+make bench-h2h ARGS="-reasonix /path/to/reasonix"
+```
+
 ## Future Work
 
 - [ ] Support for multi-turn conversations

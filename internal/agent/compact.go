@@ -45,6 +45,13 @@ type CompactionConfig struct {
 	// its pre-§3.6 behavior. Comes from a cacheprobe measurement; it never
 	// touches the frozen prefix (the summary is an assistant body message).
 	CacheUnit int
+
+	// TailTokensFloor, when > 0, guarantees at least this many tokens
+	// of recent messages survive every compaction verbatim (in addition
+	// to the PreserveRecentMessages message-count floor). Cadence-policy
+	// inspiration: Reasonix's 16k verbatim tail (MIT). Default 16_384
+	// via DefaultCompactionConfig; 0 = message-count floor only.
+	TailTokensFloor int
 }
 
 // CompactionResult is what CompactSession produces. Summary == ""
@@ -359,7 +366,17 @@ func ShouldCompact(messages []llm.Message, cfg CompactionConfig, charsPerToken f
 	if EstimateInputTokens(messages, charsPerToken) < threshold {
 		return false, 0, 0
 	}
-	return true, 0, len(messages) - preserve
+	toIdx = len(messages) - preserve
+	if cfg.TailTokensFloor > 0 {
+		// Walk the boundary back until the kept tail reaches the floor.
+		for toIdx > 0 && EstimateInputTokens(messages[toIdx:], charsPerToken) < cfg.TailTokensFloor {
+			toIdx--
+		}
+	}
+	if toIdx <= 0 {
+		return false, 0, 0
+	}
+	return true, 0, toIdx
 }
 
 // reconcileCompactThreshold returns the effective absolute token threshold for
@@ -402,6 +419,7 @@ func DefaultCompactionConfig() CompactionConfig {
 		PreserveRecentMessages: 4,
 		MaxEstimatedTokens:     10_000,
 		AutoCompactInputTokens: 800_000,
+		TailTokensFloor:        16_384,
 	}
 	if v := os.Getenv("DEEPSEEKCODE_AUTO_COMPACT_INPUT_TOKENS"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {

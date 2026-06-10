@@ -34,6 +34,10 @@ func TestCompact_FlagTriggersCompact(t *testing.T) {
 	// Keep only the last 2 messages outside the window; we need at least
 	// preserve*2+1 messages for ShouldCompact to fire.
 	a.CompactionCfg.PreserveRecentMessages = 2
+	// Disable the token-based tail floor — this test's fixture (10 short
+	// messages) produces far fewer than 16k tokens, so the floor would
+	// consume the entire window and suppress compaction.
+	a.CompactionCfg.TailTokensFloor = 0
 
 	// Populate the message list with enough messages to exceed the threshold.
 	for i := 0; i < 10; i++ {

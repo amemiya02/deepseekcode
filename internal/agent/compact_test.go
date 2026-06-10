@@ -738,6 +738,35 @@ func TestAgentMaybeCompactNoOpBelowThreshold(t *testing.T) {
 	}
 }
 
+// TestShouldCompactRespectsTailTokensFloor verifies the token-based verbatim
+// tail floor: when TailTokensFloor is set, the kept tail must contain at least
+// that many tokens, even if PreserveRecentMessages would keep fewer.
+func TestShouldCompactRespectsTailTokensFloor(t *testing.T) {
+	// 60 messages x 4000 chars each; low absolute threshold so token pressure
+	// triggers. With the tokenizer ~500 tokens/msg, total ≈ 30k tokens — well
+	// above the 16k floor. With TailTokensFloor=16384 the window must end
+	// early enough to keep >=16k tokens verbatim.
+	msgs := make([]llm.Message, 60)
+	for i := range msgs {
+		msgs[i] = llm.Message{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: strings.Repeat("x", 4000)}}}
+	}
+	cfg := CompactionConfig{PreserveRecentMessages: 4, AutoCompactInputTokens: 1000, TailTokensFloor: 16384}
+	ok, from, to := ShouldCompact(msgs, cfg, 4.0)
+	if !ok {
+		t.Fatal("expected compaction to trigger")
+	}
+	if from != 0 {
+		t.Fatalf("from=%d", from)
+	}
+	tail := EstimateInputTokens(msgs[to:], 4.0)
+	if tail < 16384 {
+		t.Fatalf("tail floor violated: kept only %d tokens (to=%d)", tail, to)
+	}
+	if to <= 0 {
+		t.Fatal("floor consumed the whole window")
+	}
+}
+
 func TestEstimateTokensApproxFor100Chars(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Blocks: []llm.ContentBlock{
 		llm.TextBlock{Text: strings.Repeat("x", 100)},

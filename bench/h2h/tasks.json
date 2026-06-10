@@ -1,0 +1,52 @@
+[
+  {
+    "id": "grpc-3476",
+    "repo": "https://github.com/grpc/grpc-go",
+    "commit": "e965f2a60b15c8d613c9fb4439efccc4c706daa0",
+    "prompt": "cmp.Equal is not supposed to be used in production code because of its propensity towards panicking. This equality will eventually be checked from the LB policy when it gets a service config update. Fix the equality implementation for key builder maps.",
+    "fail_to_pass": ["TestBuilderMapEqual", "TestBuilderEqual", "TestMatcherEqual"],
+    "test_dir": "./balancer/rls/internal/keys/...",
+    "turn_cap": 30,
+    "wallclock_cap_min": 20
+  },
+  {
+    "id": "grpc-2996",
+    "repo": "https://github.com/grpc/grpc-go",
+    "commit": "45bd2846a34b039c5f1e69b7202f118687156b34",
+    "prompt": "Assume not running on GCP if dmi not present. Fix the panic that occurs when detecting the GCP environment.",
+    "fail_to_pass": ["TestIsRunningOnGCPNoProductNameFile"],
+    "test_dir": "./credentials/alts/...",
+    "turn_cap": 30,
+    "wallclock_cap_min": 20
+  },
+  {
+    "id": "grpc-2760",
+    "repo": "https://github.com/grpc/grpc-go",
+    "commit": "d5973a91700d6143b4c45366641bd3911034e10f",
+    "prompt": "Rate limit DNS resolution requests to prevent excessive lookups.",
+    "fail_to_pass": ["TestRateLimitedResolve"],
+    "test_dir": "./resolver/dns/...",
+    "turn_cap": 30,
+    "wallclock_cap_min": 20
+  },
+  {
+    "id": "cobra-1781",
+    "repo": "https://github.com/spf13/cobra",
+    "commit": "cc7e235fc26cfd0b5ae36c960f399eea4badaa3e",
+    "prompt": "When the command searches args to find the arg matching a particular subcommand name, it needs to ignore flag values, as it is possible that the value for a flag might match the name of the sub command. Fix argsMinusFirstX() to ignore flag values when it searches for the X to exclude from the result.",
+    "fail_to_pass": ["TestFind"],
+    "test_dir": ".",
+    "turn_cap": 30,
+    "wallclock_cap_min": 20
+  },
+  {
+    "id": "chi-1045",
+    "repo": "https://github.com/go-chi/chi",
+    "commit": "6eb35881c0e438ffb663ddbad3a61babaa5e5d8a",
+    "prompt": "Fix a bug in the RouteHeaders middleware where an empty router (created with RouteHeaders() but no routes added) would invoke the next handler twice. In HeaderRouter.Handler(), when len(hr) == 0, the code calls next.ServeHTTP(w, r) but doesn't return, causing execution to continue and call next.ServeHTTP again.",
+    "fail_to_pass": ["TestRouteHeaders", "TestPattern"],
+    "test_dir": "./middleware/...",
+    "turn_cap": 30,
+    "wallclock_cap_min": 20
+  }
+]

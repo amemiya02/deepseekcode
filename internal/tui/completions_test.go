@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
 
 // sampleItems builds a small candidate set spanning the three cmd kinds so the
@@ -162,8 +164,11 @@ func TestSelectedReturnsCursorItem(t *testing.T) {
 	}
 }
 
-// TestViewEmptyWhenInactiveOrNoMatch verifies View renders nothing in the two
-// "no popup" states, and Lines agrees.
+// TestViewEmptyWhenInactiveOrNoMatch verifies View renders nothing on a closed
+// popup, while an OPEN popup with zero matches keeps its fixed-height card —
+// padded blank around a dimmed notice row — instead of collapsing. The card's
+// geometry is a function of the candidate set, not the live match count, so a
+// dud query can no longer bounce the frame.
 func TestViewEmptyWhenInactiveOrNoMatch(t *testing.T) {
 	th := DarkTheme()
 	var c completions
@@ -176,12 +181,38 @@ func TestViewEmptyWhenInactiveOrNoMatch(t *testing.T) {
 	}
 
 	c.Open('/', sampleItems(), 0)
+	want := len(sampleItems()) + 2 // every candidate + 2 borders
 	c.SetQuery("zzz-no-match")
-	if v := c.View(th, 80); v != "" {
-		t.Fatalf("View with zero matches = %q, want empty", v)
+	if c.Lines() != want {
+		t.Fatalf("Lines with zero matches = %d, want %d (fixed-height card must not collapse)", c.Lines(), want)
 	}
-	if c.Lines() != 0 {
-		t.Fatalf("Lines with zero matches = %d, want 0", c.Lines())
+	v := c.View(th, 80)
+	if got := strings.Count(v, "\n") + 1; got != want {
+		t.Fatalf("rendered lines with zero matches = %d, want %d\n--- view ---\n%s", got, want, v)
+	}
+	if !strings.Contains(v, i18n.T("app.completions.none")) {
+		t.Fatalf("zero-match card should show the %q notice\n--- view ---\n%s", i18n.T("app.completions.none"), v)
+	}
+}
+
+// TestViewFixedHeightWhileFiltering pins the popup's stability contract: the
+// card keeps exactly the same height for the whole life of one trigger session
+// no matter how the query narrows, empties, or resets the match set, so typing
+// in the menu never reflows anything around it.
+func TestViewFixedHeightWhileFiltering(t *testing.T) {
+	th := DarkTheme()
+	var c completions
+	c.Open('/', sampleItems(), 0)
+	want := len(sampleItems()) + 2 // all 5 candidates + 2 borders
+
+	for _, q := range []string{"", "comp", "zzz-no-match", "c", ""} {
+		c.SetQuery(q)
+		if c.Lines() != want {
+			t.Fatalf("Lines under query %q = %d, want %d (card height must be fixed)", q, c.Lines(), want)
+		}
+		if got := strings.Count(c.View(th, 80), "\n") + 1; got != want {
+			t.Fatalf("rendered lines under query %q = %d, want %d", q, got, want)
+		}
 	}
 }
 

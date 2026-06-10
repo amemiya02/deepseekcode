@@ -36,11 +36,11 @@ var messages = map[string]map[string]string{
 		"status.compacting": "compacting context…",
 
 		// Permission prompts (internal/tui/permission.go)
-		"permission.prompt":   "Allow tool %s on %s? [y/N/always]",
-		"permission.granted":  "Permission granted.",
-		"permission.session":  "Allow for this session.",
-		"permission.always":   "Always allowed for this session.",
-		"permission.denied":   "Permission denied.",
+		"permission.prompt":  "Allow tool %s on %s? [y/N/always]",
+		"permission.granted": "Permission granted.",
+		"permission.session": "Allow for this session.",
+		"permission.always":  "Always allowed for this session.",
+		"permission.denied":  "Permission denied.",
 
 		// Question / confirm prompts (internal/tui/question.go)
 		"question.confirm":    "Continue? [y/N]",
@@ -50,6 +50,9 @@ var messages = map[string]map[string]string{
 		// App-level hints (internal/tui/app.go)
 		"app.help.hint":  "/help for commands",
 		"app.input.hint": "⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help for commands",
+
+		// Completions popup (internal/tui/completions.go)
+		"app.completions.none": "no matching entries",
 	},
 
 	"zh-CN": {
@@ -67,11 +70,11 @@ var messages = map[string]map[string]string{
 		"status.compacting": "压缩上下文…",
 
 		// Permission prompts
-		"permission.prompt":   "允许工具 %s 操作 %s？[y/N/always]",
-		"permission.granted":  "已授权。",
-		"permission.session":  "允许本次会话。",
-		"permission.always":   "本次会话始终允许。",
-		"permission.denied":   "已拒绝。",
+		"permission.prompt":  "允许工具 %s 操作 %s？[y/N/always]",
+		"permission.granted": "已授权。",
+		"permission.session": "允许本次会话。",
+		"permission.always":  "本次会话始终允许。",
+		"permission.denied":  "已拒绝。",
 
 		// Question / confirm prompts
 		"question.confirm":    "继续？[y/N]",
@@ -81,6 +84,9 @@ var messages = map[string]map[string]string{
 		// App-level hints
 		"app.help.hint":  "输入 /help 查看命令",
 		"app.input.hint": "⏎ 发送 · ⇧⏎ 换行 · esc 滚动 · ^C 取消 · ^R 思考 · 输入 /help 查看命令",
+
+		// Completions popup
+		"app.completions.none": "无匹配项",
 	},
 }
 

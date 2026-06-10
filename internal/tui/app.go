@@ -76,9 +76,10 @@ type App struct {
 	// readline prompt history (G2). completions is derived from the input
 	// buffer by syncCompletions on every insert-mode keystroke; history is
 	// the cross-session recall ring loaded from / appended to historyPath.
-	// popupLines is the number of terminal rows the popup currently occupies,
-	// which layout() subtracts from the viewport height so the popup never
-	// pushes the input off-screen.
+	// popupLines is the number of terminal rows the popup card currently
+	// occupies. The card FLOATS over the frame (overlayPopup) rather than
+	// reserving layout rows, so this no longer shrinks the viewport; layout()
+	// keeps it in sync with the clamped Lines() for tests and telemetry.
 	completions completions
 	history     *promptHistory
 	popupLines  int
@@ -878,20 +879,55 @@ func (a *App) View() tea.View {
 		hint = a.theme.Hint.Render("  " + i18n.T("app.input.hint"))
 	}
 
-	// Splice the completions popup (G1/§4.4) directly above the input box so it
-	// reads as a card floating just over the prompt. layout() has already
-	// reserved a.popupLines rows for it, so nothing overflows the screen. The
-	// transient toast (G8/§6.5) sits one row below the status bar, above both
-	// the popup and the input, colored by kind.
+	// The completions popup (G1/§4.4) FLOATS over the transcript instead of
+	// being spliced into the stack: the base frame below is laid out as if no
+	// menu were open, and the fixed-height card is then composited over the
+	// transcript rows directly above the chrome/divider/status cluster.
+	// Reflow-free by construction — the transcript band, the status HUD, the
+	// toast, the input box, and the hint all occupy the same terminal rows
+	// whether or not the menu is up, so opening, filtering, or closing it can
+	// never bounce the HUD around or shove the input off-screen; the card only
+	// covers (and on close uncovers) the bottom of the transcript.
 	parts := []string{header, body, chrome, divider, status}
+	bottomRows := lipgloss.Height(chrome) + lipgloss.Height(divider) + lipgloss.Height(status) +
+		lipgloss.Height(inputBox) + lipgloss.Height(hint)
 	if toast := a.renderToast(); toast != "" {
 		parts = append(parts, toast)
-	}
-	if pop := a.completions.View(a.theme, a.width); pop != "" {
-		parts = append(parts, pop)
+		bottomRows += lipgloss.Height(toast)
 	}
 	parts = append(parts, inputBox, hint)
-	return tea.View{Content: lipgloss.JoinVertical(lipgloss.Left, parts...), AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	if pop := a.completions.View(a.theme, a.width); pop != "" {
+		content = overlayPopup(content, pop, bottomRows)
+	}
+	return tea.View{Content: content, AltScreen: true, MouseMode: tea.MouseModeCellMotion, Cursor: cur}
+}
+
+// overlayPopup composites the full-width popup card over the frame rows
+// directly above the bottom-anchored chrome/status/input cluster (the frame's
+// last bottomRows lines). Whole lines are replaced — the card always spans the
+// full terminal width — so no ANSI-aware cell splicing is needed. The card never
+// covers the header row: if the frame is somehow too short for it (a frame
+// rendered mid-resize, before layout() re-clamped SetMaxRows), the card's TOP
+// rows are dropped rather than overflowing the stack.
+func overlayPopup(frame, pop string, bottomRows int) string {
+	base := strings.Split(frame, "\n")
+	rows := strings.Split(pop, "\n")
+	end := len(base) - bottomRows
+	start := end - len(rows)
+	if start < 1 {
+		drop := 1 - start
+		if drop >= len(rows) {
+			return frame
+		}
+		rows = rows[drop:]
+		start = 1
+	}
+	if end <= start {
+		return frame
+	}
+	copy(base[start:end], rows)
+	return strings.Join(base, "\n")
 }
 
 // modeChip returns a filled badge string for the active permission mode, or
@@ -1011,19 +1047,21 @@ func (a *App) layout() {
 	if a.toastState.active && a.toastState.text != "" {
 		toastH = 1
 	}
-	// Reserve the completions popup's rows (G1/§4.4) so it grows upward from the
-	// prompt without pushing the input off-screen. popupLines == 0 reproduces
-	// exactly the pre-popup geometry. The popup is the only flexible band, so
-	// layout is its single authority: cap its visible rows at whatever vertical
-	// space is left once the fixed rows (chrome/divider/status/input/hint/perm/
-	// toast) and the minimum body floor are accounted for, then derive popupLines
-	// from the now-clamped Lines(). Without this clamp a tall match set on a short
-	// terminal would overflow the View stack and shove the input box off-screen.
-	const minBodyH = 5
-	popupBudget := a.height - headerH - chromeH - statusH - dividerH - inputH - hintH - permH - toastH - minBodyH
+	// The completions popup (G1/§4.4) FLOATS over the transcript (see
+	// overlayPopup in View) instead of reserving layout rows: opening,
+	// filtering, or closing it never resizes the transcript band or moves the
+	// chrome/status/input/hint rows, and its height is fixed per trigger
+	// session (completions.visibleRows tracks the candidate set, not the live
+	// match count). layout() still owns its ceiling: the card may cover the
+	// transcript but must never reach the header row above or the
+	// chrome/divider/status/toast/input/hint cluster it floats on top of, so
+	// cap its rows at the transcript band's height. On a terminal with no room
+	// at all the cap is 0 and the popup is suppressed rather than overflowing.
+	popupBudget := a.height - headerH - chromeH - dividerH - statusH - inputH - hintH - toastH
 	a.completions.SetMaxRows(popupBudget - 2) // budget is card lines; -2 for the borders
 	a.popupLines = a.completions.Lines()
-	bodyH := a.height - headerH - chromeH - statusH - dividerH - inputH - hintH - permH - a.popupLines - toastH
+	const minBodyH = 5
+	bodyH := a.height - headerH - chromeH - statusH - dividerH - inputH - hintH - permH - toastH
 	if bodyH < minBodyH {
 		bodyH = minBodyH
 	}
@@ -1464,12 +1502,12 @@ func (a *App) completionItems(trigger rune) []complItem {
 	return items
 }
 
-// syncPopupLayout re-lays-out so the viewport shrinks or grows to make room for
-// the popup. Called whenever the popup opens, closes, or refilters. layout() is
-// the single authority for the popup's reserved height: it caps the popup's
-// rows against the terminal height (so a tall match set on a short terminal
-// can't shove the input off-screen) and then sets a.popupLines from the clamped
-// Lines(), so there is nothing to recompute here.
+// syncPopupLayout re-lays-out after a popup state change. The popup floats over
+// the frame (overlayPopup) so the viewport no longer resizes for it; what this
+// refresh maintains is the card's terminal-height ceiling (SetMaxRows) and the
+// popupLines mirror. Called whenever the popup opens, closes, or refilters.
+// layout() is the single authority for that ceiling, so there is nothing to
+// recompute here.
 func (a *App) syncPopupLayout() {
 	a.layout()
 }

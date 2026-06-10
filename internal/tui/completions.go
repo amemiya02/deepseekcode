@@ -1,7 +1,9 @@
 // completions.go is the inline popup that backs the `/` and `@` menus.
 // It is a small, self-contained list
-// component the input owns: not a full-screen overlay but a bordered card
-// spliced into View()'s parts slice directly above the input box.
+// component the input owns: not a full-screen overlay but a fixed-height
+// bordered card that App.View() floats over the rows directly above the input
+// box (see overlayPopup), so opening, filtering, or closing it never reflows
+// the transcript or the status/input/hint rows.
 //
 // The component holds the full candidate set for the active trigger and a
 // fuzzy-filtered index window; ranking reuses fuzzyMatch (fuzzy.go) so the
@@ -16,6 +18,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
 
 // complMaxRows caps the visible window; longer match sets scroll internally
@@ -202,14 +206,18 @@ func (c *completions) Lines() int {
 	return n + 2
 }
 
-// visibleRows returns how many candidate rows the popup body shows: 0 when
-// inactive or nothing matches, otherwise min(matches, complMaxRows) further
-// bounded by the layout's terminal-height ceiling (maxRows) when one is set. On
-// a short terminal the popup shrinks (and scrolls the overflow) instead of
-// pushing the input box off-screen; with no room at all the ceiling is 0 and the
-// popup is suppressed entirely.
+// visibleRows returns how many body rows the popup card occupies: 0 when
+// inactive, otherwise min(candidates, complMaxRows) further bounded by the
+// layout's terminal-height ceiling (maxRows) when one is set. It is a function
+// of the full candidate set (fixed at Open), NOT the live match count: the card
+// keeps the same height for the whole life of one trigger session, so
+// filtering never resizes it — fewer matches than rows pad blank, and zero
+// matches show a notice row instead of collapsing the card. On a short
+// terminal the popup shrinks (and scrolls the overflow) instead of pushing the
+// input box off-screen; with no room at all the ceiling is 0 and the popup is
+// suppressed entirely.
 func (c *completions) visibleRows() int {
-	if !c.active || len(c.filtered) == 0 {
+	if !c.active || len(c.items) == 0 {
 		return 0
 	}
 	limit := complMaxRows
@@ -219,16 +227,21 @@ func (c *completions) visibleRows() int {
 	if limit < 0 {
 		limit = 0
 	}
-	if len(c.filtered) > limit {
+	if len(c.items) > limit {
 		return limit
 	}
-	return len(c.filtered)
+	return len(c.items)
 }
 
 // window returns the [start, end) slice of filtered indices the popup shows,
-// scrolling to keep the cursor in view when the match set exceeds the cap.
+// scrolling to keep the cursor in view when the match set exceeds the card
+// body. With fewer matches than body rows the window is the whole match set
+// (View pads the remainder blank to keep the card height fixed).
 func (c *completions) window() (int, int) {
 	n := c.visibleRows()
+	if n > len(c.filtered) {
+		n = len(c.filtered)
+	}
 	if n == 0 {
 		return 0, 0
 	}
@@ -246,17 +259,21 @@ func (c *completions) window() (int, int) {
 	return start, start + n
 }
 
-// View renders the popup as a raised, bordered card. It returns "" when the
-// popup is inactive or no candidate matches the query. Otherwise it shows up
-// to complMaxRows rows: each row is "<label>  <detail>", the fuzzy-matched
-// runes in the label are bolded, the detail column is dimmed, and the cursor
-// row is drawn as the selection band. When the match set exceeds the cap a
-// scrollbar rides the right edge and the window scrolls around the cursor.
+// View renders the popup as a raised, bordered card of FIXED height: the row
+// count is set by the candidate set at Open (see visibleRows), so filtering
+// while the user types never resizes the card. It returns "" only when the
+// popup is inactive (or clamped to zero rows by the layout's terminal-height
+// ceiling). Each row is "<label>  <detail>", the fuzzy-matched runes in the
+// label are bolded, the detail column is dimmed, and the cursor row is drawn
+// as the selection band. When the match set exceeds the body a scrollbar rides
+// the right edge and the window scrolls around the cursor; when it falls short
+// the remaining rows are padded blank, and an empty match set shows a single
+// dimmed notice instead of collapsing the card.
 func (c *completions) View(t Theme, width int) string {
 	if c.visibleRows() == 0 {
-		// Inactive, no match, or clamped to zero rows by the layout's
-		// terminal-height ceiling — render nothing so Lines() (which also routes
-		// through visibleRows) and View stay in lockstep.
+		// Inactive, an empty candidate set, or clamped to zero rows by the
+		// layout's terminal-height ceiling — render nothing so Lines() (which
+		// also routes through visibleRows) and View stay in lockstep.
 		return ""
 	}
 
@@ -303,6 +320,19 @@ func (c *completions) View(t Theme, width int) string {
 			text += glyph
 		}
 		rows = append(rows, text)
+	}
+
+	// Fixed-height card: the rows the matches don't fill are padded blank so
+	// the card's geometry never changes while the user types. Zero matches get
+	// a dimmed notice row — without it the card would read as broken, and the
+	// notice also explains why ⏎ doesn't submit while the menu is up. Padding
+	// and the scrollbar are mutually exclusive (padding only happens when the
+	// match set is smaller than the body), so rowW here is always `inner`.
+	if len(c.filtered) == 0 {
+		rows = append(rows, lipgloss.NewStyle().Width(rowW).Render("  "+dim.Render(i18n.T("app.completions.none"))))
+	}
+	for len(rows) < c.visibleRows() {
+		rows = append(rows, lipgloss.NewStyle().Width(rowW).Render(""))
 	}
 
 	// Each row is already composed to exactly `inner` display cells (content

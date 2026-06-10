@@ -50,9 +50,6 @@ var messages = map[string]map[string]string{
 		// App-level hints (internal/tui/app.go)
 		"app.help.hint":  "/help for commands",
 		"app.input.hint": "⏎ send · ⇧⏎ newline · esc scroll · ^C cancel · ^R thinking · /help for commands",
-
-		// Completions popup (internal/tui/completions.go)
-		"app.completions.none": "no matching entries",
 	},
 
 	"zh-CN": {
@@ -84,9 +81,6 @@ var messages = map[string]map[string]string{
 		// App-level hints
 		"app.help.hint":  "输入 /help 查看命令",
 		"app.input.hint": "⏎ 发送 · ⇧⏎ 换行 · esc 滚动 · ^C 取消 · ^R 思考 · 输入 /help 查看命令",
-
-		// Completions popup
-		"app.completions.none": "无匹配项",
 	},
 }
 

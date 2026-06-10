@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
 
 // sampleItems builds a small candidate set spanning the three cmd kinds so the
@@ -164,11 +162,9 @@ func TestSelectedReturnsCursorItem(t *testing.T) {
 	}
 }
 
-// TestViewEmptyWhenInactiveOrNoMatch verifies View renders nothing on a closed
-// popup, while an OPEN popup with zero matches keeps its fixed-height card —
-// padded blank around a dimmed notice row — instead of collapsing. The card's
-// geometry is a function of the candidate set, not the live match count, so a
-// dud query can no longer bounce the frame.
+// TestViewEmptyWhenInactiveOrNoMatch verifies View renders nothing in the two
+// "no popup" states — closed, and open with zero matches (the menu hides
+// rather than showing an empty shell) — and Lines agrees.
 func TestViewEmptyWhenInactiveOrNoMatch(t *testing.T) {
 	th := DarkTheme()
 	var c completions
@@ -181,37 +177,48 @@ func TestViewEmptyWhenInactiveOrNoMatch(t *testing.T) {
 	}
 
 	c.Open('/', sampleItems(), 0)
-	want := len(sampleItems()) + 2 // every candidate + 2 borders
 	c.SetQuery("zzz-no-match")
-	if c.Lines() != want {
-		t.Fatalf("Lines with zero matches = %d, want %d (fixed-height card must not collapse)", c.Lines(), want)
+	if v := c.View(th, 80); v != "" {
+		t.Fatalf("View with zero matches = %q, want empty (menu hides)", v)
 	}
-	v := c.View(th, 80)
-	if got := strings.Count(v, "\n") + 1; got != want {
-		t.Fatalf("rendered lines with zero matches = %d, want %d\n--- view ---\n%s", got, want, v)
-	}
-	if !strings.Contains(v, i18n.T("app.completions.none")) {
-		t.Fatalf("zero-match card should show the %q notice\n--- view ---\n%s", i18n.T("app.completions.none"), v)
+	if c.Lines() != 0 {
+		t.Fatalf("Lines with zero matches = %d, want 0", c.Lines())
 	}
 }
 
-// TestViewFixedHeightWhileFiltering pins the popup's stability contract: the
-// card keeps exactly the same height for the whole life of one trigger session
-// no matter how the query narrows, empties, or resets the match set, so typing
-// in the menu never reflows anything around it.
-func TestViewFixedHeightWhileFiltering(t *testing.T) {
+// TestViewAdaptiveHeightWhileFiltering pins the popup's sizing contract: the
+// card opens at its largest (the full candidate set, capped), shrinks to hug
+// the match set as the query narrows, disappears entirely at zero matches,
+// and grows back when the query widens again. Because the card floats
+// bottom-anchored over the transcript (overlayPopup), these resizes move
+// nothing else on screen.
+func TestViewAdaptiveHeightWhileFiltering(t *testing.T) {
 	th := DarkTheme()
 	var c completions
 	c.Open('/', sampleItems(), 0)
-	want := len(sampleItems()) + 2 // all 5 candidates + 2 borders
 
-	for _, q := range []string{"", "comp", "zzz-no-match", "c", ""} {
-		c.SetQuery(q)
-		if c.Lines() != want {
-			t.Fatalf("Lines under query %q = %d, want %d (card height must be fixed)", q, c.Lines(), want)
+	steps := []struct {
+		q    string
+		want int // rendered card lines: matches + 2 borders, 0 = hidden
+	}{
+		{"", len(sampleItems()) + 2}, // open at max: all 5 candidates
+		{"c", 4},                     // /clear + /compact
+		{"comp", 3},                  // /compact only
+		{"zzz-no-match", 0},          // menu hides
+		{"", len(sampleItems()) + 2}, // widening the query grows it back
+	}
+	for _, s := range steps {
+		c.SetQuery(s.q)
+		if c.Lines() != s.want {
+			t.Fatalf("Lines under query %q = %d, want %d (height must hug the match set)", s.q, c.Lines(), s.want)
 		}
-		if got := strings.Count(c.View(th, 80), "\n") + 1; got != want {
-			t.Fatalf("rendered lines under query %q = %d, want %d", q, got, want)
+		v := c.View(th, 80)
+		got := 0
+		if v != "" {
+			got = strings.Count(v, "\n") + 1
+		}
+		if got != s.want {
+			t.Fatalf("rendered lines under query %q = %d, want %d", s.q, got, s.want)
 		}
 	}
 }

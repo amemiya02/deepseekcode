@@ -881,8 +881,9 @@ func (a *App) View() tea.View {
 
 	// The completions popup (G1/§4.4) FLOATS over the transcript instead of
 	// being spliced into the stack: the base frame below is laid out as if no
-	// menu were open, and the fixed-height card is then composited over the
-	// transcript rows directly above the chrome/divider/status cluster.
+	// menu were open, and the bottom-anchored card is then composited over the
+	// transcript rows directly above the chrome/divider/status cluster, its
+	// height adapting to the match set (a shrink only uncovers transcript).
 	// Reflow-free by construction — the transcript band, the status HUD, the
 	// toast, the input box, and the hint all occupy the same terminal rows
 	// whether or not the menu is up, so opening, filtering, or closing it can
@@ -1050,13 +1051,15 @@ func (a *App) layout() {
 	// The completions popup (G1/§4.4) FLOATS over the transcript (see
 	// overlayPopup in View) instead of reserving layout rows: opening,
 	// filtering, or closing it never resizes the transcript band or moves the
-	// chrome/status/input/hint rows, and its height is fixed per trigger
-	// session (completions.visibleRows tracks the candidate set, not the live
-	// match count). layout() still owns its ceiling: the card may cover the
-	// transcript but must never reach the header row above or the
-	// chrome/divider/status/toast/input/hint cluster it floats on top of, so
-	// cap its rows at the transcript band's height. On a terminal with no room
-	// at all the cap is 0 and the popup is suppressed rather than overflowing.
+	// chrome/status/input/hint rows. Its height ADAPTS to the live match set —
+	// largest at open, shrinking to hug the matches as the query narrows,
+	// hidden at zero matches (completions.visibleRows); since the card is
+	// bottom-anchored, a resize only changes how much transcript it covers.
+	// layout() still owns its ceiling: the card may cover the transcript but
+	// must never reach the header row above or the chrome/divider/status/
+	// toast/input/hint cluster it floats on top of, so cap its rows at the
+	// transcript band's height. On a terminal with no room at all the cap is 0
+	// and the popup is suppressed rather than overflowing.
 	popupBudget := a.height - headerH - chromeH - dividerH - statusH - inputH - hintH - toastH
 	a.completions.SetMaxRows(popupBudget - 2) // budget is card lines; -2 for the borders
 	a.popupLines = a.completions.Lines()

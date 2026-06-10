@@ -3,14 +3,14 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/amemiya02/deepseekcode/internal/i18n"
 )
 
-// The completions popup FLOATS over the transcript band (overlayPopup) at a
-// height fixed per trigger session, so opening, filtering, or closing it never
-// reflows the frame: the header, the transcript geometry, the chrome/divider/
-// status HUD cluster, the input box, and the hint all keep their terminal rows.
+// The completions popup FLOATS over the transcript band (overlayPopup) at an
+// adaptive height — largest at open, shrinking to hug the match set as the
+// query narrows, hidden at zero matches — so opening, filtering, or closing it
+// never reflows the frame: the header, the transcript geometry, the chrome/
+// divider/status HUD cluster, the input box, and the hint all keep their
+// terminal rows; a resize only changes how much transcript the card covers.
 // These tests pin that anchoring, plus the terminal-height ceiling that keeps
 // the card off the header and the input on short terminals.
 
@@ -102,8 +102,9 @@ func TestPopupFullSizeOnTallTerminal(t *testing.T) {
 // TestPopupOverlayKeepsFrameAnchored is the regression test for the popup
 // bouncing the frame: opening the `/` menu, filtering it down to fewer (then
 // zero) matches, and closing it must never move the header, the transcript
-// top, the chrome/divider/status HUD cluster, the input box, or the hint —
-// and the card's height must stay fixed for the whole session.
+// top, the chrome/divider/status HUD cluster, the input box, or the hint.
+// The card itself adapts: it opens at its largest, shrinks to hug the match
+// set as the query narrows, and hides entirely at zero matches.
 func TestPopupOverlayKeepsFrameAnchored(t *testing.T) {
 	const w, h = 80, 30
 	a := sizeApp(t, newKeyflowApp(t), w, h)
@@ -138,29 +139,43 @@ func TestPopupOverlayKeepsFrameAnchored(t *testing.T) {
 		t.Fatalf("opening the menu moved the input prompt: row %d -> %d", promptRow(before), pr)
 	}
 	if a.popupLines != 12 {
-		t.Fatalf("popupLines after open = %d, want 12 (10 built-ins + 2 borders)", a.popupLines)
+		t.Fatalf("popupLines after open = %d, want 12 (10 built-ins + 2 borders = the session maximum)", a.popupLines)
 	}
 
-	// Filter down ('m' narrows the set), then to zero matches ('z','z'): the
-	// card height and every anchored row must not move on any keystroke.
-	for _, r := range []rune{'m', 'z', 'z'} {
-		a = drive(t, a, press(r))
-		if a.popupLines != 12 {
-			t.Fatalf("popupLines after typing %q = %d, want it fixed at 12", r, a.popupLines)
-		}
-		cur := renderedView(a)
-		if len(cur) != h {
-			t.Fatalf("frame height after typing %q = %d lines, want %d", r, len(cur), h)
-		}
-		for _, i := range anchored() {
-			if cur[i] != before[i] {
-				t.Fatalf("typing %q moved anchored row %d:\nbefore: %q\nafter:  %q", r, i, before[i], cur[i])
-			}
+	// 'm' narrows the match set: the card shrinks to hug the matches
+	// (adaptive height), while every anchored row stays put.
+	a = drive(t, a, press('m'))
+	if want := len(a.completions.filtered) + 2; a.popupLines != want || a.popupLines >= 12 {
+		t.Fatalf("popupLines after narrowing = %d, want %d (matches + 2 borders) and < 12", a.popupLines, want)
+	}
+	cur := renderedView(a)
+	if len(cur) != h {
+		t.Fatalf("frame height after narrowing = %d lines, want %d", len(cur), h)
+	}
+	for _, i := range anchored() {
+		if cur[i] != before[i] {
+			t.Fatalf("narrowing the menu moved anchored row %d:\nbefore: %q\nafter:  %q", i, before[i], cur[i])
 		}
 	}
-	// "/mzz" matches nothing: the card shows the dimmed notice, not a collapse.
-	if !strings.Contains(a.View().Content, i18n.T("app.completions.none")) {
-		t.Fatalf("zero-match menu should show the %q notice:\n%s", i18n.T("app.completions.none"), a.View().Content)
+
+	// "/mzz" matches nothing: the menu hides entirely — the frame must equal
+	// the baseline except the input box rows (which hold the typed draft).
+	a = drive(t, a, press('z'))
+	a = drive(t, a, press('z'))
+	if a.popupLines != 0 {
+		t.Fatalf("popupLines with zero matches = %d, want 0 (menu hidden)", a.popupLines)
+	}
+	noMatch := renderedView(a)
+	if len(noMatch) != h {
+		t.Fatalf("frame height with zero matches = %d lines, want %d", len(noMatch), h)
+	}
+	for i := range noMatch {
+		if i >= inputTop && i < inputTop+5 {
+			continue // input box rows hold the typed draft
+		}
+		if noMatch[i] != before[i] {
+			t.Fatalf("zero-match state left row %d altered:\nbefore: %q\nafter:  %q", i, before[i], noMatch[i])
+		}
 	}
 
 	// Closing the menu restores the frame exactly, except the input box rows

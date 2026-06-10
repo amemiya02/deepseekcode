@@ -47,9 +47,13 @@ type Client struct {
 }
 
 // Start launches the agent process and begins the read loop.
-func Start(ctx context.Context, bin string, args, extraEnv []string) (*Client, error) {
+// cwd sets the working directory for the child process.
+func Start(ctx context.Context, bin string, args, extraEnv []string, cwd string) (*Client, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = append(cmd.Environ(), extraEnv...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

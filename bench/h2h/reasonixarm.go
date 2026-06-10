@@ -61,8 +61,9 @@ func RunReasonix(ctx context.Context, bin string, task TaskSpec, ws *Workspace) 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(task.WallclockCapMin)*time.Minute)
 	defer cancel()
 	c, err := acpclient.Start(ctx, bin,
-		[]string{"acp", "--yolo", "--dir", ws.Dir},
-		[]string{"DEEPSEEK_API_KEY=" + os.Getenv("REASONIX_BENCH_API_KEY")})
+		[]string{"acp"},
+		[]string{"DEEPSEEK_API_KEY=" + os.Getenv("REASONIX_BENCH_API_KEY")},
+		ws.Dir)
 	if err != nil {
 		res.Err = err.Error()
 		res.DNF = true

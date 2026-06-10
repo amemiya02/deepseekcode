@@ -66,7 +66,7 @@ func TestClientHandshakeAndPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := Start(context.Background(), exe, []string{"-test.run=NONE"}, []string{"ACP_FAKE_AGENT=1"})
+	c, err := Start(context.Background(), exe, []string{"-test.run=NONE"}, []string{"ACP_FAKE_AGENT=1"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCallErrorsWhenAgentCrashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := Start(context.Background(), exe, []string{"-test.run=NONE"},
-		[]string{"ACP_FAKE_AGENT=1", "ACP_FAKE_AGENT_CRASH=1"})
+		[]string{"ACP_FAKE_AGENT=1", "ACP_FAKE_AGENT_CRASH=1"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

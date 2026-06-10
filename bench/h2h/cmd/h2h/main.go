@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,6 +46,13 @@ func main() {
 	}
 	if *rxBin == "" || os.Getenv("DSC_BENCH_API_KEY") == "" || os.Getenv("REASONIX_BENCH_API_KEY") == "" {
 		log.Fatal("live run needs -reasonix plus DSC_BENCH_API_KEY and REASONIX_BENCH_API_KEY (two different accounts)")
+	}
+	// Resolve binary paths to absolute so they work from any working directory.
+	if abs, err := filepath.Abs(*dscBin); err == nil {
+		*dscBin = abs
+	}
+	if abs, err := filepath.Abs(*rxBin); err == nil {
+		*rxBin = abs
 	}
 	rxHash := fileSHA256(*rxBin)
 	dscCommit := gitHead()

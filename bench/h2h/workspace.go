@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -159,7 +158,7 @@ func (w *Workspace) RunFailToPass(task TaskSpec) (string, error) {
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
 	// Own process group so the hard kill reaps compiled test binaries,
 	// not just the go tool.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = setSysProcAttr(nil)
 	done := make(chan struct {
 		out []byte
 		err error
@@ -176,7 +175,7 @@ func (w *Workspace) RunFailToPass(task TaskSpec) (string, error) {
 		return string(result.out), result.err
 	case <-time.After(11 * time.Minute):
 		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			killProcessGroup(cmd.Process.Pid)
 		}
 		return "", fmt.Errorf("test run exceeded 11m hard kill")
 	}

@@ -19,7 +19,7 @@ func LoadTasks(path string) ([]TaskSpec, error) {
 	}
 	for i := range tasks {
 		t := &tasks[i]
-		if t.ID == "" || t.Repo == "" || t.Commit == "" || t.Prompt == "" || len(t.FailToPass) == 0 || t.TestDir == "" {
+		if t.ID == "" || t.Repo == "" || t.Commit == "" || t.FixCommit == "" || t.Prompt == "" || len(t.FailToPass) == 0 || t.TestDir == "" {
 			return nil, fmt.Errorf("task %d (%q): missing required field", i, t.ID)
 		}
 		if t.TurnCap <= 0 {

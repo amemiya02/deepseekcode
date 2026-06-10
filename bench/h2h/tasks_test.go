@@ -8,7 +8,7 @@ import (
 
 func TestLoadTasksValidatesRequiredFields(t *testing.T) {
 	dir := t.TempDir()
-	good := `[{"id":"grpc-3476","repo":"https://github.com/grpc/grpc-go","commit":"abc123","prompt":"fix the bug","fail_to_pass":["TestFoo"],"test_dir":"./rls/...","turn_cap":30,"wallclock_cap_min":20}]`
+	good := `[{"id":"grpc-3476","repo":"https://github.com/grpc/grpc-go","commit":"abc123","fix_commit":"def456","prompt":"fix the bug","fail_to_pass":["TestFoo"],"test_dir":"./rls/...","turn_cap":30,"wallclock_cap_min":20}]`
 	p := filepath.Join(dir, "tasks.json")
 	os.WriteFile(p, []byte(good), 0o644)
 	tasks, err := LoadTasks(p)

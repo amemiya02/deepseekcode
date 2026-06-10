@@ -6,7 +6,8 @@ package h2h
 type TaskSpec struct {
 	ID              string   `json:"id"`
 	Repo            string   `json:"repo"`
-	Commit          string   `json:"commit"`
+	Commit          string   `json:"commit"`     // buggy commit (checkout this)
+	FixCommit       string   `json:"fix_commit"` // fixing commit (checkout tests from here)
 	Prompt          string   `json:"prompt"`
 	FailToPass      []string `json:"fail_to_pass"`
 	TestDir         string   `json:"test_dir"`

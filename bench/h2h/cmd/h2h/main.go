@@ -27,6 +27,7 @@ func main() {
 	repeats := flag.Int("repeats", 2, "repeats per task per arm")
 	outDir := flag.String("out", "docs/competitive/data", "output directory")
 	validate := flag.Bool("validate", false, "validate tasks.json and exit")
+	goldcheck := flag.Bool("goldcheck", false, "gold-validate tasks: clone, verify tests fail at buggy commit, pass after fix")
 	flag.Parse()
 
 	tasks, err := h2h.LoadTasks(*tasksPath)
@@ -35,6 +36,10 @@ func main() {
 	}
 	if *validate {
 		fmt.Printf("OK: %d tasks\n", len(tasks))
+		return
+	}
+	if *goldcheck {
+		runGoldcheck(tasks)
 		return
 	}
 	if *rxBin == "" || os.Getenv("DSC_BENCH_API_KEY") == "" || os.Getenv("REASONIX_BENCH_API_KEY") == "" {
@@ -62,6 +67,14 @@ func main() {
 					res, _ = h2h.RunReasonix(ctx, *rxBin, task, ws)
 				}
 				res.Repeat = rep
+				// Enforce turn cap: if the arm exceeded the allowed
+				// number of turns, mark as DNF.
+				if task.TurnCap > 0 && len(res.Turns) > task.TurnCap {
+					res.DNF = true
+					if res.Err == "" {
+						res.Err = fmt.Sprintf("turn cap exceeded: %d > %d", len(res.Turns), task.TurnCap)
+					}
+				}
 				res.Resolved = ws.Score(task)
 				rr.Results = append(rr.Results, res)
 				log.Printf("[%s/%s#%d] resolved=%v hit=%.1f%% billable=%d err=%q",
@@ -95,4 +108,103 @@ func mustTemp() string {
 		log.Fatal(d, err)
 	}
 	return d
+}
+
+// runGoldcheck validates each task by:
+//  1. Cloning the repo and checking out the buggy commit.
+//  2. Verifying that the fail-to-pass tests FAIL at the buggy commit
+//     (negative control -- if they pass, the task is bogus).
+//  3. Applying the fix commit's test files and verifying they PASS
+//     (positive control -- the gold reference for "resolved").
+func runGoldcheck(tasks []h2h.TaskSpec) {
+	var failed []string
+	for _, task := range tasks {
+		fmt.Printf("--- %s ---\n", task.ID)
+
+		// 1. Clone and checkout buggy commit.
+		ws, err := h2h.NewWorkspace(mustTemp(), task)
+		if err != nil {
+			log.Printf("FAIL %s: workspace: %v", task.ID, err)
+			failed = append(failed, task.ID)
+			continue
+		}
+
+		// 2. Negative control: tests must FAIL at the buggy commit.
+		//    First checkout the test files from fix commit so they exist.
+		testDir := task.TestDir
+		if testDir == "" {
+			testDir = "."
+		}
+		gitPath := strings.TrimSuffix(testDir, "/...")
+		if gitPath == "" {
+			gitPath = "."
+		}
+		cmd := exec.Command("git", "checkout", task.FixCommit, "--", gitPath)
+		cmd.Dir = ws.Dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("FAIL %s: checkout fix tests: %v\n%s", task.ID, err, out)
+			failed = append(failed, task.ID)
+			continue
+		}
+
+		// Run tests at buggy commit (should fail).
+		// Anchor patterns to avoid false matches.
+		var anchored []string
+		for _, p := range task.FailToPass {
+			if !strings.HasPrefix(p, "^") {
+				p = "^" + p
+			}
+			if !strings.HasSuffix(p, "$") {
+				p = p + "$"
+			}
+			anchored = append(anchored, p)
+		}
+		run := strings.Join(anchored, "|")
+		testCmd := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", run, "-v", task.TestDir)
+		testCmd.Dir = ws.Dir
+		testCmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		out, err := testCmd.CombinedOutput()
+		output := string(out)
+
+		if strings.Contains(output, "no tests to run") || strings.Contains(output, "[no test files]") {
+			log.Printf("FAIL %s: no tests matched pattern %q -- check fail_to_pass in tasks.json", task.ID, task.FailToPass)
+			failed = append(failed, task.ID)
+			continue
+		}
+		if err == nil {
+			log.Printf("FAIL %s: tests PASS at buggy commit (expected FAIL) -- task is bogus or commit is wrong", task.ID)
+			failed = append(failed, task.ID)
+			continue
+		}
+		fmt.Printf("  NEGATIVE OK: tests fail at buggy commit\n")
+
+		// 3. Positive control: now apply the fix (cherry-pick the fix commit).
+		cpCmd := exec.Command("git", "cherry-pick", "--no-commit", task.FixCommit)
+		cpCmd.Dir = ws.Dir
+		if _, err := cpCmd.CombinedOutput(); err != nil {
+			// Cherry-pick may conflict; try a simpler approach:
+			// just checkout ALL files from fix commit except .git.
+			log.Printf("  cherry-pick failed (%v), trying full checkout from fix commit", err)
+			exec.Command("git", "checkout", task.FixCommit, "--", ".").Run()
+		}
+
+		testCmd2 := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", run, "-v", task.TestDir)
+		testCmd2.Dir = ws.Dir
+		testCmd2.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		out2, err2 := testCmd2.CombinedOutput()
+		output2 := string(out2)
+
+		if err2 != nil || !strings.Contains(output2, "PASS") {
+			log.Printf("FAIL %s: tests do not PASS after fix: %v\n%s", task.ID, err2, output2)
+			failed = append(failed, task.ID)
+			continue
+		}
+		fmt.Printf("  POSITIVE OK: tests pass after fix\n")
+	}
+
+	fmt.Printf("\n=== RESULTS ===\n")
+	if len(failed) > 0 {
+		log.Fatalf("GOLDCHECK FAILED: %v", failed)
+	}
+	fmt.Println("ALL TASKS GOLD-VALIDATED")
 }

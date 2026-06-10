@@ -43,6 +43,7 @@ type Client struct {
 	pending map[int64]chan rpcMsg
 	usage   []Usage
 	usageMu sync.Mutex
+	closed  chan struct{}
 }
 
 // Start launches the agent process and begins the read loop.
@@ -60,12 +61,13 @@ func Start(ctx context.Context, bin string, args, extraEnv []string) (*Client, e
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	c := &Client{cmd: cmd, stdin: stdin, pending: map[int64]chan rpcMsg{}}
+	c := &Client{cmd: cmd, stdin: stdin, pending: map[int64]chan rpcMsg{}, closed: make(chan struct{})}
 	go c.readLoop(stdout)
 	return c, nil
 }
 
 func (c *Client) readLoop(r io.Reader) {
+	defer close(c.closed)
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 64*1024*1024)
 	for sc.Scan() {
@@ -131,7 +133,12 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 	if err := c.write(req); err != nil {
 		return nil, err
 	}
-	msg := <-ch
+	var msg rpcMsg
+	select {
+	case msg = <-ch:
+	case <-c.closed:
+		return nil, fmt.Errorf("%s: client closed (process may have crashed)", method)
+	}
 	if msg.Error != nil {
 		return nil, fmt.Errorf("%s: rpc %d: %s", method, msg.Error.Code, msg.Error.Message)
 	}

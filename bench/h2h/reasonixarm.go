@@ -83,7 +83,7 @@ func RunReasonix(ctx context.Context, bin string, task TaskSpec, ws *Workspace) 
 	usage, perr := c.Prompt(sid, task.Prompt)
 	if perr != nil {
 		res.Err = "prompt: " + perr.Error()
-		res.DNF = ctx.Err() != nil
+		res.DNF = true // timeout, crash, or error all count as DNF
 	}
 	for _, u := range usage {
 		res.Turns = append(res.Turns, TurnUsage{HitTokens: u.HitTokens, MissTokens: u.MissTokens, OutTokens: u.OutTokens})

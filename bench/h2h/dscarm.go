@@ -13,10 +13,10 @@ import (
 // traceFrame is the JSON shape of one line in a dsc -trace-jsonl file.
 // Usage counters are flat top-level fields, not nested under a "usage" object.
 type traceFrame struct {
-	Type           string `json:"type"`
-	CacheHitTokens int    `json:"cache_hit_tokens"`
-	CacheMissTokens int   `json:"cache_miss_tokens"`
-	OutputTokens   int    `json:"output_tokens"`
+	Type            string `json:"type"`
+	CacheHitTokens  int    `json:"cache_hit_tokens"`
+	CacheMissTokens int    `json:"cache_miss_tokens"`
+	OutputTokens    int    `json:"output_tokens"`
 }
 
 // ParseDscTrace extracts per-turn usage from a dsc -trace-jsonl file.
@@ -60,7 +60,7 @@ func RunDsc(ctx context.Context, dscBin string, task TaskSpec, ws *Workspace) (A
 	cmd.Dir = ws.Dir
 	cmd.Env = append(os.Environ(), "DEEPSEEK_API_KEY="+os.Getenv("DSC_BENCH_API_KEY"))
 	if err := cmd.Run(); err != nil {
-		res.DNF = ctx.Err() != nil
+		res.DNF = true // timeout, crash, or non-zero exit all count as DNF
 		res.Err = fmt.Sprintf("dsc run: %v", err)
 		// fall through: partial trace still parses (fail-soft, spec 5)
 	}

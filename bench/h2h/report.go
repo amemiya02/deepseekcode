@@ -55,6 +55,7 @@ func RenderReport(rr RunResult) string {
 		fmt.Fprintf(&b, "\n**WIN GATE: %v** (hit %.1f%% vs %.1f%%, billable %d vs %d, resolved %d vs %d)\n",
 			win, rate(d), rate(r), d.miss+d.out, r.miss+r.out, d.resolved, r.resolved)
 	}
+	b.WriteString("\nDNF runs' tokens are included in the aggregate hit-rate/billable above (§3.3(5): failures stay visible); see per-run detail for which runs were DNF.\n")
 	// Per-run detail — failures must be visible, never averaged away (§3.3(5)).
 	b.WriteString("\n## Per-run detail\n\n| arm | task | repeat | resolved | DNF | hit rate | billable | err |\n|---|---|---|---|---|---|---|---|\n")
 	for _, x := range rr.Results {

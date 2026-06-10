@@ -137,7 +137,16 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 	select {
 	case msg = <-ch:
 	case <-c.closed:
-		return nil, fmt.Errorf("%s: client closed (process may have crashed)", method)
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		// readLoop has exited; any response it delivered before exiting
+		// is already buffered in ch, so a non-blocking drain is reliable.
+		select {
+		case msg = <-ch:
+		default:
+			return nil, fmt.Errorf("%s: client closed (process may have crashed)", method)
+		}
 	}
 	if msg.Error != nil {
 		return nil, fmt.Errorf("%s: rpc %d: %s", method, msg.Error.Code, msg.Error.Message)

@@ -54,8 +54,10 @@ func main() {
 	for _, task := range tasks {
 		for rep := 1; rep <= *repeats; rep++ {
 			for _, arm := range []string{"dsc", "reasonix"} {
-				ws, err := h2h.NewWorkspace(mustTemp(), task) // fresh checkout per arm per repeat
+				tmp := mustTemp()
+				ws, err := h2h.NewWorkspace(tmp, task) // fresh checkout per arm per repeat
 				if err != nil {
+					os.RemoveAll(tmp)
 					log.Printf("[%s/%s#%d] workspace: %v (recorded as DNF)", arm, task.ID, rep, err)
 					rr.Results = append(rr.Results, h2h.ArmResult{Arm: arm, TaskID: task.ID, Repeat: rep, DNF: true, Err: err.Error()})
 					continue
@@ -76,6 +78,7 @@ func main() {
 					}
 				}
 				res.Resolved = ws.Score(task)
+				os.RemoveAll(tmp)
 				rr.Results = append(rr.Results, res)
 				log.Printf("[%s/%s#%d] resolved=%v hit=%.1f%% billable=%d err=%q",
 					arm, task.ID, rep, res.Resolved, 100*res.HitRate(), res.Billable(), res.Err)
@@ -110,101 +113,71 @@ func mustTemp() string {
 	return d
 }
 
-// runGoldcheck validates each task by:
-//  1. Cloning the repo and checking out the buggy commit.
-//  2. Verifying that the fail-to-pass tests FAIL at the buggy commit
-//     (negative control -- if they pass, the task is bogus).
-//  3. Applying the fix commit's test files and verifying they PASS
-//     (positive control -- the gold reference for "resolved").
+// runGoldcheck machine-validates each task:
+//
+//	negative control — with the canonical tests restored (test files
+//	only), the F2P tests must RUN and FAIL at the buggy commit; a
+//	build error or "no tests to run" does not count as failing.
+//	positive control — after applying the fix commit's non-test
+//	changes (the gold solution), ws.Score() itself must report
+//	resolved, so goldcheck doubles as a regression test for the scorer.
 func runGoldcheck(tasks []h2h.TaskSpec) {
 	var failed []string
 	for _, task := range tasks {
 		fmt.Printf("--- %s ---\n", task.ID)
-
-		// 1. Clone and checkout buggy commit.
-		ws, err := h2h.NewWorkspace(mustTemp(), task)
-		if err != nil {
-			log.Printf("FAIL %s: workspace: %v", task.ID, err)
+		if err := goldcheckTask(task); err != nil {
+			log.Printf("FAIL %s: %v", task.ID, err)
 			failed = append(failed, task.ID)
-			continue
 		}
-
-		// 2. Negative control: tests must FAIL at the buggy commit.
-		//    First checkout the test files from fix commit so they exist.
-		testDir := task.TestDir
-		if testDir == "" {
-			testDir = "."
-		}
-		gitPath := strings.TrimSuffix(testDir, "/...")
-		if gitPath == "" {
-			gitPath = "."
-		}
-		cmd := exec.Command("git", "checkout", task.FixCommit, "--", gitPath)
-		cmd.Dir = ws.Dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("FAIL %s: checkout fix tests: %v\n%s", task.ID, err, out)
-			failed = append(failed, task.ID)
-			continue
-		}
-
-		// Run tests at buggy commit (should fail).
-		// Anchor patterns to avoid false matches.
-		var anchored []string
-		for _, p := range task.FailToPass {
-			if !strings.HasPrefix(p, "^") {
-				p = "^" + p
-			}
-			if !strings.HasSuffix(p, "$") {
-				p = p + "$"
-			}
-			anchored = append(anchored, p)
-		}
-		run := strings.Join(anchored, "|")
-		testCmd := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", run, "-v", task.TestDir)
-		testCmd.Dir = ws.Dir
-		testCmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-		out, err := testCmd.CombinedOutput()
-		output := string(out)
-
-		if strings.Contains(output, "no tests to run") || strings.Contains(output, "[no test files]") {
-			log.Printf("FAIL %s: no tests matched pattern %q -- check fail_to_pass in tasks.json", task.ID, task.FailToPass)
-			failed = append(failed, task.ID)
-			continue
-		}
-		if err == nil {
-			log.Printf("FAIL %s: tests PASS at buggy commit (expected FAIL) -- task is bogus or commit is wrong", task.ID)
-			failed = append(failed, task.ID)
-			continue
-		}
-		fmt.Printf("  NEGATIVE OK: tests fail at buggy commit\n")
-
-		// 3. Positive control: now apply the fix (cherry-pick the fix commit).
-		cpCmd := exec.Command("git", "cherry-pick", "--no-commit", task.FixCommit)
-		cpCmd.Dir = ws.Dir
-		if _, err := cpCmd.CombinedOutput(); err != nil {
-			// Cherry-pick may conflict; try a simpler approach:
-			// just checkout ALL files from fix commit except .git.
-			log.Printf("  cherry-pick failed (%v), trying full checkout from fix commit", err)
-			exec.Command("git", "checkout", task.FixCommit, "--", ".").Run()
-		}
-
-		testCmd2 := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", run, "-v", task.TestDir)
-		testCmd2.Dir = ws.Dir
-		testCmd2.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-		out2, err2 := testCmd2.CombinedOutput()
-		output2 := string(out2)
-
-		if err2 != nil || !strings.Contains(output2, "PASS") {
-			log.Printf("FAIL %s: tests do not PASS after fix: %v\n%s", task.ID, err2, output2)
-			failed = append(failed, task.ID)
-			continue
-		}
-		fmt.Printf("  POSITIVE OK: tests pass after fix\n")
 	}
-
 	fmt.Printf("\n=== RESULTS ===\n")
 	if len(failed) > 0 {
 		log.Fatalf("GOLDCHECK FAILED: %v", failed)
 	}
 	fmt.Println("ALL TASKS GOLD-VALIDATED")
+}
+
+func goldcheckTask(task h2h.TaskSpec) error {
+	tmp := mustTemp()
+	defer os.RemoveAll(tmp)
+	ws, err := h2h.NewWorkspace(tmp, task)
+	if err != nil {
+		return fmt.Errorf("workspace: %w", err)
+	}
+
+	// Negative control.
+	if err := ws.RestoreCanonicalTests(task); err != nil {
+		return fmt.Errorf("restore canonical tests: %w", err)
+	}
+	output, err := ws.RunFailToPass(task)
+	if strings.Contains(output, "no tests to run") || strings.Contains(output, "[no test files]") {
+		return fmt.Errorf("no tests matched pattern %q -- check fail_to_pass in tasks.json", task.FailToPass)
+	}
+	if err == nil {
+		return fmt.Errorf("tests PASS at buggy commit (expected FAIL) -- task is bogus or commit is wrong")
+	}
+	// Require evidence a test actually ran and failed; a compile error
+	// of the fix-commit tests against buggy sources also exits non-zero
+	// but proves nothing about the task.
+	if !strings.Contains(output, "--- FAIL: ") {
+		return fmt.Errorf("tests did not run-and-fail at buggy commit (build error?):\n%s", tail(output, 2000))
+	}
+	fmt.Printf("  NEGATIVE OK: tests run and fail at buggy commit\n")
+
+	// Positive control.
+	if err := ws.ApplyGoldFix(task); err != nil {
+		return fmt.Errorf("apply gold fix: %w", err)
+	}
+	if !ws.Score(task) {
+		return fmt.Errorf("Score() not resolved after gold fix -- scorer or task data broken")
+	}
+	fmt.Printf("  POSITIVE OK: Score()=resolved after gold fix\n")
+	return nil
+}
+
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -22,6 +23,10 @@ func TestMain(m *testing.M) {
 // session/update usage notifications then the response.
 func runFakeAgent() {
 	sc := bufio.NewScanner(os.Stdin)
+	if os.Getenv("ACP_FAKE_AGENT_CRASH") == "1" {
+		sc.Scan() // swallow one request, then die without replying
+		return
+	}
 	out := bufio.NewWriter(os.Stdout)
 	defer out.Flush()
 	emit := func(v any) {
@@ -79,5 +84,30 @@ func TestClientHandshakeAndPrompt(t *testing.T) {
 	}
 	if len(usage) != 2 || usage[1].MissTokens != 500 {
 		t.Fatalf("usage not captured from session/update stream: %+v", usage)
+	}
+}
+
+// TestCallErrorsWhenAgentCrashes is the regression test for the ACP
+// deadlock: a call in flight when the agent dies must return an error
+// promptly instead of blocking forever.
+func TestCallErrorsWhenAgentCrashes(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Start(context.Background(), exe, []string{"-test.run=NONE"},
+		[]string{"ACP_FAKE_AGENT=1", "ACP_FAKE_AGENT_CRASH=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.Initialize() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error from call after agent crash, got nil")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("call deadlocked after agent crash")
 	}
 }

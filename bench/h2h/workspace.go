@@ -28,49 +28,95 @@ func NewWorkspace(parent string, task TaskSpec) (*Workspace, error) {
 	return &Workspace{Dir: dir}, nil
 }
 
-// Score restores the canonical fail-to-pass tests from the fix commit
-// (SWE-bench tasks have tests added by the fixing PR, not present at
-// the buggy commit), then runs them. Resolved means every F2P test
-// passes within 10 minutes and at least one test actually ran.
-func (w *Workspace) Score(task TaskSpec) bool {
-	// 1. Checkout test files from the fix commit, where the failing
-	//    tests were actually introduced. The agent's code changes
-	//    (non-test files) stay as-is from whatever commit it produced.
-	if task.FixCommit != "" {
-		testDir := task.TestDir
-		if testDir == "" {
-			testDir = "."
+// isTestPath reports whether f is a test artifact (test source or
+// testdata fixture) — the only files scoring may restore from the fix
+// commit. Everything else is the solution and must never be touched.
+func isTestPath(f string) bool {
+	return strings.HasSuffix(f, "_test.go") ||
+		strings.HasPrefix(f, "testdata/") ||
+		strings.Contains(f, "/testdata/")
+}
+
+func splitLines(out []byte) []string {
+	s := strings.TrimSpace(string(out))
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+// RestoreCanonicalTests resets every test file to its canonical state:
+// agent-modified test files are reverted to the buggy commit and
+// agent-added ones (tracked or untracked) are removed, then the test
+// files the fixing PR changed are checked out from task.FixCommit,
+// one file at a time. Whole-directory checkouts from the fix commit
+// are forbidden here: for every current task the gold fix's source
+// file lives inside test_dir, so a directory checkout would apply the
+// solution itself and rig the score.
+func (w *Workspace) RestoreCanonicalTests(task TaskSpec) error {
+	// 1. Neutralize agent test tampering: revert tracked changes...
+	out, _ := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit).Output()
+	for _, f := range splitLines(out) {
+		if !isTestPath(f) {
+			continue
 		}
-		// Strip trailing "/..." for git checkout pathspec
-		gitPath := strings.TrimSuffix(testDir, "/...")
-		if gitPath == "" {
-			gitPath = "."
+		if err := exec.Command("git", "-C", w.Dir, "checkout", task.Commit, "--", f).Run(); err != nil {
+			os.Remove(filepath.Join(w.Dir, f)) // not in pinned commit: agent-added
 		}
-		cmd := exec.Command("git", "checkout", task.FixCommit, "--", gitPath)
-		cmd.Dir = w.Dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("score: checkout fix tests from %s: %v\n%s", task.FixCommit, err, out)
-			return false
+	}
+	// ...and delete untracked test files, which `git diff` cannot see.
+	out, _ = exec.Command("git", "-C", w.Dir, "ls-files", "--others", "--exclude-standard").Output()
+	for _, f := range splitLines(out) {
+		if isTestPath(f) {
+			os.Remove(filepath.Join(w.Dir, f))
 		}
-	} else {
-		// Fallback: restore test files from the buggy commit
-		// (legacy behavior for tasks without fix_commit).
-		out, _ := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit).Output()
-		for _, f := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if !strings.HasSuffix(f, "_test.go") {
-				continue
-			}
-			// Restore canonical test from pinned commit. If the file
-			// did not exist at the pinned commit (agent-added test),
-			// remove it so it cannot interfere with scoring.
-			if err := exec.Command("git", "-C", w.Dir, "checkout", task.Commit, "--", f).Run(); err != nil {
-				os.Remove(filepath.Join(w.Dir, f))
+	}
+	if task.FixCommit == "" {
+		return nil
+	}
+	// 2. Bring in exactly the test files the fixing PR changed (the
+	//    fail-to-pass tests were introduced there, SWE-bench style).
+	out, err := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit, task.FixCommit).Output()
+	if err != nil {
+		return fmt.Errorf("diff %s..%s: %w", task.Commit, task.FixCommit, err)
+	}
+	for _, f := range splitLines(out) {
+		if !isTestPath(f) {
+			continue
+		}
+		if err := exec.Command("git", "-C", w.Dir, "checkout", task.FixCommit, "--", f).Run(); err != nil {
+			os.Remove(filepath.Join(w.Dir, f)) // deleted by the fix commit
+		}
+	}
+	return nil
+}
+
+// ApplyGoldFix applies the fix commit's NON-test changes — the gold
+// solution. Only goldcheck's positive control may call this; applying
+// it in a scoring path would invalidate the benchmark.
+func (w *Workspace) ApplyGoldFix(task TaskSpec) error {
+	out, err := exec.Command("git", "-C", w.Dir, "diff", "--name-only", task.Commit, task.FixCommit).Output()
+	if err != nil {
+		return fmt.Errorf("diff %s..%s: %w", task.Commit, task.FixCommit, err)
+	}
+	for _, f := range splitLines(out) {
+		if isTestPath(f) {
+			continue
+		}
+		if err := exec.Command("git", "-C", w.Dir, "checkout", task.FixCommit, "--", f).Run(); err != nil {
+			// Checkout fails for files the fix commit deleted.
+			if rmErr := os.Remove(filepath.Join(w.Dir, f)); rmErr != nil {
+				return fmt.Errorf("apply gold fix %s: %w", f, err)
 			}
 		}
 	}
+	return nil
+}
 
-	// 2. Run the tests with timeout and capture output.
-	// Anchor patterns to avoid false matches (e.g. TestFoo matching TestFooBar).
+// RunFailToPass runs the task's fail-to-pass tests with patterns
+// anchored ^...$ (so TestFoo cannot match TestFooBar) and a hard
+// timeout, returning the combined output.
+func (w *Workspace) RunFailToPass(task TaskSpec) (string, error) {
 	var anchored []string
 	for _, p := range task.FailToPass {
 		if !strings.HasPrefix(p, "^") {
@@ -81,8 +127,7 @@ func (w *Workspace) Score(task TaskSpec) bool {
 		}
 		anchored = append(anchored, p)
 	}
-	run := strings.Join(anchored, "|")
-	cmd := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", run, "-v", task.TestDir)
+	cmd := exec.Command("go", "test", "-count=1", "-timeout", "10m", "-run", strings.Join(anchored, "|"), "-v", task.TestDir)
 	cmd.Dir = w.Dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
 	done := make(chan struct {
@@ -96,29 +141,29 @@ func (w *Workspace) Score(task TaskSpec) bool {
 			err error
 		}{out, err}
 	}()
-
-	var output string
-	var err error
 	select {
 	case result := <-done:
-		output = string(result.out)
-		err = result.err
+		return string(result.out), result.err
 	case <-time.After(11 * time.Minute):
 		cmd.Process.Kill()
+		return "", fmt.Errorf("test run exceeded 11m hard kill")
+	}
+}
+
+// Score restores the canonical fail-to-pass tests (test files only —
+// the agent's non-test changes stay as-is), then runs them. Resolved
+// means the F2P tests matched, ran, and all passed.
+func (w *Workspace) Score(task TaskSpec) bool {
+	if err := w.RestoreCanonicalTests(task); err != nil {
+		log.Printf("score: restore canonical tests: %v", err)
 		return false
 	}
-
-	// 3. Hard-fail: "no tests to run" means pattern didn't match.
+	output, err := w.RunFailToPass(task)
+	// Hard-fail: "no tests to run" means the pattern matched nothing —
+	// exit 0 here must never count as resolved.
 	if strings.Contains(output, "no tests to run") || strings.Contains(output, "[no test files]") {
 		log.Printf("score: FAIL - no tests matched pattern %q in %s", task.FailToPass, task.Repo)
 		return false
 	}
-
-	// 4. Hard-fail: zero tests ran.
-	if strings.Contains(output, "Tests: 0 ") || strings.Contains(output, "0 passed") {
-		log.Printf("score: FAIL - 0 tests ran for pattern %q", task.FailToPass)
-		return false
-	}
-
 	return err == nil && strings.Contains(output, "PASS")
 }

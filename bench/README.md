@@ -435,6 +435,31 @@ gRPC-8831, cobra-1781, chi-1045), each run twice (10 runs per arm).
 higher cache hit rate (93.9% vs 89.6%). Reasonix's 3 DNFs were all turn-cap
 overruns (>30 turns); dsc had 1.
 
+### Per-run detail
+
+| arm | task | repeat | resolved | DNF | hit rate | billable | err |
+|---|---|---|---|---|---|---|---|
+| dsc | grpc-8915 | 1 | true | false | 88.3% | 28 992 |  |
+| reasonix | grpc-8915 | 1 | true | false | 88.0% | 30 423 |  |
+| dsc | grpc-8915 | 2 | true | false | 85.6% | 20 205 |  |
+| reasonix | grpc-8915 | 2 | true | false | 94.3% | 16 993 |  |
+| dsc | grpc-9111 | 1 | false | true | 89.7% | 97 085 | turn cap exceeded: 34 > 30 |
+| reasonix | grpc-9111 | 1 | true | false | 84.1% | 78 593 |  |
+| dsc | grpc-9111 | 2 | true | false | 88.3% | 102 609 |  |
+| reasonix | grpc-9111 | 2 | false | true | 94.7% | 61 286 | turn cap exceeded: 41 > 30 |
+| dsc | grpc-8831 | 1 | true | false | 86.8% | 48 290 |  |
+| reasonix | grpc-8831 | 1 | true | false | 85.7% | 76 321 |  |
+| dsc | grpc-8831 | 2 | true | false | 81.0% | 35 103 |  |
+| reasonix | grpc-8831 | 2 | false | true | 91.7% | 78 226 | turn cap exceeded: 39 > 30 |
+| dsc | cobra-1781 | 1 | false | false | 93.8% | 51 128 |  |
+| reasonix | cobra-1781 | 1 | false | true | 98.6% | 64 543 | turn cap exceeded: 67 > 30 |
+| dsc | cobra-1781 | 2 | false | false | 93.3% | 68 632 |  |
+| reasonix | cobra-1781 | 2 | false | false | 88.8% | 5 638 |  |
+| dsc | chi-1045 | 1 | true | false | 84.9% | 9 366 |  |
+| reasonix | chi-1045 | 1 | true | false | 89.5% | 4 578 |  |
+| dsc | chi-1045 | 2 | true | false | 86.5% | 11 251 |  |
+| reasonix | chi-1045 | 2 | true | false | 86.8% | 3 824 |  |
+
 ### Takeaway
 
 dsc's task-resolution edge (70% vs 60%) comes from fewer turn-cap failures —

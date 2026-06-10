@@ -21,6 +21,7 @@ import (
 )
 
 func main() {
+	loadDotEnv() // load .env before flag parsing (keys checked after)
 	tasksPath := flag.String("tasks", "bench/h2h/tasks.json", "task spec file")
 	dscBin := flag.String("dsc", "./bin/dsc", "dsc binary")
 	rxBin := flag.String("reasonix", "", "pinned reasonix binary (required for live)")
@@ -196,6 +197,32 @@ func tail(s string, n int) string {
 // the pattern's leaf name (last slash segment, anchors stripped) must
 // appear as a segment of the failing test's name. Wrapper-suite
 // failures report as e.g. "--- FAIL: Test/ConvertToServiceConfigSuccess/case".
+// loadDotEnv reads .env from the working directory (if present) and
+// sets env vars that are not already set. Format: KEY=VALUE, one per
+// line; # comments and blank lines are skipped.
+func loadDotEnv() {
+	data, err := os.ReadFile(".env")
+	if err != nil {
+		return // no .env is fine
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		v = strings.Trim(v, `"'`) // strip quotes
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+	}
+}
+
 func failedNamed(output, pattern string) bool {
 	leaf := pattern[strings.LastIndex(pattern, "/")+1:]
 	leaf = strings.TrimSuffix(strings.TrimPrefix(leaf, "^"), "$")

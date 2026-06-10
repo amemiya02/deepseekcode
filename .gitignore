@@ -41,6 +41,9 @@ CONTEXT.md
 
 docs/superpowers/
 
+# Environment secrets
+.env
+
 # Benchmark output
 bench/traces/
 bench/reports/

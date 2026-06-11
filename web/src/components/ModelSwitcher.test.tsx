@@ -139,4 +139,29 @@ describe('ModelSwitcher', () => {
     expect(await screen.findAllByRole('option')).toHaveLength(2)
     expect(fetchSpy).toHaveBeenCalledOnce()
   })
+
+  it('groups by provider and disables unavailable models', async () => {
+    const models: ModelInfo[] = [
+      { id: 'deepseek-v4-flash', label: 'Flash', provider: 'deepseek', available: true },
+      { id: 'mimo-pro', label: 'Mimo Pro', provider: 'mimo', available: false, note: 'no API key' },
+    ]
+    const onPick = vi.fn()
+    wrap(<ModelSwitcher label="Flash" activeId="deepseek-v4-flash" models={models} onPick={onPick} />)
+    await userEvent.click(screen.getByTestId('model-trigger'))
+    expect(screen.getByText('deepseek')).toBeInTheDocument()
+    expect(screen.getByText('mimo')).toBeInTheDocument()
+    await userEvent.click(screen.getByText('Mimo Pro'))
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it('passes provider to onPick when an available model is selected', async () => {
+    const models: ModelInfo[] = [
+      { id: 'deepseek-v4-flash', label: 'Flash', provider: 'deepseek', available: true },
+    ]
+    const picked: Array<{ id: string; provider?: string }> = []
+    wrap(<ModelSwitcher label="Model" activeId="" models={models} onPick={(id, provider) => picked.push({ id, provider })} />)
+    await userEvent.click(screen.getByTestId('model-trigger'))
+    await userEvent.click(screen.getByText('Flash'))
+    expect(picked).toEqual([{ id: 'deepseek-v4-flash', provider: 'deepseek' }])
+  })
 })

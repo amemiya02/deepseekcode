@@ -22,6 +22,8 @@ export interface ModelInfo {
   id: string
   label: string
   provider?: string
+  available?: boolean
+  note?: string
   caps?: ModelCaps
   effort?: ModelEffortDesc
   context?: number
@@ -200,8 +202,8 @@ export async function respondPermission(id: string, decision: PermissionDecision
 export async function respondAnswer(answer: AskAnswer): Promise<void> {
   await postJSON('/v1/answer', answer as unknown as Record<string, unknown>)
 }
-export async function setModel(sessionId: string, model: string): Promise<void> {
-  await postJSON('/v1/model', { session_id: sessionId, model })
+export async function setModel(sessionId: string, model: string, provider?: string): Promise<void> {
+  await postJSON('/v1/model', { session_id: sessionId, model, provider })
 }
 export async function setEffort(sessionId: string, effort: string): Promise<void> {
   await postJSON('/v1/effort', { session_id: sessionId, effort })
@@ -222,6 +224,8 @@ function parseModelList(data: unknown): ModelInfo[] {
       id: d.id,
       label: d.label ?? d.id,
       provider: d.provider,
+      available: d.available,
+      note: d.note,
       caps: d.caps,
       effort: d.effort,
       context: d.context,

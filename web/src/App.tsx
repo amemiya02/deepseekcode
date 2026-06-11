@@ -320,9 +320,9 @@ function AppInner() {
 
   // Model/effort change handlers — optimistically update local state, then POST
   // to the gateway if there's an active session. Errors are swallowed silently.
-  const onModelChange = (id: string) => {
+  const onModelChange = (id: string, provider?: string) => {
     setModel(id)
-    if (sessionId) apiSetModel(sessionId, id).catch(() => {})
+    if (sessionId) apiSetModel(sessionId, id, provider).catch(() => {})
     const desc = models.find((m) => m.id === id)?.effort
     if (desc) {
       if (desc.kind === 'none') {

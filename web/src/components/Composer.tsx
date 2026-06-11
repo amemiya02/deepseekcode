@@ -44,7 +44,7 @@ export function Composer({
   activeModel?: string
   effort?: string
   effortLevels?: string[]
-  onModelChange?: (id: string) => void
+  onModelChange?: (id: string, provider?: string) => void
   onEffortChange?: (level: string) => void
 }) {
   const t = useT()

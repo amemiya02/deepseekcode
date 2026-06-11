@@ -100,7 +100,7 @@ go test ./internal/handler/... -run TestOrders
 
 ### `/undo` 的语义
 
-每次 agent 调用文件写入类工具（`write_file`、`edit_file`）之前，dsc 会把所有**即将被修改的文件**打快照，存放在：
+每次 agent 调用文件写入类工具（`write_file`、`edit_file`、`apply_patch`）之前，dsc 会把所有**即将被修改的文件**打快照，存放在：
 
 ```
 .deepseek/snapshots/<sessionID>/<stepIdx>/
@@ -170,9 +170,9 @@ dsc -r latest    # 同上
 
 ---
 
-## 5. 权限三模式怎么选
+## 5. 权限模式怎么选
 
-dsc 有三个全局模式 flag，在启动时指定，优先级高于所有规则引擎配置：
+dsc 有四个全局模式 flag，在启动时指定，优先级高于所有规则引擎配置：
 
 | Flag | 效果 | 适用场景 |
 |------|------|----------|

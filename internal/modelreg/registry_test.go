@@ -103,3 +103,21 @@ func TestSwitchWriteFailWarnsButStillSwaps(t *testing.T) {
 		t.Fatalf("expected warning + live client, got %+v", res)
 	}
 }
+
+func TestSwitchToOpenAICompatDropsThinkingAndEffort(t *testing.T) {
+	r := testRegistry(t, newFakeWriter())
+	res, err := r.Switch(context.Background(), "mimo", "mimo-pro")
+	if err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+	if res.Caps.Thinking {
+		t.Errorf("openai-compat should report Thinking=false")
+	}
+	if len(res.EffortLevels) != 0 {
+		t.Errorf("openai-compat should expose no effort levels, got %v", res.EffortLevels)
+	}
+	back, _ := r.Switch(context.Background(), "deepseek", "deepseek-v4-flash")
+	if len(back.EffortLevels) == 0 {
+		t.Errorf("deepseek should expose effort levels")
+	}
+}

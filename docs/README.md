@@ -41,6 +41,7 @@
 - [tools](dev/tools.md) — 深入：tool 接口、执行管道、快照回滚、新增 tool 实操与缓存红线
 - [tui](dev/tui.md) — 深入：Bubble Tea 模型、组件树、补全弹层、theme 实现
 - [three-surfaces](dev/three-surfaces.md) — 深入：gateway/SSE hub、Web SPA、Desktop、ACP 三端一核
+- [contributing](dev/contributing.md) — 贡献指南：环境、make targets、测试体系、PR checklist
 - [model-compatibility](dev/model-compatibility.md) — DeepSeek V4 wire 约束（贡献者必读）
 - [parity](dev/parity.md) — parity 测试场景登记（与 TestParityConsistency 四向绑定）
 - [adr/](dev/adr/) — 架构决策记录

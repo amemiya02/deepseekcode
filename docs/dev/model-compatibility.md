@@ -53,6 +53,8 @@ prompt cache on. It **sorts tools by function name** and **recursively
 key-sorts every JSON-Schema** (via the shared `canonicalizeTools` helper in
 `static_prefix.go`). Any non-deterministic field ordering anywhere upstream
 of this silently invalidates the cache and forfeits the 50× discount.
+Implementation narrative, package map, and contributor playbooks:
+[prefix-cache.md](prefix-cache.md).
 
 Guardrails that must never move:
 

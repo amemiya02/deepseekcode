@@ -27,7 +27,7 @@ func main() {
 	dscBin := flag.String("dsc", "./bin/dsc", "dsc binary")
 	rxBin := flag.String("reasonix", "", "pinned reasonix binary (required for live)")
 	repeats := flag.Int("repeats", 2, "repeats per task per arm")
-	outDir := flag.String("out", "docs/competitive/data", "output directory")
+	outDir := flag.String("out", "docs/internal/competitive/data", "output directory")
 	validate := flag.Bool("validate", false, "validate tasks.json and exit")
 	goldcheck := flag.Bool("goldcheck", false, "gold-validate tasks: clone, verify tests fail at buggy commit, pass after fix")
 	flag.Parse()

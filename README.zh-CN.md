@@ -25,11 +25,11 @@
 
 - **可证明的前缀缓存稳定性** — 单一 canonical 序列化器同时喂给 wire 字节和
   缓存指纹，构造级一致不可能发散；`dsc trace inspect` 的 `prefixes==1`
-  可证明缓存稳定（[docs/prefix-cache.md](docs/prefix-cache.md)）。
+  可证明缓存稳定（[docs/reference/prefix-cache.md](docs/reference/prefix-cache.md)）。
 - **信号驱动 Flash→Pro 路由** — 在歧义或反复修复时自动升级；破坏性调用触发
-  Duet pro 校验器（[docs/duet.md](docs/duet.md)）。
+  Duet pro 校验器（[docs/reference/duet.md](docs/reference/duet.md)）。
 - **真实 OS 沙箱** — sandbox-exec (macOS) / Landlock (Linux) 真隔离 + 真 PTY
-  （[docs/SANDBOX.md](docs/SANDBOX.md)）。
+  （[docs/reference/sandbox.md](docs/reference/sandbox.md)）。
 - **自动推理强度** — 逐回合按关键词自动开关 thinking，`low/medium/high/max`
   档位，简单任务自动降档。
 
@@ -38,7 +38,7 @@
 | 界面 | 命令 | 说明 |
 |---|---|---|
 | **TUI** | `dsc` | 交互式 Bubble Tea 终端 UI（默认） |
-| **Web SPA** | `dsc serve --http :7432` | Svelte 单页应用，含聊天、文件树、diff 查看器、设置 |
+| **Web SPA** | `dsc serve --http :7432` | React 单页应用，含聊天、文件树、diff 查看器、设置 |
 | **桌面应用** | `make desktop` | Wails v3 原生 macOS `.app` |
 
 构建内嵌 SPA 的二进制：`make build-web`。
@@ -85,6 +85,8 @@ make build && ./bin/dsc -version
 
 要求：`DEEPSEEK_API_KEY`（或已配置的 provider key）。Git 和 LSP 可选。
 
+> 新手？跟着[入门教程](docs/guide/getting-started.md)走一遍。
+
 ## 快速开始
 
 ```sh
@@ -129,7 +131,7 @@ thinking = true
 # default_model = "gpt-4o"
 ```
 
-完整参考：[docs/config.md](docs/config.md) · [docs/PROVIDERS.md](docs/PROVIDERS.md)
+完整参考：[docs/reference/config.md](docs/reference/config.md) · [docs/reference/providers.md](docs/reference/providers.md)
 
 ## 环境变量
 
@@ -142,7 +144,15 @@ thinking = true
 
 ## 文档
 
-[配置](docs/config.md) · [Providers](docs/PROVIDERS.md) · [工具](docs/tools.md) · [权限](docs/permissions.md) · [沙箱](docs/SANDBOX.md) · [Skills](docs/skills.md) · [Hooks](docs/hooks.md) · [MCP](docs/mcp.md) · [LSP](docs/lsp.md) · [前缀缓存](docs/prefix-cache.md) · [Duet](docs/duet.md) · [价格](docs/pricing.md) · [Web SPA](docs/WEB.md)
+**[文档索引](docs/README.md)** — 从这里开始。
+
+- **学习** — [入门教程](docs/guide/getting-started.md) ·
+  [核心工作流](docs/guide/core-workflow.md) · 共 7 篇教程
+- **参考** — [配置](docs/reference/config.md) · [工具](docs/reference/tools.md) ·
+  [权限](docs/reference/permissions.md) · [前缀缓存](docs/reference/prefix-cache.md) ·
+  [更多…](docs/README.md)
+- **开发** — [架构总览](docs/dev/architecture.md) ·
+  [参与贡献](docs/dev/contributing.md)
 
 ## 开发
 
@@ -163,6 +173,7 @@ PR 检查清单：`make fmt && make lint && make test`
 
 欢迎提交 issue 和 pull request。修改 README 时，请同步更新 `README.md` 和
 `README.zh-CN.md`，并保持匹配的 `##` 结构。只记录已实现且可测试的功能。
+环境搭建、make 目标及测试分类详见 [docs/dev/contributing.md](docs/dev/contributing.md)。
 
 ## 致谢
 

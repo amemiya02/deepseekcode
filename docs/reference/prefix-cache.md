@@ -1,5 +1,7 @@
 # Prefix Cache Drift Detection
 
+> Implementation deep dive (for contributors): [dev/prefix-cache.md](../dev/prefix-cache.md)
+
 DeepSeek's prompt cache gives a **50× discount** on cached tokens. The
 cache matches on the **prefix** of the request — everything before the
 first differing byte. If the prefix changes between turns, the cache

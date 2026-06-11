@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 )
@@ -14,13 +15,34 @@ type DuetClient interface {
 	ValidatePro(ctx context.Context, prompt string) (approve bool, reasoning string, err error)
 }
 
+// DuetOptions configures the pro-validation call. The zero value keeps
+// the historical behavior: no per-call timeout beyond the caller's ctx,
+// no retry before failing open.
+type DuetOptions struct {
+	// ValidatorTimeout caps each ValidatePro call. <= 0 means no extra
+	// timeout (the caller's ctx still applies). Wired from config
+	// duet.validator_timeout_ms.
+	ValidatorTimeout time.Duration
+	// RetryOnFailure retries the validation exactly once after a
+	// transient error before failing open. Wired from config
+	// duet.retry_on_failure.
+	RetryOnFailure bool
+}
+
 // NewDuetHook returns a BuiltinHook implementing destructive-call
-// validation via the pro model. Safe to register under name "duet".
+// validation via the pro model with zero-value options. Safe to
+// register under name "duet".
+func NewDuetHook(client DuetClient, extraDestructive []string, cwd string, secretPatterns []string, modelFn func() string, transcriptFn func() []byte) BuiltinHook {
+	return NewDuetHookWithOptions(client, extraDestructive, cwd, secretPatterns, modelFn, transcriptFn, DuetOptions{})
+}
+
+// NewDuetHookWithOptions is NewDuetHook with an explicit timeout/retry
+// policy for the ValidatePro call.
 //
 // modelFn supplies the current main-loop model so the hook can skip
 // self-validation when the user has switched to pro via /models.
 // transcriptFn supplies recent conversation context for pro to judge.
-func NewDuetHook(client DuetClient, extraDestructive []string, cwd string, secretPatterns []string, modelFn func() string, transcriptFn func() []byte) BuiltinHook {
+func NewDuetHookWithOptions(client DuetClient, extraDestructive []string, cwd string, secretPatterns []string, modelFn func() string, transcriptFn func() []byte, opts DuetOptions) BuiltinHook {
 	return func(ctx context.Context, in HookInput) (HookOutput, error) {
 		// When main model is pro, skip self-validation.
 		if modelFn() == "deepseek-v4-pro" {
@@ -32,7 +54,19 @@ func NewDuetHook(client DuetClient, extraDestructive []string, cwd string, secre
 		}
 
 		prompt := buildDuetPrompt(in.ToolName, in.ToolInput, transcriptFn())
-		approve, reasoning, err := client.ValidatePro(ctx, prompt)
+		validate := func() (bool, string, error) {
+			vctx, cancel := ctx, context.CancelFunc(func() {})
+			if opts.ValidatorTimeout > 0 {
+				vctx, cancel = context.WithTimeout(ctx, opts.ValidatorTimeout)
+			}
+			defer cancel()
+			return client.ValidatePro(vctx, prompt)
+		}
+		approve, reasoning, err := validate()
+		if err != nil && opts.RetryOnFailure && ctx.Err() == nil {
+			slog.Warn("duet pro validation failed, retrying once", "err", err)
+			approve, reasoning, err = validate()
+		}
 		if err != nil {
 			slog.Warn("duet pro validation failed, fail-open", "err", err)
 			return HookOutput{Decision: "continue", Reason: "pro validation skipped: " + err.Error()}, nil

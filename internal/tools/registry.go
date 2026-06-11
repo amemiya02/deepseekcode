@@ -58,8 +58,8 @@ type Tool interface {
 	Description() string
 
 	// Parameters returns the JSON-Schema describing the tool's args.
-	// The bytes do not need to be canonical — the registry canonicalizes
-	// during AsLLMTools().
+	// The bytes do not need to be canonical — canonicalization happens in
+	// MarshalCacheStable (internal/llm/request.go), not in the registry.
 	Parameters() json.RawMessage
 
 	// Execute runs the tool. args is the model's JSON arguments. The

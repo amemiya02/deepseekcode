@@ -1577,13 +1577,17 @@ func buildHookRunner(
 	// fail-open hook error on every tool call.
 	runner := hooks.NewRunner()
 	if cfg.Duet.Enabled {
-		runner.Register("duet", hooks.NewDuetHook(
+		runner.Register("duet", hooks.NewDuetHookWithOptions(
 			rt.Provider,
 			cfg.Duet.ExtraDestructive,
 			cwd,
 			cfg.Permissions.SecretPathPatterns,
 			modelFn,
 			transcriptFn,
+			hooks.DuetOptions{
+				ValidatorTimeout: time.Duration(cfg.Duet.ValidatorTimeoutMs) * time.Millisecond,
+				RetryOnFailure:   cfg.Duet.RetryOnFailure,
+			},
 		))
 	}
 	if mc := openMemoryCaptureBuiltin(cwd); mc != nil {

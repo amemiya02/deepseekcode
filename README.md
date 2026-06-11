@@ -26,12 +26,12 @@ sandbox, and signal-driven model routing.
 
 - **Provable prefix-cache stability** — single canonical serializer for wire
   bytes and cache fingerprint; `dsc trace inspect` shows `prefixes==1`
-  ([docs/prefix-cache.md](docs/prefix-cache.md)).
+  ([docs/reference/prefix-cache.md](docs/reference/prefix-cache.md)).
 - **Signal-driven Flash→Pro routing** — escalates on ambiguity / repeated
   repair; Duet pro-validator on destructive calls
-  ([docs/duet.md](docs/duet.md)).
+  ([docs/reference/duet.md](docs/reference/duet.md)).
 - **Real OS sandbox** — sandbox-exec (macOS) / Landlock (Linux) with real PTY
-  ([docs/SANDBOX.md](docs/SANDBOX.md)).
+  ([docs/reference/sandbox.md](docs/reference/sandbox.md)).
 - **Auto reasoning-effort** — per-turn thinking on/off via keyword detection;
   `low/medium/high/max` effort, auto-dialed on simple tasks.
 
@@ -40,7 +40,7 @@ sandbox, and signal-driven model routing.
 | Interface | Command | Description |
 |---|---|---|
 | **TUI** | `dsc` | Interactive Bubble Tea terminal UI (default) |
-| **Web SPA** | `dsc serve --http :7432` | Svelte SPA with chat, file tree, diff viewer, settings |
+| **Web SPA** | `dsc serve --http :7432` | React SPA with chat, file tree, diff viewer, settings |
 | **Desktop** | `make desktop` | Native macOS `.app` via Wails v3 |
 
 Build web-embedded binary: `make build-web`.
@@ -88,6 +88,8 @@ make build && ./bin/dsc -version
 
 Requires: `DEEPSEEK_API_KEY` (or configured provider key). Git and LSP optional.
 
+> New to dsc? Follow the [getting-started tutorial (zh)](docs/guide/getting-started.md).
+
 ## Quick Start
 
 ```sh
@@ -131,7 +133,7 @@ thinking = true
 # default_model = "gpt-4o"
 ```
 
-Full reference: [docs/config.md](docs/config.md) · [docs/PROVIDERS.md](docs/PROVIDERS.md)
+Full reference: [docs/reference/config.md](docs/reference/config.md) · [docs/reference/providers.md](docs/reference/providers.md)
 
 ## Environment Variables
 
@@ -144,7 +146,15 @@ Full reference: [docs/config.md](docs/config.md) · [docs/PROVIDERS.md](docs/PRO
 
 ## Documentation
 
-[Config](docs/config.md) · [Providers](docs/PROVIDERS.md) · [Tools](docs/tools.md) · [Permissions](docs/permissions.md) · [Sandbox](docs/SANDBOX.md) · [Skills](docs/skills.md) · [Hooks](docs/hooks.md) · [MCP](docs/mcp.md) · [LSP](docs/lsp.md) · [Prefix Cache](docs/prefix-cache.md) · [Duet](docs/duet.md) · [Pricing](docs/pricing.md) · [Web SPA](docs/WEB.md)
+**[Docs index](docs/README.md)** — start here.
+
+- **Learn (zh)** — [Getting started](docs/guide/getting-started.md) ·
+  [Core workflow](docs/guide/core-workflow.md) · 7-part tutorial series
+- **Reference** — [Config](docs/reference/config.md) · [Tools](docs/reference/tools.md) ·
+  [Permissions](docs/reference/permissions.md) · [Prefix cache](docs/reference/prefix-cache.md) ·
+  [more…](docs/README.md)
+- **Develop (zh)** — [Architecture](docs/dev/architecture.md) ·
+  [Contributing](docs/dev/contributing.md)
 
 ## Development
 
@@ -165,7 +175,7 @@ PR checklist: `make fmt && make lint && make test`
 
 Issues and pull requests welcome. Keep `README.md` and `README.zh-CN.md`
 synchronized with matching `##` structure. Document only implemented, testable
-features.
+features. See [docs/dev/contributing.md](docs/dev/contributing.md) for environment setup, make targets, and the test taxonomy.
 
 ## Acknowledgments
 

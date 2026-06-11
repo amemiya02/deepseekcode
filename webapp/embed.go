@@ -1,6 +1,6 @@
 //go:build withwebapp
 
-// Package webapp embeds the compiled Svelte SPA for use by dsc serve --http
+// Package webapp embeds the compiled React SPA for use by dsc serve --http
 // and the Wails desktop wrapper.
 //
 // This file is only compiled when the withwebapp build tag is set, which

@@ -393,6 +393,43 @@ func TestParityScenario_truncated_tool_args_repair(t *testing.T) {
 	}
 }
 
+// TestRunStepFeedsCommittedRepairErrorsToNextRoute pins the wiring from the
+// repair pipeline to next-turn routing: the committed turn's unrecoverable
+// repair count is stored on the agent and consumed by routeTurn on the
+// following step (classifier repair_errors signal + thinking re-enable).
+// Truncation INSIDE a string is unrepairable (NeedMore) — the call is
+// dropped and counted — while a clean turn resets the count to zero.
+func TestRunStepFeedsCommittedRepairErrorsToNextRoute(t *testing.T) {
+	srv := llmtest.NewServer(
+		llmtest.Turn{
+			ToolCalls: []llmtest.ToolCall{{ID: "call_1", Name: "echo", Args: `{"text":"hi`}}, // truncated inside the string
+			Finish:    "stop",
+		},
+		llmtest.Turn{Text: "done"},
+	)
+	defer srv.Close()
+
+	var calls int32
+	a := newMockLoopAgent(t, srv)
+	a.Tools.Register(loopEchoTool{calls: &calls})
+
+	a.Messages = append(a.Messages, llm.Message{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "echo hi"}}})
+	if _, err := a.runStep(context.Background()); err != nil {
+		t.Fatalf("runStep 1: %v", err)
+	}
+	if got := a.repairErrorsLastTurn; got != 1 {
+		t.Fatalf("repairErrorsLastTurn after unrecoverable repair = %d, want 1", got)
+	}
+
+	// The second (clean) turn reads the signal at routeTurn and then resets it.
+	if _, err := a.runStep(context.Background()); err != nil {
+		t.Fatalf("runStep 2: %v", err)
+	}
+	if got := a.repairErrorsLastTurn; got != 0 {
+		t.Fatalf("repairErrorsLastTurn after clean turn = %d, want 0", got)
+	}
+}
+
 // TestLoopFirstTokenTimeout pins that a first-token stall that persists across
 // the one bounded re-issue (T1.4) surfaces as a first-token timeout the loop
 // reports (not a silent hang). The first stall is re-issued; the second is

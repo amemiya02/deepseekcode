@@ -10,7 +10,7 @@ tool specs, and any leading few-shot turns — using the same canonicalization
 profile, connected-but-inactive MCP servers, the full skill catalog) is **not**
 folded into the fingerprint; it is tracked separately as the **Capability Set**
 that `EpochManager` watches to decide when to mint a new epoch. See
-[`/CONTEXT.md`](../../CONTEXT.md) for the vocabulary.
+`/CONTEXT.md` for the vocabulary.
 
 ## Considered options
 

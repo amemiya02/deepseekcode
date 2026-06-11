@@ -716,7 +716,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 
 	app := tui.New(tui.Config{
 		Agent:    a,
-		Model:    rt.Model,
+		Model:    modelReg.Active().Model,
 		Thinking: cfg.Defaults.Thinking,
 		Registry: modelReg,
 		Theme:    cfg.Defaults.Theme,

@@ -40,7 +40,7 @@ sandbox, and signal-driven model routing.
 | Interface | Command | Description |
 |---|---|---|
 | **TUI** | `dsc` | Interactive Bubble Tea terminal UI (default) |
-| **Web SPA** | `dsc serve --http :7432` | Svelte SPA with chat, file tree, diff viewer, settings |
+| **Web SPA** | `dsc serve --http :7432` | React SPA with chat, file tree, diff viewer, settings |
 | **Desktop** | `make desktop` | Native macOS `.app` via Wails v3 |
 
 Build web-embedded binary: `make build-web`.
@@ -87,6 +87,8 @@ make build && ./bin/dsc -version
 ```
 
 Requires: `DEEPSEEK_API_KEY` (or configured provider key). Git and LSP optional.
+
+> New to dsc? Follow the [getting-started tutorial (zh)](docs/guide/getting-started.md).
 
 ## Quick Start
 
@@ -144,7 +146,15 @@ Full reference: [docs/reference/config.md](docs/reference/config.md) · [docs/re
 
 ## Documentation
 
-[Config](docs/reference/config.md) · [Providers](docs/reference/providers.md) · [Tools](docs/reference/tools.md) · [Permissions](docs/reference/permissions.md) · [Sandbox](docs/reference/sandbox.md) · [Skills](docs/reference/skills.md) · [Hooks](docs/reference/hooks.md) · [MCP](docs/reference/mcp.md) · [LSP](docs/reference/lsp.md) · [Prefix Cache](docs/reference/prefix-cache.md) · [Duet](docs/reference/duet.md) · [Pricing](docs/reference/pricing.md) · [Web SPA](docs/reference/web.md)
+**[Docs index](docs/README.md)** — start here.
+
+- **Learn (zh)** — [Getting started](docs/guide/getting-started.md) ·
+  [Core workflow](docs/guide/core-workflow.md) · 7-part tutorial series
+- **Reference** — [Config](docs/reference/config.md) · [Tools](docs/reference/tools.md) ·
+  [Permissions](docs/reference/permissions.md) · [Prefix cache](docs/reference/prefix-cache.md) ·
+  [more…](docs/README.md)
+- **Develop (zh)** — [Architecture](docs/dev/architecture.md) ·
+  [Contributing](docs/dev/contributing.md)
 
 ## Development
 
@@ -165,7 +175,7 @@ PR checklist: `make fmt && make lint && make test`
 
 Issues and pull requests welcome. Keep `README.md` and `README.zh-CN.md`
 synchronized with matching `##` structure. Document only implemented, testable
-features.
+features. See [docs/dev/contributing.md](docs/dev/contributing.md) for environment setup, make targets, and the test taxonomy.
 
 ## Acknowledgments
 

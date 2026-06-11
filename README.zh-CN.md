@@ -38,7 +38,7 @@
 | 界面 | 命令 | 说明 |
 |---|---|---|
 | **TUI** | `dsc` | 交互式 Bubble Tea 终端 UI（默认） |
-| **Web SPA** | `dsc serve --http :7432` | Svelte 单页应用，含聊天、文件树、diff 查看器、设置 |
+| **Web SPA** | `dsc serve --http :7432` | React 单页应用，含聊天、文件树、diff 查看器、设置 |
 | **桌面应用** | `make desktop` | Wails v3 原生 macOS `.app` |
 
 构建内嵌 SPA 的二进制：`make build-web`。
@@ -84,6 +84,8 @@ make build && ./bin/dsc -version
 ```
 
 要求：`DEEPSEEK_API_KEY`（或已配置的 provider key）。Git 和 LSP 可选。
+
+> 新手？跟着[入门教程](docs/guide/getting-started.md)走一遍。
 
 ## 快速开始
 
@@ -142,7 +144,15 @@ thinking = true
 
 ## 文档
 
-[配置](docs/reference/config.md) · [Providers](docs/reference/providers.md) · [工具](docs/reference/tools.md) · [权限](docs/reference/permissions.md) · [沙箱](docs/reference/sandbox.md) · [Skills](docs/reference/skills.md) · [Hooks](docs/reference/hooks.md) · [MCP](docs/reference/mcp.md) · [LSP](docs/reference/lsp.md) · [前缀缓存](docs/reference/prefix-cache.md) · [Duet](docs/reference/duet.md) · [价格](docs/reference/pricing.md) · [Web SPA](docs/reference/web.md)
+**[文档索引](docs/README.md)** — 从这里开始。
+
+- **学习** — [入门教程](docs/guide/getting-started.md) ·
+  [核心工作流](docs/guide/core-workflow.md) · 共 7 篇教程
+- **参考** — [配置](docs/reference/config.md) · [工具](docs/reference/tools.md) ·
+  [权限](docs/reference/permissions.md) · [前缀缓存](docs/reference/prefix-cache.md) ·
+  [更多…](docs/README.md)
+- **开发** — [架构总览](docs/dev/architecture.md) ·
+  [参与贡献](docs/dev/contributing.md)
 
 ## 开发
 
@@ -163,6 +173,7 @@ PR 检查清单：`make fmt && make lint && make test`
 
 欢迎提交 issue 和 pull request。修改 README 时，请同步更新 `README.md` 和
 `README.zh-CN.md`，并保持匹配的 `##` 结构。只记录已实现且可测试的功能。
+环境搭建、make 目标及测试分类详见 [docs/dev/contributing.md](docs/dev/contributing.md)。
 
 ## 致谢
 

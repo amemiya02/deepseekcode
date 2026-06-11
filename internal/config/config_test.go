@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestDefaultValid(t *testing.T) {
@@ -456,5 +458,26 @@ enabled = false
 	}
 	if cfg.Web.Enabled {
 		t.Error("web.enabled = false should override the default true")
+	}
+}
+
+func TestProviderModelsFieldParses(t *testing.T) {
+	const data = `
+[active]
+provider = "mimo"
+
+[providers.mimo]
+type = "openai-compat"
+base_url = "https://api.mimo/v1"
+default_model = "mimo-pro"
+models = ["mimo-pro", "mimo-flash"]
+`
+	var c Config
+	if _, err := toml.Decode(data, &c); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := c.Providers["mimo"].Models
+	if len(got) != 2 || got[0] != "mimo-pro" || got[1] != "mimo-flash" {
+		t.Fatalf("Models = %v, want [mimo-pro mimo-flash]", got)
 	}
 }

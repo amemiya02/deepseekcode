@@ -109,7 +109,8 @@ type ProviderConfigTOML struct {
 	SecretsFileKey      string `toml:"secrets_file_key"`
 	FirstTokenTimeoutMs int    `toml:"first_token_timeout_ms"`
 	ChunkStallTimeoutMs int    `toml:"chunk_stall_timeout_ms"`
-	DefaultModel        string `toml:"default_model"`
+	DefaultModel        string   `toml:"default_model"`
+	Models              []string `toml:"models"`
 }
 
 type APIConfig struct {

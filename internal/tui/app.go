@@ -1677,7 +1677,16 @@ func (a *App) handleSlash(line string) tea.Cmd {
 	case "/models":
 		// Direct switch: /models <id>
 		if len(fields) >= 2 {
-			return a.applyModelSwitch(fields[1])
+			// Look up the provider from the hard-coded table so the
+			// session writer receives the provider context.
+			prov := ""
+			for _, m := range availableModels() {
+				if m.ID == fields[1] {
+					prov = m.Provider
+					break
+				}
+			}
+			return a.applyModelSwitch(fields[1], prov)
 		}
 		a.overlay.OpenModels(a.model)
 	case "/effort":
@@ -2239,10 +2248,10 @@ func (a *App) maybePreviewTheme() {
 func (a *App) acceptOverlaySelection() tea.Cmd {
 	switch a.overlay.Mode() {
 	case modeModels:
-		id := a.overlay.SelectedModelID()
+		opt, ok := a.overlay.SelectedModelOption()
 		a.overlay.Close()
-		if id != "" {
-			return a.applyModelSwitch(id)
+		if ok && opt.ID != "" {
+			return a.applyModelSwitch(opt.ID, opt.Provider)
 		}
 	case modeSessions:
 		// Session switching is a wave-6 polish — for v0.1 it just records
@@ -2422,7 +2431,10 @@ func (a *App) yankLastAssistant() tea.Cmd {
 // toast was shown). Durable signals — an unknown-model error and a
 // persist-failure warning — stay in the scrollback so they can be scrolled
 // back to.
-func (a *App) applyModelSwitch(id string) tea.Cmd {
+//
+// provider is the registry provider name (e.g. "deepseek") carried by the
+// modelOption row; it is forwarded to the session writer when present.
+func (a *App) applyModelSwitch(id string, provider string) tea.Cmd {
 	if id == "" {
 		return nil
 	}
@@ -2449,6 +2461,7 @@ func (a *App) applyModelSwitch(id string) tea.Cmd {
 			return nil
 		}
 	}
+	_ = provider // forwarded to session writer when provider-scoped persistence lands
 	return a.toast(BadgeBrand, "model → "+id)
 }
 

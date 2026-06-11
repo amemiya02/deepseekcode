@@ -129,6 +129,27 @@ func (o *Overlay) OpenModels(activeID string) {
 	}
 }
 
+// OpenModelsRows seeds the picker from registry-supplied rows instead of the
+// hard-coded defaults.  Callers that build rows from the model registry
+// (provider grouping, availability flags) use this entry point.
+func (o *Overlay) OpenModelsRows(activeID string, rows []modelOption) {
+	o.models = rows
+	o.mode = modeModels
+	o.cursor = 0
+	o.filter = filterableList{} // reset filter state
+	labels := make([]string, len(rows))
+	for i, m := range rows {
+		labels[i] = m.Short + " " + m.Note
+	}
+	o.filter.SetRows(labels)
+	for i, m := range rows {
+		if m.ID == activeID {
+			o.cursorTo(i)
+			break
+		}
+	}
+}
+
 // OpenSessions switches to the /sessions picker with the supplied rows. The
 // filter matches against the short id + summary of each row.
 func (o *Overlay) OpenSessions(rows []sessionRow) {
@@ -246,6 +267,15 @@ func (o *Overlay) SelectedModelID() string {
 		return o.models[i].ID
 	}
 	return ""
+}
+
+// SelectedModelOption returns the full modelOption under the cursor (mapped
+// through the filter), or the zero value and false when nothing matches.
+func (o *Overlay) SelectedModelOption() (modelOption, bool) {
+	if i := o.filter.Selected(); i >= 0 && i < len(o.models) {
+		return o.models[i], true
+	}
+	return modelOption{}, false
 }
 
 // SelectedSessionID returns the session id under the cursor (mapped through
@@ -434,9 +464,11 @@ func renderQuitConfirm(t Theme, width, height int) string {
 
 // modelOption is one row in the /models picker.
 type modelOption struct {
-	ID    string
-	Short string
-	Note  string // e.g. pricing summary
+	ID        string
+	Short     string
+	Note      string // e.g. pricing summary
+	Provider  string // registry provider name (e.g. "deepseek")
+	Available bool   // false when the model cannot be reached right now
 }
 
 // availableModels returns the picker rows for /models. Pricing is
@@ -445,10 +477,10 @@ type modelOption struct {
 // legacy aliases are listed below with the retirement date.
 func availableModels() []modelOption {
 	return []modelOption{
-		{ID: "deepseek-v4-flash", Short: "flash", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · default"},
-		{ID: "deepseek-v4-pro", Short: "pro", Note: "1M ctx · ¥3/¥0.025 in · ¥6 out · stronger"},
-		{ID: "deepseek-chat", Short: "chat", Note: "legacy until 2026-07-24 · alias → flash"},
-		{ID: "deepseek-reasoner", Short: "reasoner", Note: "legacy until 2026-07-24 · alias → flash"},
+		{ID: "deepseek-v4-flash", Short: "flash", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · default", Provider: "deepseek", Available: true},
+		{ID: "deepseek-v4-pro", Short: "pro", Note: "1M ctx · ¥3/¥0.025 in · ¥6 out · stronger", Provider: "deepseek", Available: true},
+		{ID: "deepseek-chat", Short: "chat", Note: "legacy until 2026-07-24 · alias → flash", Provider: "deepseek", Available: true},
+		{ID: "deepseek-reasoner", Short: "reasoner", Note: "legacy until 2026-07-24 · alias → flash", Provider: "deepseek", Available: true},
 	}
 }
 
@@ -556,6 +588,10 @@ func filterLine(t Theme, query string) string {
 // renderModelsPicker draws the /models picker overlay. visible is the
 // fuzzy-narrowed row order (indices into models); cursor is the position
 // within visible. A filter input rides above the rows (G6).
+//
+// When rows carry a Provider field, consecutive visible rows from different
+// providers are separated by a dimmed provider header line.  Unavailable rows
+// (Available == false) render with dimmed text and an "(unavailable)" suffix.
 func renderModelsPicker(t Theme, models []modelOption, visible []int, cursor int, filter, activeID string, width, height int) string {
 	rowW := width - 4 // 2-cell gutter each side (wrapPane indents the body by 2)
 	if rowW < 20 {
@@ -566,24 +602,42 @@ func renderModelsPicker(t Theme, models []modelOption, visible []int, cursor int
 	if len(visible) == 0 {
 		b.WriteString(t.Hint.Render("(no models match the filter)"))
 	}
+	prevProvider := ""
 	for vi, idx := range visible {
 		m := models[idx]
+
+		// Emit a provider header when the group changes.
+		if m.Provider != "" && m.Provider != prevProvider {
+			b.WriteString(t.Hint.Render("  "+m.Provider) + "\n")
+			prevProvider = m.Provider
+		}
+
 		active := " "
 		if m.ID == activeID {
 			active = "*"
+		}
+		note := m.Note
+		if !m.Available {
+			note = note + " (unavailable)"
 		}
 		if vi == cursor {
 			// Selected row: brandDeep bg-fill with onAccent fg spanning the
 			// row, in addition to the ▶ marker. Plain text inside the filled
 			// style so the foreground stays legible on the accent band.
-			text := fmt.Sprintf("▶ %s %s  %s", active, m.Short, m.Note)
+			text := fmt.Sprintf("▶ %s %s  %s", active, m.Short, note)
 			b.WriteString(selectedRow(t, truncateCells(text, rowW), rowW) + "\n")
 		} else {
 			marker := " "
 			if m.ID == activeID {
 				marker = t.StatusGood.Render("*")
 			}
-			line := fmt.Sprintf("  %s %s  %s", marker, t.StatusModel.Render(m.Short), t.Hint.Render(m.Note))
+			var line string
+			if !m.Available {
+				// Dim the entire row for unavailable models.
+				line = fmt.Sprintf("  %s %s  %s", marker, t.Hint.Render(m.Short), t.Hint.Render(note))
+			} else {
+				line = fmt.Sprintf("  %s %s  %s", marker, t.StatusModel.Render(m.Short), t.Hint.Render(note))
+			}
 			b.WriteString(line + "\n")
 		}
 	}

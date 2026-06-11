@@ -58,9 +58,7 @@ desktop/build/
 desktop/frontend/wailsjs/
 
 # Competitive / strategic analysis docs (session-generated; not tracked source)
-# List only the three untracked session files explicitly so the five already-tracked
-# files in docs/competitive/ remain visible to editors, CI diff viewers, and `git add`.
-docs/competitive/
+docs/internal/competitive/
 .superpowers/
 .playwright-mcp/
 /*.png

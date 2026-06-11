@@ -25,11 +25,11 @@
 
 - **可证明的前缀缓存稳定性** — 单一 canonical 序列化器同时喂给 wire 字节和
   缓存指纹，构造级一致不可能发散；`dsc trace inspect` 的 `prefixes==1`
-  可证明缓存稳定（[docs/prefix-cache.md](docs/prefix-cache.md)）。
+  可证明缓存稳定（[docs/reference/prefix-cache.md](docs/reference/prefix-cache.md)）。
 - **信号驱动 Flash→Pro 路由** — 在歧义或反复修复时自动升级；破坏性调用触发
-  Duet pro 校验器（[docs/duet.md](docs/duet.md)）。
+  Duet pro 校验器（[docs/reference/duet.md](docs/reference/duet.md)）。
 - **真实 OS 沙箱** — sandbox-exec (macOS) / Landlock (Linux) 真隔离 + 真 PTY
-  （[docs/SANDBOX.md](docs/SANDBOX.md)）。
+  （[docs/reference/sandbox.md](docs/reference/sandbox.md)）。
 - **自动推理强度** — 逐回合按关键词自动开关 thinking，`low/medium/high/max`
   档位，简单任务自动降档。
 
@@ -129,7 +129,7 @@ thinking = true
 # default_model = "gpt-4o"
 ```
 
-完整参考：[docs/config.md](docs/config.md) · [docs/PROVIDERS.md](docs/PROVIDERS.md)
+完整参考：[docs/reference/config.md](docs/reference/config.md) · [docs/reference/providers.md](docs/reference/providers.md)
 
 ## 环境变量
 
@@ -142,7 +142,7 @@ thinking = true
 
 ## 文档
 
-[配置](docs/config.md) · [Providers](docs/PROVIDERS.md) · [工具](docs/tools.md) · [权限](docs/permissions.md) · [沙箱](docs/SANDBOX.md) · [Skills](docs/skills.md) · [Hooks](docs/hooks.md) · [MCP](docs/mcp.md) · [LSP](docs/lsp.md) · [前缀缓存](docs/prefix-cache.md) · [Duet](docs/duet.md) · [价格](docs/pricing.md) · [Web SPA](docs/WEB.md)
+[配置](docs/reference/config.md) · [Providers](docs/reference/providers.md) · [工具](docs/reference/tools.md) · [权限](docs/reference/permissions.md) · [沙箱](docs/reference/sandbox.md) · [Skills](docs/reference/skills.md) · [Hooks](docs/reference/hooks.md) · [MCP](docs/reference/mcp.md) · [LSP](docs/reference/lsp.md) · [前缀缓存](docs/reference/prefix-cache.md) · [Duet](docs/reference/duet.md) · [价格](docs/reference/pricing.md) · [Web SPA](docs/reference/web.md)
 
 ## 开发
 

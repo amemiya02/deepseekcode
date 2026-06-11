@@ -85,7 +85,7 @@ Or hit the model with a one-shot prompt and exit:
 dsc -p "explain the auth flow in pkg/auth"
 ```
 
-See [config.md](config.md) for permanent configuration via
+See [config.md](reference/config.md) for permanent configuration via
 `~/.deepseek/config.toml`.
 
 ## Upgrade

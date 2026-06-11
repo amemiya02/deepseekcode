@@ -87,6 +87,6 @@ user's decision.
 - Option A (no change) is the zero-cost default if no decision is made; the
   terminal binary continues to ship as-is.
 - The competitive-analysis reference is
-  [`docs/research/deepseek-specialization-vs-reasonix.md`](../research/deepseek-specialization-vs-reasonix.md),
+  `docs/research/deepseek-specialization-vs-reasonix.md`,
   sections 8 (breadth vs. specialization distinction) and 9 (P2
   recommendation).

@@ -38,7 +38,7 @@ is invisible (or inverts) when the actual backdrop is whatever the user's
 terminal happens to be. So we paint the canvas and build depth from there. A
 config opt-out (`ui.transparent_background`) restores the old transparent
 rendering; the same degraded path engages automatically on non-truecolor
-terminals. See [`/CONTEXT.md`](../../CONTEXT.md) for the vocabulary.
+terminals. See `/CONTEXT.md` for the vocabulary.
 
 ## Considered options
 

@@ -60,7 +60,7 @@ agent 侧（`internal/agent/agent.go`）：
 
 Duet 侧：
 
-- **`config.DuetConfig`**（`internal/config/config.go`）—— `enabled`（默认 `true`）与 `extra_destructive_patterns` 被运行时消费（`cmd/dsc/main.go` 的 `buildHookRunner`）；`retry_on_failure` 与 `validator_timeout_ms` 当前只被配置层解析，**运行时没有消费方**（全仓 grep 核实），不要依赖它们改变行为。
+- **`config.DuetConfig`**（`internal/config/config.go`）—— 四个键全部被运行时消费（`cmd/dsc/main.go` 的 `buildHookRunner`）：`enabled`（默认 `true`）、`extra_destructive_patterns`，以及经 `hooks.DuetOptions` 传入的 `validator_timeout_ms`（单次 `ValidatePro` 的超时上限，默认 10000ms）与 `retry_on_failure`（瞬态失败重试一次再 fail-open，默认 `true`）；后两者由 `internal/hooks/builtin_duet_test.go` 钉住。
 - **`hooks.HookOutput`**（`internal/hooks/hooks.go`）—— Duet 以 builtin hook 形式存在，裁决值为 `allow` / `deny` / `ask` / `continue`；`Runner.Run` 聚合时 `deny` 短路（`runner.go`）。
 - **`tools.BashIntent`**（`internal/tools/bash_validate.go`）—— bash 四级分级 `read` / `safe` / `destructive` / `unknown`，Duet 的 bash 触发面就是 `BashDestructive` 这一级。
 
@@ -185,7 +185,7 @@ Duet 是权限闸**之后**的第二道独立闸：
 | `[clarify] auto_clarify` / `--auto-clarify` | `false` | 澄清前置闸 |
 | `[duet] enabled` / `--no-duet` | `true` | Duet 总开关 |
 | `[duet] extra_destructive_patterns` | 空 | 追加 bash destructive 正则 |
-| `[duet] retry_on_failure` / `validator_timeout_ms` | `true` / `10000` | **仅被解析，运行时无消费方**（现状） |
+| `[duet] retry_on_failure` / `validator_timeout_ms` | `true` / `10000` | 失败重试一次 / 单次验证超时（毫秒），经 `hooks.DuetOptions` 生效 |
 | `[permissions] secret_path_patterns` | 见 defaults | 与权限闸共享的秘密文件面 |
 
 ## 4. 不变量与测试守卫

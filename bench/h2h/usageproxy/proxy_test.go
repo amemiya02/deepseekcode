@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func startUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
@@ -48,6 +49,22 @@ func TestNonStreamUsageCaptured(t *testing.T) {
 	}
 }
 
+// waitForUsage polls p.Usages() until it has at least n records or times out.
+// This guards against the race where the HTTP response reaches the client
+// before the proxy handler goroutine has appended the usage record.
+func waitForUsage(t *testing.T, p *Proxy, n int) []Usage {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if u := p.Usages(); len(u) >= n {
+			return u
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d usage record(s), got %d", n, len(p.Usages()))
+	return nil
+}
+
 func TestSSEUsageCaptured(t *testing.T) {
 	chunks := []string{
 		`data: {"choices":[{"delta":{"content":"h"}}]}`,
@@ -71,7 +88,7 @@ func TestSSEUsageCaptured(t *testing.T) {
 	if string(got) != sse {
 		t.Fatalf("SSE not passed through:\nwant %q\ngot  %q", sse, got)
 	}
-	u := p.Usages()
+	u := waitForUsage(t, p, 1)
 	if len(u) != 1 || u[0].HitTokens != 1100 || u[0].MissTokens != 10 || u[0].OutTokens != 80 {
 		t.Fatalf("bad usage records: %+v", u)
 	}

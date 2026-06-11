@@ -38,6 +38,7 @@ type App struct {
 	// Wiring
 	agent    *agent.Agent
 	reg      *modelreg.Registry // nil when no registry (legacy single-provider mode)
+	pendingSwap func()           // deferred model swap, executed on turn completion
 	model    string
 	thinking bool
 	cwd      string
@@ -437,7 +438,13 @@ func (a *App) runAgent(prompt string) {
 	a.runCancel = nil
 	a.runCtx = nil
 	a.running = false
+	pending := a.pendingSwap
+	a.pendingSwap = nil
 	a.runMu.Unlock()
+
+	if pending != nil {
+		pending()
+	}
 }
 
 // Init satisfies tea.Model. The first scrollback entry is an ASCII
@@ -1684,13 +1691,21 @@ func (a *App) handleSlash(line string) tea.Cmd {
 	case "/models":
 		// Direct switch: /models <id>
 		if len(fields) >= 2 {
-			// Look up the provider from the hard-coded table so the
-			// session writer receives the provider context.
 			prov := ""
-			for _, m := range availableModels() {
-				if m.ID == fields[1] {
-					prov = m.Provider
-					break
+			if a.reg != nil {
+				rows, _ := a.reg.List(context.Background())
+				for _, m := range rows {
+					if m.ID == fields[1] {
+						prov = m.Provider
+						break
+					}
+				}
+			} else {
+				for _, m := range availableModels() {
+					if m.ID == fields[1] {
+						prov = m.Provider
+						break
+					}
 				}
 			}
 			return a.applyModelSwitch(fields[1], prov)
@@ -2453,13 +2468,24 @@ func (a *App) applyModelSwitch(id string, provider string) tea.Cmd {
 			a.refreshView()
 			return nil
 		}
-		a.agent.SwitchProvider(res.Client, res.Model, res.Caps)
-		a.model = res.Model
-		a.status.model = res.Model
-		if res.Caps.MaxContextTokens > 0 {
-			a.status.contextLimit = res.Caps.MaxContextTokens
+		apply := func() {
+			a.agent.SwitchProvider(res.Client, res.Model, res.Caps)
+			a.model = res.Model
+			a.status.model = res.Model
+			if res.Caps.MaxContextTokens > 0 {
+				a.status.contextLimit = res.Caps.MaxContextTokens
+			}
+			a.scrollback.SetModel(res.Model)
 		}
-		a.scrollback.SetModel(res.Model)
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running {
+			a.pendingSwap = apply
+			a.scrollback.AppendInfo("model will switch to " + res.Model + " after the current turn")
+		} else {
+			apply()
+		}
 		if res.Warning != "" {
 			a.scrollback.AppendInfo("model switched (" + res.Warning + ")")
 		}

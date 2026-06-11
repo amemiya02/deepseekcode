@@ -458,7 +458,10 @@ func (a *Agent) Events() <-chan Event { return a.eventsCompat }
 // buildEpochComponents pads the static system prompt so the frozen prefix
 // ends on a cache-unit boundary (§3.4). Must be called before the first Run.
 // Zero (the default) disables padding entirely.
-func (a *Agent) SetCacheUnit(unit int) { a.cacheUnit = unit }
+func (a *Agent) SetCacheUnit(unit int) {
+	a.cacheUnit = unit
+	a.CompactionCfg.CacheUnit = unit // W0.3: keep compaction alignment in sync
+}
 
 // Bus returns the agent's event bus. Additional consumers (loggers,
 // parity recorders, future daemons) subscribe via Bus().Subscribe
@@ -906,6 +909,11 @@ func (a *Agent) learnStaticResidual(usagePromptTokens int, sentMessages []llm.Me
 // collapse. Errors surface via EventInfo so the user sees them
 // without crashing the Run.
 func (a *Agent) maybeCompact(ctx context.Context) {
+	// W0.3 safety net: ensure CompactionCfg.CacheUnit tracks a.cacheUnit
+	// in case SetCacheUnit was called after construction.
+	if a.cacheUnit > 0 && a.CompactionCfg.CacheUnit == 0 {
+		a.CompactionCfg.CacheUnit = a.cacheUnit
+	}
 	maxCtx := a.MaxContextTokens
 	if maxCtx <= 0 {
 		maxCtx = MaxContextTokens
@@ -936,7 +944,11 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 				systemPrompt = epoch.FrozenSystem
 				toolSpecs = epoch.FrozenTools
 			}
-			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, toolSpecs, a.SemanticCfg)
+			// Thread CacheUnit through so SemanticCompact aligns the rebuilt
+			// tail to the same cache-unit boundary as CompactSession (W0.3).
+			semCfg := a.SemanticCfg
+			semCfg.CacheUnit = a.CompactionCfg.CacheUnit
+			res := SemanticCompact(ctx, a.Messages, a.Client, systemPrompt, toolSpecs, semCfg)
 			if res.Summary != "" {
 				if home, herr := os.UserHomeDir(); herr == nil {
 					if _, aerr := archiveCompactedMessages(filepath.Join(home, ".deepseek", "archive"), a.archiveLabel(), a.Messages[res.FromIdx:res.ToIdx]); aerr != nil {
@@ -950,10 +962,10 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 					}
 				}
 				a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
-				a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
-				a.compactionWarned = false // reset warn latch on successful compaction
+				a.cacheEpoch.afterCompaction()              // M3: bump epoch at compaction
+				a.compactionWarned = false                  // reset warn latch on successful compaction
 				a.compactionMetrics.record(res.SummaryCost) // M3: track compaction frequency + cost
-				a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
+				a.compactionFloor = len(a.steps)            // boundaries before here are now stale (T3.5)
 				// Folded read_file results are gone from the live transcript, so
 				// the model no longer holds those files' contents — force a
 				// re-read before any edit (T3.2). nil-safe on both calls.
@@ -1007,9 +1019,9 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 		}
 	}
 	a.Messages = append([]llm.Message{res.SummaryMessage}, res.KeptMessages...)
-	a.cacheEpoch.afterCompaction() // M3: bump epoch at compaction
-	a.compactionWarned = false // reset warn latch on successful compaction
-	a.compactionMetrics.record(0) // M3: deterministic compaction has no LLM cost
+	a.cacheEpoch.afterCompaction()   // M3: bump epoch at compaction
+	a.compactionWarned = false       // reset warn latch on successful compaction
+	a.compactionMetrics.record(0)    // M3: deterministic compaction has no LLM cost
 	a.compactionFloor = len(a.steps) // boundaries before here are now stale (T3.5)
 	// See the semantic path above: invalidate read stamps on fold (T3.2).
 	a.Tools.FileTracker().Clear()
@@ -2338,9 +2350,10 @@ func (a *Agent) effectiveReasoningEffort(thinking bool) llm.ReasoningEffort {
 
 // selectTurnThinking resolves whether to think this turn. ThinkingMode (set via
 // DEEPSEEKCODE_THINKING_MODE for cost A/Bs) overrides the legacy path:
-//   "off"      -> never think
-//   "adaptive" -> think on the first turn (plan) or a repair turn, else terse
-//   "on"/""    -> legacy: AutoReasoning ? SelectThinking : Thinking
+//
+//	"off"      -> never think
+//	"adaptive" -> think on the first turn (plan) or a repair turn, else terse
+//	"on"/""    -> legacy: AutoReasoning ? SelectThinking : Thinking
 //
 // Thinking on/off changes only the wire reasoning_effort field (and whether the
 // model emits reasoning_content); it does NOT touch the Static Prefix, so it
@@ -2370,10 +2383,37 @@ func (a *Agent) selectTurnThinking(userText string, repairErrorsLastTurn int) bo
 
 // routeTurn returns the per-turn (model, thinking, effort) to use. When
 // AutoRoute is off (or no escalation target) it returns the loop defaults
-// unchanged. It updates a.lastRoute for stickiness. Model/effort never affect
-// the Static Prefix, so this cannot cause prefix drift.
+// unchanged — except for predictive pro-first routing: when escalation is
+// enabled (EscalationModel != "") and the classifier detects hard_reasoning,
+// repair_errors, or sticky, the turn starts on pro directly, avoiding the
+// wasted flash round that the reactive escalation path would discard.
+//
+// Behavior-change note (W0.5): this activates the routing classifier even
+// when AutoRoute is off, gated solely on EscalationModel != "". The three
+// proactive triggers are: hard_reasoning (high-confidence complex prompt),
+// repair_errors (previous turn had ≥3 unrecoverable repair errors), and
+// sticky (holding pro for StickyTurns after a prior escalation). Without
+// EscalationModel set, routeTurn returns the loop defaults unchanged.
+//
+// It updates a.lastRoute for stickiness. Model/effort never affect the
+// Static Prefix, so this cannot cause prefix drift.
 func (a *Agent) routeTurn(userText string, repairErrorsLastTurn int) (string, bool, llm.ReasoningEffort) {
 	if !a.AutoRoute || a.EscalationModel == "" {
+		// Predictive pro-first: even without AutoRoute, when escalation is
+		// enabled, run the classifier to detect hard_reasoning and route to
+		// pro directly — avoiding the wasted flash turn.
+		if a.EscalationModel != "" {
+			d := routing.Classify(
+				routing.Signals{UserText: userText, RepairErrorsLastTurn: repairErrorsLastTurn},
+				routing.Config{FlashModel: a.Model, ProModel: a.EscalationModel, StickyTurns: 2},
+				a.lastRoute,
+			)
+			if d.Reason == "hard_reasoning" || d.Reason == "repair_errors" || d.Reason == "sticky" {
+				a.lastRoute = d
+				effort, _ := llm.ParseReasoningEffort(d.Effort)
+				return d.Model, d.Thinking, effort
+			}
+		}
 		thinking := a.selectTurnThinking(userText, repairErrorsLastTurn)
 		return a.Model, thinking, a.effectiveReasoningEffort(thinking)
 	}
@@ -2786,8 +2826,8 @@ type cacheEpochCounter struct {
 	n int
 }
 
-func (e *cacheEpochCounter) value() int                { return e.n }
-func (e *cacheEpochCounter) afterCompaction()          { e.n++ }
+func (e *cacheEpochCounter) value() int             { return e.n }
+func (e *cacheEpochCounter) afterCompaction()       { e.n++ }
 func (e *cacheEpochCounter) afterTurnNoCompaction() {} // no-op
 
 // compactionMetrics tracks compaction frequency and cost for observability.

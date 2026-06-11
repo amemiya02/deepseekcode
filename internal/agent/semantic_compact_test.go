@@ -580,7 +580,7 @@ func TestBuildSemanticSummaryPrompt(t *testing.T) {
 		}},
 	}
 
-	prompt := buildSemanticSummaryPrompt(msgs)
+	prompt := buildSemanticSummaryPrompt(msgs, 2048)
 
 	for _, want := range []string{
 		"CRITICAL CONSTRAINTS",
@@ -649,6 +649,9 @@ func TestDefaultSemanticCompactionConfig(t *testing.T) {
 	if cfg.MaxSummaryTokens != 2000 {
 		t.Errorf("MaxSummaryTokens: got %d want 2000", cfg.MaxSummaryTokens)
 	}
+	if cfg.SummaryTokenBudget != 2048 {
+		t.Errorf("SummaryTokenBudget: got %d want 2048", cfg.SummaryTokenBudget)
+	}
 }
 
 // TestSemanticPromptCarriesPriorSummaryForward covers the T4.3 semantic-path
@@ -663,7 +666,7 @@ func TestSemanticPromptCarriesPriorSummaryForward(t *testing.T) {
 		{Role: "assistant", Blocks: []llm.ContentBlock{llm.TextBlock{Text: prior}}},
 		{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "now do the next thing"}}},
 	}
-	prompt := buildSemanticSummaryPrompt(msgs)
+	prompt := buildSemanticSummaryPrompt(msgs, 2048)
 	if !strings.Contains(prompt, prior) {
 		t.Errorf("prior summary must be embedded in full; prompt:\n%s", prompt)
 	}
@@ -672,5 +675,74 @@ func TestSemanticPromptCarriesPriorSummaryForward(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "early_tool") || !strings.Contains(prompt, "early_fact.go") {
 		t.Errorf("early facts missing from prompt:\n%s", prompt)
+	}
+}
+
+// --- Test: Prompt includes token budget instruction ---
+func TestBuildSemanticSummaryPrompt_TokenBudgetInstruction(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: "user", Blocks: []llm.ContentBlock{llm.TextBlock{Text: "hello"}}},
+	}
+	prompt := buildSemanticSummaryPrompt(msgs, 1024)
+	if !strings.Contains(prompt, "1024") {
+		t.Errorf("prompt should mention the token budget (1024); got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "MUST be under") {
+		t.Errorf("prompt should contain 'MUST be under' instruction; got:\n%s", prompt)
+	}
+}
+
+// --- Test: Summary is hard-clamped to SummaryTokenBudget ---
+func TestSemanticCompact_SummaryClampedToTokenBudget(t *testing.T) {
+	// Build an extremely verbose summary that far exceeds the budget.
+	// ~500 words ≈ ~650 tokens, well over a 100-token budget.
+	verboseSummary := "<summary>\n"
+	for i := 0; i < 100; i++ {
+		verboseSummary += "- objective: this is a very detailed line of progress that has been made on the task at hand and we need to track every single step carefully\n"
+	}
+	verboseSummary += "</summary>"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": verboseSummary}},
+			},
+			"usage": map[string]int{"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient("test-key", srv.URL)
+
+	// Build messages large enough to trigger compaction.
+	msgs := make([]llm.Message, 20)
+	for i := range msgs {
+		msgs[i] = llm.Message{Role: "user", Blocks: []llm.ContentBlock{
+			llm.TextBlock{Text: strings.Repeat("x", 400)},
+		}}
+	}
+
+	budget := 100
+	cfg := SemanticCompactionConfig{
+		SummaryModel:       "deepseek-v4-flash",
+		SummaryTimeout:     15 * time.Second,
+		MaxSummaryTokens:   2000,
+		SummaryTokenBudget: budget,
+	}
+
+	res := SemanticCompact(context.Background(), msgs, client, "system prompt", nil, cfg)
+	if !res.UsedSemantic {
+		t.Fatal("expected semantic compaction (UsedSemantic=true)")
+	}
+
+	// The summary must be clamped to within the budget.
+	tokCount := countTextTokens(res.Summary)
+	if tokCount > budget {
+		t.Errorf("summary token count %d exceeds budget %d; summary:\n%s", tokCount, budget, res.Summary)
+	}
+	if tokCount == 0 {
+		t.Error("clamped summary should not be empty")
 	}
 }

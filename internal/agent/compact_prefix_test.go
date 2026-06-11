@@ -8,14 +8,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
-func textOf(m llm.Message) string {
-	for _, b := range m.Blocks {
-		if tb, ok := b.(llm.TextBlock); ok {
-			return tb.Text
-		}
-	}
-	return ""
-}
+// textOf is defined in compact.go (production) — reused here.
 
 func TestCompactionNeverTouchesSystemPrefix(t *testing.T) {
 	msgs := []llm.Message{

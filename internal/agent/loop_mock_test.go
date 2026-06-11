@@ -642,6 +642,39 @@ func TestLoopAPIErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestPredictiveProFirstE2E: with escalation enabled (but AutoRoute off) and a
+// hard-reasoning prompt, the loop should route directly to pro — exactly 1
+// request (pro), not 2 (flash + pro escalation). This is the end-to-end
+// counterpart to TestPredictiveProFirstAvoidsDiscardedFlash.
+func TestPredictiveProFirstE2E(t *testing.T) {
+	srv := llmtest.NewServer(llmtest.Turn{Text: "pro's considered answer"})
+	defer srv.Close()
+
+	a := newMockLoopAgent(t, srv)
+	a.EscalationModel = proModel
+	// AutoRoute is off (zero value) — the predictive path should still fire.
+	esc := captureEscalations(a)
+
+	reason, err := a.Run(context.Background(), "why does this deadlock? prove the root cause")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reason != StopModelDone {
+		t.Fatalf("reason = %v, want StopModelDone", reason)
+	}
+	// Exactly 1 request — pro from the start, no wasted flash round.
+	if srv.Count() != 1 {
+		t.Fatalf("served %d requests, want 1 (pro-first, no flash+escalate)", srv.Count())
+	}
+	if m := requestModel(t, srv.Requests()[0]); m != proModel {
+		t.Errorf("request model = %q, want %q (pro-first)", m, proModel)
+	}
+	// No reactive escalation event — the turn was routed pro from the start.
+	if events := esc(); len(events) != 0 {
+		t.Errorf("no escalation events expected for predictive pro-first, got %+v", events)
+	}
+}
+
 // TestLoopPartialPersistOnMidStreamError pins T1.1: when a stream breaks
 // mid-turn after some reasoning/text has arrived, that partial assistant
 // turn is appended to the message history (and persisted) rather than

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/tokenizer"
 )
 
 // SemanticCompactionConfig controls semantic compaction behavior.
@@ -48,9 +49,26 @@ type SemanticCompactionConfig struct {
 	// Default: 15 seconds
 	SummaryTimeout time.Duration
 
-	// MaxSummaryTokens caps the semantic summary length.
-	// Default: 2000
+	// MaxSummaryTokens caps the LLM's max_tokens parameter — the model
+	// is told to produce at most this many output tokens. Default: 2000.
+	// This is a wire-level cap sent to the provider; the model may still
+	// produce fewer tokens. See also SummaryTokenBudget (the post-hoc
+	// hard-clamp backstop).
 	MaxSummaryTokens int
+
+	// SummaryTokenBudget caps the token count of the semantic summary.
+	// The summary is re-sent every turn after a fold; a verbose summary
+	// is permanent body weight. After the LLM produces a summary, it is
+	// hard-clamped to this budget as a backstop (model may ignore the
+	// prompt instruction). Default: 2048.
+	SummaryTokenBudget int
+
+	// CacheUnit is the measured DeepSeek cache-unit boundary (tokens)
+	// used to align the rebuilt post-compaction tail. Carried here so
+	// SemanticCompact can pass it to alignTailToCacheUnit without
+	// requiring a separate CompactionConfig argument. 0 (default) =
+	// disabled (no alignment). See CompactionConfig.CacheUnit.
+	CacheUnit int
 }
 
 // SemanticCompactionResult is what SemanticCompact produces.
@@ -109,6 +127,7 @@ func defaultSemanticCompactionConfig() SemanticCompactionConfig {
 		SummaryModel:        "deepseek-v4-flash",
 		SummaryTimeout:      15 * time.Second,
 		MaxSummaryTokens:    2000,
+		SummaryTokenBudget:  2048,
 	}
 }
 
@@ -141,6 +160,9 @@ func SemanticCompact(
 	if cfg.MaxSummaryTokens <= 0 {
 		cfg.MaxSummaryTokens = 2000
 	}
+	if cfg.SummaryTokenBudget <= 0 {
+		cfg.SummaryTokenBudget = 2048
+	}
 
 	// Determine compaction window via existing ShouldCompact logic.
 	// We need to compact the same way as the deterministic path.
@@ -172,6 +194,10 @@ func SemanticCompact(
 		return fallbackToDeterministic(messages, compCfg, "LLM returned empty summary")
 	}
 
+	// Hard-clamp the summary to the token budget. The model may ignore the
+	// prompt instruction, so we enforce it here as a backstop.
+	summary = clampToTokenBudget(summary, cfg.SummaryTokenBudget)
+
 	cost := llm.Cost(cfg.SummaryModel, usage)
 	// Assistant-role body message, consistent with the deterministic path
 	// (T4.3) — never a second system message in the wire.
@@ -179,6 +205,11 @@ func SemanticCompact(
 		Role:   "assistant",
 		Blocks: []llm.ContentBlock{llm.TextBlock{Text: summary}},
 	}
+	// §3.6: align the rebuilt tail ([summary || kept]) to a cache-unit boundary,
+	// matching CompactSession's behavior. Without this, the semantic path would
+	// produce a different post-fold prefix boundary than the deterministic path
+	// for the same tail content, violating the W0.3 determinism invariant.
+	summaryMsg = alignTailToCacheUnit(summaryMsg, kept, cfg.CacheUnit)
 
 	return SemanticCompactionResult{
 		Summary:        summary,
@@ -206,7 +237,7 @@ func callSummaryModel(
 		return "", llm.Usage{}, fmt.Errorf("nil LLM client")
 	}
 
-	prompt := buildSemanticSummaryPrompt(messages)
+	prompt := buildSemanticSummaryPrompt(messages, cfg.SummaryTokenBudget)
 
 	// Build a minimal request: system prompt + summary prompt.
 	// Thinking disabled for cost savings.
@@ -283,9 +314,12 @@ func callSummaryModel(
 //   - The messages to summarize
 //   - Instructions to preserve pinned facts, current task, constraints
 //   - Instructions to produce a structured summary
-func buildSemanticSummaryPrompt(messages []llm.Message) string {
+func buildSemanticSummaryPrompt(messages []llm.Message, tokenBudget int) string {
 	var b strings.Builder
 	b.WriteString("You are a conversation summarizer. Produce a concise, structured summary of the following messages.\n\n")
+	if tokenBudget > 0 {
+		fmt.Fprintf(&b, "Your summary MUST be under %d tokens. Be concise.\n\n", tokenBudget)
+	}
 	b.WriteString("CRITICAL CONSTRAINTS — you MUST preserve these in the summary:\n")
 	b.WriteString("1. **Pinned skill facts**: any specific facts, rules, or constraints mentioned\n")
 	b.WriteString("2. **Current objective/task**: what the user is trying to accomplish RIGHT NOW\n")
@@ -330,6 +364,49 @@ func buildSemanticSummaryPrompt(messages []llm.Message) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// clampToTokenBudget truncates text to fit within the given token budget.
+// Uses the exact tokenizer when available, falling back to a len/4 heuristic.
+// Truncation is done at the last newline boundary that fits, so the summary
+// remains structurally valid.
+func clampToTokenBudget(text string, budget int) string {
+	if budget <= 0 {
+		return text
+	}
+	tok := countTextTokens(text)
+	if tok <= budget {
+		return text
+	}
+	// Binary search for the longest prefix that fits within the budget.
+	lo, hi := 0, len(text)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if countTextTokens(text[:mid]) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	truncated := text[:lo]
+	// Try to cut at a newline for structural validity.
+	if idx := strings.LastIndex(truncated, "\n"); idx > len(truncated)/2 {
+		truncated = truncated[:idx+1]
+	}
+	return strings.TrimSpace(truncated)
+}
+
+// countTextTokens returns the token count of a plain text string.
+// Uses the exact tokenizer when available, else the len/4 heuristic.
+func countTextTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	if n := tokenizer.Count(text); n > 0 {
+		return n
+	}
+	// Fallback: approximate 4 chars per token.
+	return max(1, len(text)/4)
 }
 
 // fallbackToDeterministic wraps the existing CompactSession for fallback.

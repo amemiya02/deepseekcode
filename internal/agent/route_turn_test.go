@@ -74,3 +74,39 @@ func TestThinkingModeOverrides(t *testing.T) {
 		t.Fatal("a high-effort keyword must think even when short")
 	}
 }
+
+// TestPredictiveProFirstAvoidsDiscardedFlash: when escalation is enabled (but
+// AutoRoute is off), a hard-reasoning user text should route directly to pro
+// on the first request, avoiding the wasted flash round.
+func TestPredictiveProFirstAvoidsDiscardedFlash(t *testing.T) {
+	a := &Agent{
+		Model:           "deepseek-v4-flash",
+		EscalationModel: "deepseek-v4-pro",
+		// AutoRoute is off (zero value).
+	}
+	model, thinking, effort := a.routeTurn("why does this deadlock? prove the root cause", 0)
+	if model != "deepseek-v4-pro" {
+		t.Fatalf("hard_reasoning with escalation enabled should route pro, got %q", model)
+	}
+	// thinking is driven by the classifier's Decision (hard_reasoning → true),
+	// consistent with the AutoRoute path.
+	if !thinking {
+		t.Fatal("hard prompt must enable thinking")
+	}
+	if effort != llm.ReasoningEffortMax {
+		t.Fatalf("hard prompt should get max effort, got %q", effort)
+	}
+}
+
+// TestPredictiveProFirstKeepsFlashOnMechanical: the predictive path must NOT
+// override flash for a short/mechanical prompt when AutoRoute is off.
+func TestPredictiveProFirstKeepsFlashOnMechanical(t *testing.T) {
+	a := &Agent{
+		Model:           "deepseek-v4-flash",
+		EscalationModel: "deepseek-v4-pro",
+	}
+	model, _, _ := a.routeTurn("read a file", 0)
+	if model != "deepseek-v4-flash" {
+		t.Fatalf("mechanical prompt should stay on flash, got %q", model)
+	}
+}

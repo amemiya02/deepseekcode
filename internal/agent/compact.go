@@ -241,6 +241,17 @@ func alignTailToCacheUnit(summaryMsg llm.Message, kept []llm.Message, unit int) 
 	return summaryMsg
 }
 
+// textOf returns the text of the first TextBlock in a message, or "" if none.
+// Shared by compaction tests (compact_prefix_test.go, compact_frozen_prefix_test.go).
+func textOf(m llm.Message) string {
+	for _, b := range m.Blocks {
+		if tb, ok := b.(llm.TextBlock); ok {
+			return tb.Text
+		}
+	}
+	return ""
+}
+
 // adjustBoundary tweaks toIdx so the compaction window doesn't
 // split a tool_use from its matching tool_result. Two-pass:
 //
@@ -480,6 +491,9 @@ func CompactWithSemantic(
 	case "none", "warn":
 		return SemanticCompactionResult{}
 	case "compact", "protect":
+		// Thread CacheUnit through so SemanticCompact aligns the rebuilt
+		// tail to the same cache-unit boundary as CompactSession (W0.3).
+		semanticCfg.CacheUnit = compCfg.CacheUnit
 		return SemanticCompact(ctx, messages, client, systemPrompt, tools, semanticCfg)
 	default:
 		return SemanticCompactionResult{}

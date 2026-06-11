@@ -19,11 +19,29 @@ type TaskSpec struct {
 	WallclockCapMin int      `json:"wallclock_cap_min"`
 }
 
+// TokenAttribution breaks down token counts by category so we can see
+// what dsc over-sends on short runs (spec: W0.4).
+//
+// DEFERRED (W0.4): The dsc trace-jsonl format (dscarm.go traceFrame) only
+// reports per-turn totals (cache_hit/cache_miss/output), not per-category
+// breakdowns. Reasonix ACP likewise provides no category data. The struct
+// and report rendering are wired and ready, but neither arm populates
+// Attribution today — the "Token attribution" report section will appear
+// only when a future trace format or post-hoc analysis provides category
+// data. See spec §5.3: "Wave 0 ships instrumentation, not a blind fix."
+type TokenAttribution struct {
+	ToolResult    int `json:"tool_result,omitempty"`
+	AssistantText int `json:"assistant_text,omitempty"`
+	Reasoning     int `json:"reasoning,omitempty"`
+	System        int `json:"system,omitempty"`
+}
+
 // TurnUsage is one model turn's provider usage counters.
 type TurnUsage struct {
-	HitTokens  int `json:"prompt_cache_hit_tokens"`
-	MissTokens int `json:"prompt_cache_miss_tokens"`
-	OutTokens  int `json:"completion_tokens"`
+	HitTokens   int               `json:"prompt_cache_hit_tokens"`
+	MissTokens  int               `json:"prompt_cache_miss_tokens"`
+	OutTokens   int               `json:"completion_tokens"`
+	Attribution *TokenAttribution `json:"attribution,omitempty"`
 }
 
 // ArmResult is one arm's outcome on one task run.

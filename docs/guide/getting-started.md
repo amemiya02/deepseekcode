@@ -227,5 +227,5 @@ rm -rf .deepseek          # 在每个项目目录下执行，删除项目级指�
 
 ## 下一步
 
+- [核心工作流](core-workflow.md) — 用一个完整场景学会提问、审查、回滚、续接、权限选择
 - [配置参考](../reference/config.md) — 所有配置项的完整说明（`~/.deepseek/config.toml`、环境变量、provider 矩阵）
-- [核心工作流](core-workflow.md) — 如何在真实项目中高效使用 dsc（待上线）

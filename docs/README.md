@@ -8,6 +8,7 @@
 
 <!-- 各教程任务完成时在此追加条目 -->
 - 1. [入门：安装到第一个会话](guide/getting-started.md)
+- 2. [日常工作流：一次真实的改 bug 走查](guide/core-workflow.md)
 
 ## 我想查 —— 参考手册（reference/）
 

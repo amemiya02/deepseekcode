@@ -35,6 +35,7 @@
 
 <!-- 架构总览与深入篇任务完成时在此追加条目 -->
 - [architecture](dev/architecture.md) — 架构总览：三端一核、请求生命周期、37 包地图、代码导读 ⭐ 从这里开始
+- [agent-loop](dev/agent-loop.md) — 深入：turn 循环、finish-reason 覆写、compaction、repair、thinking 门控
 - [model-compatibility](dev/model-compatibility.md) — DeepSeek V4 wire 约束（贡献者必读）
 - [parity](dev/parity.md) — parity 测试场景登记（与 TestParityConsistency 四向绑定）
 - [adr/](dev/adr/) — 架构决策记录

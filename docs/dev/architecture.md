@@ -211,7 +211,7 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 
 读 `internal/agent/agent.go`，抓住主线三个函数：
 
-- `Run` —— turn 入口：steer 排队、停止原因、压缩触发点；
+- `Run` —— turn 入口：steer 排队、停止原因、压缩触发点（逐步走查见 [agent-loop.md](agent-loop.md)）；
 - `runStep` —— 一步 = 一次 LLM 往返：组消息（`fullMessages`）、路由（`routeTurn`）、收流（`streamWithReissue` / `consumeStream`）；
 - `runToolCalls` / `executeOne` —— 权限关卡、PreToolUse/PostToolUse hook、并行执行、快照。
 
@@ -235,4 +235,4 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 - **trace**：设 `DEEPSEEKCODE_TRACE_JSONL` 指向一个文件（gateway 路径在 `cmd/dsc/serve.go` 读这个变量），每 turn 落一行 `traceschema.Record`，再用 `dsc trace` 离线分析（`traceinspect.ExplainFile` 输出逐 turn 账本，含缓存命中归因）；
 - **离线测试**：`internal/llmtest` 提供确定性 mock DeepSeek server，`internal/agent` 的循环测试（如 `loop_mock_test.go`）全程不碰网络；`go build ./...` 秒级完成，改完即可验证。
 
-各方向的深入篇（agent-loop / prefix-cache / routing / tools / tui / three-surfaces）会陆续落在本目录；在它们就位前，[model-compatibility.md](model-compatibility.md)、[parity.md](parity.md) 与 [adr/](adr/) 是 dev/ 下已可用的全部材料。
+各方向的深入篇（agent-loop / prefix-cache / routing / tools / tui / three-surfaces）会陆续落在本目录，已就位的第一篇是 [agent-loop.md](agent-loop.md)；此外 [model-compatibility.md](model-compatibility.md)、[parity.md](parity.md) 与 [adr/](adr/) 也是 dev/ 下已可用的材料。

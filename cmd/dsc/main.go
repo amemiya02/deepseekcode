@@ -449,7 +449,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	// cache-epoch hash can never diverge.
 	home4skills, _ := os.UserHomeDir()
 	skillStore, _ := skillspkg.LoadScan(cwd, home4skills)
-	a := agent.New(client, reg, pol, rt.Model)
+	a := agent.New(client, reg, pol, modelReg.Active().Model)
 	defer a.Close()
 	a.MCPRegistry = mcpReg
 	reg.Register(tools.NewQuestionTool(a))
@@ -934,6 +934,10 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		return err
 	}
 	client := rt.Client
+	modelReg := modelreg.New(cfg, modelreg.Options{})
+	if n := modelReg.Notice(); n != "" {
+		rt.Notices = append(rt.Notices, n)
+	}
 	client.OnRetry = func(attempt int, err error) {
 		fmt.Fprintf(os.Stderr, "\n\033[33m[retry %d/%d: %v]\033[0m\n", attempt, client.MaxRetries, err)
 	}
@@ -995,7 +999,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	// cache-epoch hash can never diverge.
 	home4skills, _ := os.UserHomeDir()
 	skillStore, _ := skillspkg.LoadScan(cwd, home4skills)
-	a := agent.New(client, reg, pol, rt.Model)
+	a := agent.New(client, reg, pol, modelReg.Active().Model)
 	defer a.Close()
 	a.MCPRegistry = mcpReg
 	reg.Register(tools.NewQuestionTool(a))
@@ -1536,11 +1540,12 @@ func runCompactCmd(_ []string) error {
 	if err != nil {
 		return err
 	}
+	modelReg := modelreg.New(cfg, modelreg.Options{})
 
 	cwd, _ := os.Getwd()
 	reg := tools.New()
 	pol := permissions.New(permissions.ModeAskAll, cwd, nil, nil, nil)
-	a := agent.New(rt.Client, reg, pol, rt.Model)
+	a := agent.New(rt.Client, reg, pol, modelReg.Active().Model)
 	defer a.Close()
 	a.DisableSemanticCompaction = true // compact command uses deterministic path only
 

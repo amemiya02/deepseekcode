@@ -7,7 +7,7 @@
 > 渐进式中文教程，按编号顺序读；1→2 是必经，之后可跳读。
 
 <!-- 各教程任务完成时在此追加条目 -->
-- （安装与入门暂见 [install](install.md)，中文教程上线后由 guide/getting-started.md 取代）
+- 1. [入门：安装到第一个会话](guide/getting-started.md)
 
 ## 我想查 —— 参考手册（reference/）
 

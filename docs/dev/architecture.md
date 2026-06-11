@@ -226,7 +226,7 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 
 ### Day 5 —— 按兴趣分叉
 
-- **TUI**：`internal/tui/app.go`（`New` / `Run`、`tea.Program` 消息循环）入手，组件按文件名自解释（`completions.go`、`diffview.go`、`permission.go`、`history.go`…）。
+- **TUI**：`internal/tui/app.go`（`New` / `Run`、`tea.Program` 消息循环）入手，组件按文件名自解释（`completions.go`、`diffview.go`、`permission.go`、`history.go`…）。深入篇见 [tui.md](tui.md)。
 - **三端/网关**：`internal/acp/http.go`（`handlePrompt` / `handleStream`）→ `internal/gateway/gateway.go` + `hub.go` → `cmd/dsc/serve.go` → `desktop/main.go`，正好走完 §1 的图。
 - **工具与安全**：`internal/tools/registry.go`（`Tool` 接口、tier 体系）→ 挑一个工具如 `bash.go` 顺着读 `internal/permissions/policy.go` 与 `internal/sandbox/`。深入篇见 [tools.md](tools.md)。
 

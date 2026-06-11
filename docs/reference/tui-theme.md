@@ -1,8 +1,12 @@
 # TUI Theme — DeepSeek Ocean
 
+> Implementation deep dive (for contributors): [dev/tui.md](../dev/tui.md)
+
 The TUI uses a **DeepSeek Ocean** visual identity built on a deep blue →
-light blue gradient palette. There is no runtime theme switching; the
-theme is selected at startup from config (`dark` default, `light` alt).
+light blue gradient palette. The theme is selected at startup from config
+(`dark` default) and can also be switched at runtime with `/theme`
+(live-preview picker; five themes: `dark`, `light`, `midnight`, `nebula`,
+`aurora`).
 
 ## Palette
 

@@ -39,6 +39,7 @@
 - [prefix-cache](dev/prefix-cache.md) — 深入：canonical 序列化器、前缀指纹、golden 守卫、缓存红线
 - [routing](dev/routing.md) — 深入：Flash→Pro 升级信号、Duet 验证器、成本权衡
 - [tools](dev/tools.md) — 深入：tool 接口、执行管道、快照回滚、新增 tool 实操与缓存红线
+- [tui](dev/tui.md) — 深入：Bubble Tea 模型、组件树、补全弹层、theme 实现
 - [model-compatibility](dev/model-compatibility.md) — DeepSeek V4 wire 约束（贡献者必读）
 - [parity](dev/parity.md) — parity 测试场景登记（与 TestParityConsistency 四向绑定）
 - [adr/](dev/adr/) — 架构决策记录

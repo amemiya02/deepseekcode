@@ -27,7 +27,9 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/acp"
+	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
+	"github.com/amemiya02/deepseekcode/internal/modelreg"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/snapshots"
 	"github.com/amemiya02/deepseekcode/webapp"
@@ -86,6 +88,7 @@ type Handler struct {
 	intSeq      atomic.Int64 // interaction id sequence
 	sessions    *sessionStore
 	models      *modelState
+	reg         *modelreg.Registry
 	outputStyle *outputStyleState
 }
 
@@ -109,6 +112,21 @@ func NewHandler(sm *acp.SessionManager, tracePath string, opts ...Option) http.H
 		sessions:    newSessionStore(),
 		models:      newModelState(),
 		outputStyle: newOutputStyleState(),
+	}
+	if cfg, cfgErr := config.Load(); cfgErr == nil {
+		// Only create the registry when the active provider has a resolvable
+		// API key. Without a key the Switch path would fail at provider-build
+		// time; keeping h.reg nil preserves the legacy fallback (model list +
+		// bare selection) so tests and keyless boots continue to work.
+		activeName := cfg.Active.Provider
+		if activeName == "" {
+			activeName = "deepseek"
+		}
+		if p, ok := cfg.Providers[activeName]; ok {
+			if _, secErr := config.ResolveSecret(p); secErr == nil {
+				h.reg = modelreg.New(cfg, modelreg.Options{})
+			}
+		}
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -280,7 +298,16 @@ func (h *Handler) handlePrompt(w http.ResponseWriter, r *http.Request) {
 	// the prompt itself. Without this, those endpoints only changed display
 	// state and the agent kept its construction-time config (Yolo still asked).
 	h.models.mu.Lock()
-	ts := acp.TurnSettings{Model: h.models.active, Effort: h.models.effort, PermissionMode: req.Mode}
+	ts := acp.TurnSettings{
+		Model:          h.models.active,
+		Effort:         h.models.effort,
+		PermissionMode: req.Mode,
+		Provider:       h.models.activeProvider,
+	}
+	if h.models.storedClient != nil {
+		ts.Client = h.models.storedClient
+		ts.Caps = &h.models.storedCaps
+	}
 	h.models.mu.Unlock()
 	h.sm.ApplySettings(sessionID, ts)
 

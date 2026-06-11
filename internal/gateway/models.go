@@ -21,11 +21,14 @@ var defaultModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 // /v1/effort. It is the gateway's view; applying it to a live agent run is the
 // concern of a later wave (the session factory reads config today).
 type modelState struct {
-	mu          sync.Mutex
-	models      []string
-	descriptors []modelDescriptor
-	active      string
-	effort      string
+	mu             sync.Mutex
+	models         []string
+	descriptors    []modelDescriptor
+	active         string
+	effort         string
+	activeProvider string
+	storedClient   *llm.Client
+	storedCaps     llm.Capabilities
 }
 
 // modelCaps is the per-model capability flags the composer renders as glyphs.
@@ -171,29 +174,77 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	h.models.mu.Lock()
 	resp := map[string]any{"active": h.models.active, "effort": h.models.effort}
-	if len(h.models.descriptors) > 0 {
+	h.models.mu.Unlock()
+
+	if h.reg != nil {
+		rows, _ := h.reg.List(r.Context())
+		def := config.Default().Defaults.ReasoningEffort
+		if def == "" {
+			def = "max"
+		}
+		descs := make([]map[string]any, 0, len(rows))
+		for _, m := range rows {
+			var effort map[string]any
+			if len(m.Caps.ReasoningEfforts) > 0 {
+				levels := make([]string, len(m.Caps.ReasoningEfforts))
+				for i, e := range m.Caps.ReasoningEfforts {
+					levels[i] = string(e)
+				}
+				effort = map[string]any{"kind": "levels", "levels": levels, "default": def}
+			} else {
+				effort = map[string]any{"kind": "none"}
+			}
+			descs = append(descs, map[string]any{
+				"id": m.ID, "label": modelLabel(m.ID), "provider": m.Provider,
+				"available": m.Available,
+				"caps":      map[string]bool{"vision": false, "tools": true, "reasoning": m.Caps.Thinking},
+				"effort":    effort,
+				"context":   m.Caps.MaxContextTokens,
+			})
+		}
+		resp["models"] = descs
+	} else if len(h.models.descriptors) > 0 {
 		resp["models"] = h.models.descriptors
 	} else {
-		resp["models"] = h.models.models // bare-id fallback (web tolerates both)
+		resp["models"] = h.models.models
 	}
-	h.models.mu.Unlock()
 	writeJSON(w, resp)
 }
 
 // handleModel implements POST /v1/model. It accepts only a model in the
-// advertised list; an unknown model is 400.
+// advertised list; an unknown model is 400. When a registry is available it
+// also accepts a provider field and delegates to modelreg.Switch.
 func (h *Handler) handleModel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var body struct {
-		Model string `json:"model"`
+		Model    string `json:"model"`
+		Provider string `json:"provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	if h.reg != nil {
+		res, err := h.reg.Switch(r.Context(), body.Provider, body.Model)
+		if err == nil {
+			h.models.mu.Lock()
+			h.models.active = res.Model
+			h.models.effort = res.Effort
+			h.models.activeProvider = res.Provider
+			h.models.storedClient = res.Client
+			h.models.storedCaps = res.Caps
+			h.models.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Registry Switch failed (e.g. default provider has no key in the
+		// merged config). Fall through to the legacy model-list path.
+	}
+
 	h.models.mu.Lock()
 	ok := slices.Contains(h.models.models, body.Model)
 	if ok {

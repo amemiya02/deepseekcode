@@ -152,6 +152,13 @@ type Agent struct {
 	// lastRoute carries routing stickiness across turns.
 	lastRoute routing.Decision
 
+	// repairErrorsLastTurn is the committed previous turn's unrecoverable
+	// repair count. routeTurn feeds it to the classifier's repair_errors
+	// signal and to selectTurnThinking (re-enable thinking after a
+	// repair-heavy turn). Reset by every committed turn, so one clean
+	// turn clears the signal.
+	repairErrorsLastTurn int
+
 	// UserID is an optional DeepSeek field for abuse monitoring and
 	// enterprise attribution. Empty means omitted from wire.
 	UserID string
@@ -1227,7 +1234,7 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	a.refreshGitContext(ctx)
 
 	lastUserText := a.lastUserText()
-	turnModel, turnThinking, turnEffort := a.routeTurn(lastUserText, 0)
+	turnModel, turnThinking, turnEffort := a.routeTurn(lastUserText, a.repairErrorsLastTurn)
 	a.turnsSeen++ // after routeTurn so the first turn reads turnsSeen==0 (adaptive plan turn)
 
 	req := llm.Request{
@@ -1421,10 +1428,15 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 				}
 				sr = proSR
 				respModel = a.EscalationModel
-				assembledCall, _ = a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
+				assembledCall, repairErrors = a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)
 			}
 		}
 	}
+
+	// Record the committed turn's repair count for the next turn's router.
+	// On escalation this is the pro re-issue's count (the flash turn was
+	// discarded), so a clean pro turn clears the signal.
+	a.repairErrorsLastTurn = repairErrors
 
 	// The wire flatten layer turns Blocks back into DeepSeek's
 	// {content, reasoning_content, tool_calls} shape on the next

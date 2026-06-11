@@ -86,7 +86,7 @@ Duet 侧：
    - `StickyTurns` 在 `routeTurn` 调用点硬编码为 `2`。
 2. **`repair_errors`** —— `Signals.RepairErrorsLastTurn >= 3`：
    - 升 pro + `max` 并重新武装粘滞；
-   - **诚实标注**：`runStep` 当前在唯一调用点传的是字面量 `0`，所以这个信号目前只由 `internal/routing` 的单测驱动；生产路径上「修复错误触发升级」实际走的是 §2.3 的通道②（阈值同为 3）。给 `Classify` 喂真实修复计数是一个已留好接口、尚未接线的扩展点。
+   - `runStep` 在每个提交回合末把不可恢复修复计数存入 `Agent.repairErrorsLastTurn`（升级重发时取 pro 回合的计数——flash 回合已被丢弃），下一回合开头传给 `routeTurn`；接线由 `TestRunStepFeedsCommittedRepairErrorsToNextRoute`（`loop_mock_test.go`）钉住。与 §2.3 通道②（同回合内重发，阈值同为 3）互补：通道②被预算闸跳过时，本信号在下一回合接棒。
 3. **`hard_reasoning`** —— 用户文本超过 240 字节，**或**小写后包含 `hardWords` 之一：
    - 词表（`classifier.go` 包级变量）：`why`、`design`、`architect`、`refactor`、`debug`、`prove`、`root cause`、`race`、`deadlock`、`redesign`、`trade-off`、`tradeoff`；
    - 命中即 pro + thinking + `max` + 重新武装粘滞。
@@ -225,7 +225,7 @@ go test ./internal/routing/... ./internal/agent/... ./internal/hooks/... \
    - 是否**重新武装** `StickyLeft`；
    - 给 `Reason` 起一个新的稳定字符串（trace 和测试都会断言它）。
 2. **`internal/routing/classifier_test.go`** —— 为新信号加正反两个用例：触发时升 pro，未达阈值时仍 mechanical。`routing` 包零依赖，这层测试秒级。
-3. **`internal/agent/agent.go` 的 `runStep`** —— 把真实信号值喂进 `routeTurn` 调用。当前 `repairErrorsLastTurn` 传 `0` 的现状就是前车之鉴：**信号在分类器里实现了、调用点没接线，等于没有**。信号若需要跨步状态，加在 `Agent` 字段上并注意 session 生命周期。
+3. **`internal/agent/agent.go` 的 `runStep`** —— 把真实信号值喂进 `routeTurn` 调用。历史教训：`repairErrorsLastTurn` 曾长期传字面量 `0`——**信号在分类器里实现了、调用点没接线，等于没有**（2026-06 已接线）。信号若需要跨步状态，照 `Agent.repairErrorsLastTurn` 的样子加字段并注意 session 生命周期。
 4. **`internal/agent/route_turn_test.go`** —— 加一条经 `routeTurn` 的集成断言，防止接线再次退化。
 5. **想清楚通道归属** —— 信号若来自「本步已经发生的事实」（模型输出、修复结果），考虑放进 `escalationTrigger`（通道②，turn 内重发）而不是 `Classify`（通道①，turn 前预测）；前者多花一轮 flash 的钱但判定更准，后者免费但只能看 turn 前可见的信号。
 6. **缓存红线自查** —— 新信号的判定与生效都不得改前缀字节。若你发现自己想往系统提示里塞东西，先读 [prefix-cache.md](prefix-cache.md) 的 golden 守卫一节，并参考 `escalationContract` 的注入纪律（边界之前、字节稳定、`PromptBuilder` 场景禁注入）。

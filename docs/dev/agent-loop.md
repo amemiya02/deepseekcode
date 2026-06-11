@@ -69,7 +69,7 @@ agentLoop:
 `runStep`（`agent.go`）是一次完整的 LLM 往返：
 
 1. `refreshGitContext` 刷新动态尾部的 git 上下文；
-2. `routeTurn(lastUserText, 0)` 决定本轮 `(model, thinking, effort)`（§2.5；注意 `runStep` 调用时 `repairErrorsLastTurn` 实参固定为 `0`，跨轮修复信号目前只作用于同轮升级，不作用于下一轮路由）；
+2. `routeTurn(lastUserText, a.repairErrorsLastTurn)` 决定本轮 `(model, thinking, effort)`（§2.5；实参是上一提交回合的不可恢复修复计数，回合末由 `runStep` 记账——见 [routing.md](routing.md) 信号清单）；
 3. 组装 `llm.Request`：`fullMessages()` + `Tools.AsLLMToolsFiltered(a.ActiveTiers...)` + `ThinkingEnabled(turnThinking)` + effort。若前缀 epoch 已冻结，则改用 `epoch.FrozenTools` / `fullMessagesWithFrozenSystem`（缓存稳定性，详见前缀缓存深入篇与 [../reference/prefix-cache.md](../reference/prefix-cache.md)）；
 4. 预算闸门：发流前用投影成本对会话预算做检查；
 5. `streamWithReissue` 发流：瞬态中流停摆（`ErrFirstTokenTimeout` / `ErrChunkStall`，见 `isReissuableStreamErr`）按原请求重发一次，放弃前抢救部分输出（`partialBlocks`——刻意**不含** tool call，半成品 ToolUseBlock 会在下一请求留下悬空 tool_call）；`consumeStream` 把 SSE 事件聚合成 `streamResult`，finish reason、usage、tool calls 都从终结事件 `llm.EventFinish` 来；

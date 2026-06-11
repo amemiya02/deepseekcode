@@ -47,7 +47,9 @@ func TestEventTurnUsageEmittedPerRequest(t *testing.T) {
 		mu     sync.Mutex
 		events []EventTurnUsage
 	)
+	subDone := make(chan struct{})
 	go func() {
+		defer close(subDone)
 		for env := range sub.C {
 			if e, ok := env.Event.(EventTurnUsage); ok {
 				mu.Lock()
@@ -65,8 +67,10 @@ func TestEventTurnUsageEmittedPerRequest(t *testing.T) {
 		t.Fatalf("reason = %v, want StopModelDone", reason)
 	}
 
-	// Wait for bus to drain.
+	// Close the bus, then wait for the subscriber goroutine to finish
+	// draining all buffered events before reading the slice.
 	a.bus.Close()
+	<-subDone
 
 	mu.Lock()
 	got := events

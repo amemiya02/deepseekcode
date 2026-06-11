@@ -127,7 +127,7 @@ hub 的根治手段是**让广播与订阅在同一把锁下对账**（`hub.go`�
 
 ## 4. Web SPA（`web/`）
 
-**技术栈**（`web/package.json`，name `dsc-web`，已核实）：React 18 + TypeScript + Vite；状态用 zustand；渲染件有 react-markdown(+remark-gfm/math、rehype-highlight/katex)、monaco-editor、highlight.js、lucide-react、cmdk；测试 vitest + Playwright。不是 Svelte（`webapp/embed.go` 的包注释写着"Svelte SPA"，是陈旧注释，以 package.json 为准）。
+**技术栈**（`web/package.json`，name `dsc-web`，已核实）：React 18 + TypeScript + Vite；状态用 zustand；渲染件有 react-markdown(+remark-gfm/math、rehype-highlight/katex)、monaco-editor、highlight.js、lucide-react、cmdk；测试 vitest + Playwright。不是 Svelte。
 
 **与 gateway 的契约**全部收口在 `web/src/lib/api.ts`（文件头自称"the SINGLE gateway client"）：REST 部分是一批 typed `fetch('/v1/…')` 函数；事件流部分是 `GatewayClient.openEventStream(sessionId, handlers)`，对 §2.3 的每个命名事件 `addEventListener`。开发态 `vite.config.ts` 把 `/v1` 代理到 `http://localhost:7432`；生产态 SPA 与 gateway 同源（嵌入或同进程），相对路径直接生效——三种宿主（浏览器、webview、回环兜底）零分支。
 

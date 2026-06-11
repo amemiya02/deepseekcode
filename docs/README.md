@@ -11,6 +11,7 @@
 - 2. [日常工作流：一次真实的改 bug 走查](guide/core-workflow.md)
 - 3. [配置：从默认值到项目级定制](guide/configuration.md)
 - 4. [定制：让 dsc 长成你的形状](guide/customization.md)
+- 5. [进阶三件套：Skills、Subagents、Hooks](guide/skills-agents-hooks.md)
 
 ## 我想查 —— 参考手册（reference/）
 

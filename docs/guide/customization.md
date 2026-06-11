@@ -129,4 +129,4 @@ $ARGUMENTS
 
 ## 下一步
 
-- [Skills、Agents 与 Hooks 进阶参考](../reference/skills.md)（进阶教程即将上线）
+- [进阶三件套：Skills、Subagents、Hooks](skills-agents-hooks.md)

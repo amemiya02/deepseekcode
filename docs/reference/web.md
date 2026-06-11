@@ -1,5 +1,7 @@
 # Web Tools
 
+> Looking for the Web SPA (browser UI)? Implementation deep dive (for contributors): [dev/three-surfaces.md](../dev/three-surfaces.md). This page covers the `web_fetch` / `web_search` tools.
+
 dsc provides two web tools: `web_fetch` for retrieving content from URLs, and `web_search` for searching the web.
 
 ## 启用

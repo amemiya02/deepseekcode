@@ -91,7 +91,7 @@ make desktop              # 构建桌面端 .app（先构建 web/ 再打包）
 
 ### ① 输入接收
 
-TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SPA `POST` 到 `/v1/*`，落到 `acp.HTTPGateway.handlePrompt`（`internal/acp/http.go`）；流式回包走同文件的 `handleStream`，事件由 `internal/gateway/hub.go` 的 `hub` 做每会话 SSE 广播。`hub` 带每 turn 重放缓冲（`subscribe` 返回订阅前已发生的事件，`resetTurn` 在新 turn 清空）——订阅晚到也不会丢 `turn_done`，这是桌面端"第二条消息死锁"级 bug 的根治手段。
+TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SPA `POST` 到 `/v1/*`，落到 `gateway.Handler.handlePrompt`（`internal/gateway/gateway.go`）；流式回包走同文件的 `handleEvents`，事件由 `internal/gateway/hub.go` 的 `hub` 做每会话 SSE 广播。`hub` 带每 turn 重放缓冲（`subscribe` 返回订阅前已发生的事件，`resetTurn` 在新 turn 清空）——订阅晚到也不会丢 `turn_done`，这是桌面端"第二条消息死锁"级 bug 的根治手段。深入篇见 [three-surfaces.md](three-surfaces.md)。
 
 ### ② 进入 ReAct 循环
 
@@ -227,7 +227,7 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 ### Day 5 —— 按兴趣分叉
 
 - **TUI**：`internal/tui/app.go`（`New` / `Run`、`tea.Program` 消息循环）入手，组件按文件名自解释（`completions.go`、`diffview.go`、`permission.go`、`history.go`…）。深入篇见 [tui.md](tui.md)。
-- **三端/网关**：`internal/acp/http.go`（`handlePrompt` / `handleStream`）→ `internal/gateway/gateway.go` + `hub.go` → `cmd/dsc/serve.go` → `desktop/main.go`，正好走完 §1 的图。
+- **三端/网关**：`internal/gateway/gateway.go`（`handlePrompt` / `handleEvents`）+ `hub.go` → `cmd/dsc/serve.go` → `internal/acp/`（`session.go` / `server.go`）→ `desktop/main.go`，正好走完 §1 的图。深入篇见 [three-surfaces.md](three-surfaces.md)。
 - **工具与安全**：`internal/tools/registry.go`（`Tool` 接口、tier 体系）→ 挑一个工具如 `bash.go` 顺着读 `internal/permissions/policy.go` 与 `internal/sandbox/`。深入篇见 [tools.md](tools.md)。
 
 两个贯穿全程的调试手段：

@@ -1,5 +1,7 @@
 # Desktop App
 
+> Implementation deep dive (for contributors): [dev/three-surfaces.md](../dev/three-surfaces.md)
+
 Native macOS `.app` built from the same dsc binary and agent core, packaged via a self-contained shell script that uses only stock macOS tools (no Wails CLI required).
 
 ## Build & run

@@ -25,7 +25,7 @@
 - [tui-theme](reference/tui-theme.md) — TUI 主题
 - [notifications](reference/notifications.md) — 通知
 - [pricing](reference/pricing.md) — 价格速查
-- [web](reference/web.md) — Web SPA
+- [web](reference/web.md) — web_fetch / web_search 工具
 - [desktop](reference/desktop.md) — 桌面端
 - [bash-validation](reference/bash-validation.md) — Bash 命令校验
 - [prefix-cache](reference/prefix-cache.md) — 前缀缓存（用户视角）
@@ -40,6 +40,7 @@
 - [routing](dev/routing.md) — 深入：Flash→Pro 升级信号、Duet 验证器、成本权衡
 - [tools](dev/tools.md) — 深入：tool 接口、执行管道、快照回滚、新增 tool 实操与缓存红线
 - [tui](dev/tui.md) — 深入：Bubble Tea 模型、组件树、补全弹层、theme 实现
+- [three-surfaces](dev/three-surfaces.md) — 深入：gateway/SSE hub、Web SPA、Desktop、ACP 三端一核
 - [model-compatibility](dev/model-compatibility.md) — DeepSeek V4 wire 约束（贡献者必读）
 - [parity](dev/parity.md) — parity 测试场景登记（与 TestParityConsistency 四向绑定）
 - [adr/](dev/adr/) — 架构决策记录

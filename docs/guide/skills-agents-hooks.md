@@ -19,7 +19,13 @@
 4. `.claude/skills/<name>/SKILL.md`
 5. `.agents/skills/<name>/SKILL.md`
 
-**Home 级**（相对于 `$HOME`）：同上五个路径，优先级低于项目级。
+**Home 级**（相对于 `$HOME`）：
+1. `.deepseek/skills`
+2. `.claude/skills`
+3. `.opencode/skills`
+4. `.agents/skills`
+
+（Home 级没有裸 `skills/` 路径；优先级低于项目级。）
 
 同名 skill 以第一个发现的为准（项目级 > home 级；`.deepseek` > `.claude`）。
 

@@ -1,5 +1,7 @@
 # Tools
 
+> Implementation deep dive (for contributors): [dev/tools.md](../dev/tools.md)
+
 `deepseekcode` ships with 14 built-in tools. The model uses them via
 OpenAI-style function calling.
 

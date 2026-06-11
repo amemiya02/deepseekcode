@@ -200,4 +200,4 @@ dsc 有四个全局模式 flag，在启动时指定，优先级高于所有规�
 
 ## 下一步
 
-- [配置参考](../reference/config.md) — `~/.deepseek/config.toml` 所有配置项，包括 `[permissions.rules]` 精细规则配置
+- [配置：从默认值到项目级定制](configuration.md) — 四层叠加模型、模型与 effort 选择、界面语言与主题切换

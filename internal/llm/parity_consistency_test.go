@@ -15,7 +15,7 @@ import (
 //
 //	A = scenario names from ParityScenarios()
 //	B = scenario names recorded in testdata/parity/manifest.json
-//	C = first-column scenario names listed in docs/PARITY.md
+//	C = first-column scenario names listed in docs/dev/parity.md
 //	D = filenames of testdata/parity/*.golden.json (sans .golden.json)
 //
 // A ≠ B ≠ C ≠ D means somebody added/removed/renamed a scenario in one
@@ -27,10 +27,10 @@ func TestParityConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	paritDocPath := filepath.Join("..", "..", "docs", "PARITY.md")
+	paritDocPath := filepath.Join("..", "..", "docs", "dev", "parity.md")
 	c, err := parsePARITYNames(paritDocPath)
 	if err != nil {
-		t.Fatalf("parse docs/PARITY.md (%s): %v\nCreate it with a table whose first column is the scenario name.", paritDocPath, err)
+		t.Fatalf("parse docs/dev/parity.md (%s): %v\nCreate it with a table whose first column is the scenario name.", paritDocPath, err)
 	}
 	d, err := namesFromGoldens(filepath.Join("testdata", "parity"))
 	if err != nil {
@@ -38,7 +38,7 @@ func TestParityConsistency(t *testing.T) {
 	}
 
 	checkEqualSets(t, "ParityScenarios()", a, "manifest.json", b)
-	checkEqualSets(t, "ParityScenarios()", a, "docs/PARITY.md", c)
+	checkEqualSets(t, "ParityScenarios()", a, "docs/dev/parity.md", c)
 	checkEqualSets(t, "ParityScenarios()", a, "*.golden.json", d)
 }
 

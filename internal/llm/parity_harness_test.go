@@ -26,7 +26,7 @@ type ParityScenario struct {
 // ParityScenarios returns every named parity scenario. Names are unique
 // and stable — adding, removing, or renaming a scenario is a deliberate
 // act that must be reflected in manifest.json, golden files, and
-// docs/PARITY.md. TestParityConsistency enforces that quadruple-binding.
+// docs/dev/parity.md. TestParityConsistency enforces that quadruple-binding.
 //
 // Each Build must be deterministic: no time.Now, no map iteration order
 // dependency, no goroutine state. MarshalCacheStable sorts its outputs

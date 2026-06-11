@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 // ErrSessionNotFound is returned by SessionManager lookups when no session
@@ -159,6 +161,9 @@ type TurnSettings struct {
 	Model          string
 	Effort         string
 	PermissionMode string
+	Provider       string
+	Client         *llm.Client
+	Caps           *llm.Capabilities
 }
 
 // SettingsApplier is an optional interface an AgentRunner may implement to

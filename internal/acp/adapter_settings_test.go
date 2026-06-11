@@ -59,3 +59,14 @@ func TestAdapterApplySettingsModeMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestApplySettingsSwapsClientWhenProvided(t *testing.T) {
+	a := &agent.Agent{Model: "deepseek-v4-flash"}
+	ad := NewAgentAdapter(a)
+	newClient := &llm.Client{}
+	caps := llm.Capabilities{Thinking: false, MaxContextTokens: 128_000}
+	ad.ApplySettings(TurnSettings{Provider: "mimo", Model: "mimo-pro", Client: newClient, Caps: &caps})
+	if a.Client != newClient || a.Model != "mimo-pro" {
+		t.Fatalf("client/model not swapped")
+	}
+}

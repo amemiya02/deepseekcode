@@ -48,6 +48,13 @@ func (ad *AgentAdapter) ApplySettings(ts TurnSettings) {
 	if ad.real == nil {
 		return
 	}
+	if ts.Client != nil {
+		caps := llm.Capabilities{}
+		if ts.Caps != nil {
+			caps = *ts.Caps
+		}
+		ad.real.SwitchProvider(ts.Client, ts.Model, caps)
+	}
 	if ts.Model != "" {
 		ad.real.Model = ts.Model
 	}

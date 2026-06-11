@@ -116,7 +116,7 @@ go test ./internal/agent/ -run TestLoop
 make test-race
 ```
 
-**已知 pre-existing 竞态点**：`internal/agent/agent.go` 中 `executeOne` 被并行 goroutine 调用（`sync.WaitGroup` 扇出），而 `toolCallCount++`（约第 2066 行）未加锁——`-race` 检测器会报告此处。这是已知的历史遗留问题，尚未修复。提交时若 `-race` 仅报此处，不属于你引入的新问题；若 `-race` 报告其他路径，请先排查。
+`executeOne` 被并行 goroutine 调用（`sync.WaitGroup` 扇出），其工具调用计数 `toolCallCount` 使用 `atomic.Int64`（`Add` 返回值保证 80% 告警恰好触发一次）。若 `-race` 报告任何路径，都属于需要先排查的新问题。
 
 ### 3.5 Web 测试（vitest + Playwright）
 

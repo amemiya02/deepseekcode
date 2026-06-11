@@ -307,7 +307,7 @@ type Agent struct {
 	// are exposed). The constructor defaults this to [TierCore] (see New).
 	ActiveTiers []tools.ToolTier
 
-	toolCallCount int
+	toolCallCount atomic.Int64 // incremented from parallel tool goroutines (executeOne)
 	steps         []StepRecord
 	gitReader     *gitctx.Reader // lazily constructed per cwd
 
@@ -2062,15 +2062,17 @@ func (a *Agent) executeOne(ctx context.Context, call llm.ToolCall) (tools.Result
 	a.bus.Publish(EventToolCallStart{Call: call})
 
 	// Tool-call rate limit. Warning fires exactly once when crossing 80%
-	// of the cap; the hard cap blocks any call beyond MaxToolCalls.
-	a.toolCallCount++
+	// of the cap (Add's return value is unique per call, so exactly one
+	// goroutine observes ==threshold); the hard cap blocks any call
+	// beyond MaxToolCalls.
+	n := int(a.toolCallCount.Add(1))
 	if a.MaxToolCalls > 0 {
 		threshold := int(float64(a.MaxToolCalls) * 0.8)
-		if threshold > 0 && a.toolCallCount == threshold {
-			a.bus.Publish(EventInfo{Text: fmt.Sprintf("tool call warning: %d/%d used", a.toolCallCount, a.MaxToolCalls)})
+		if threshold > 0 && n == threshold {
+			a.bus.Publish(EventInfo{Text: fmt.Sprintf("tool call warning: %d/%d used", n, a.MaxToolCalls)})
 		}
-		if a.toolCallCount > a.MaxToolCalls {
-			return tools.Errf("tool call limit reached (%d/%d)", a.toolCallCount, a.MaxToolCalls), nil
+		if n > a.MaxToolCalls {
+			return tools.Errf("tool call limit reached (%d/%d)", n, a.MaxToolCalls), nil
 		}
 	}
 

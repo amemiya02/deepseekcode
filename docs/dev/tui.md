@@ -67,13 +67,15 @@ agent 的所有事件（十几种 `agent.Event` 具体类型）进 TUI 只走这
 ```go
 type completions struct {
     active   bool
-    trigger  rune      // '/' 或 '@'
+    trigger  rune        // '/' 或 '@'
+    query    string      // 当前过滤串（SetQuery 写入）
     items    []complItem // 当前触发符的全量候选（打开时固定）
-    filtered []int     // fuzzy 过滤后的下标，按 score 再按 label 排序
-    cursor   int       // filtered 内的光标
-    anchorStart int    // 触发符在输入缓冲里的字节偏移（accept 时从这里替换）
-    capped  bool       // layout() 是否设过终端高度天花板
-    maxRows int        // 天花板值；0 = 完全抑制弹层
+    filtered []int       // fuzzy 过滤后的下标，按 score 再按 label 排序
+    matches  [][]int     // 每个 filtered 项的匹配 rune 下标（用于加粗）
+    cursor   int         // filtered 内的光标
+    anchorStart int      // 触发符在输入缓冲里的字节偏移（accept 时从这里替换）
+    capped  bool         // layout() 是否设过终端高度天花板
+    maxRows int          // 天花板值；0 = 完全抑制弹层
 }
 ```
 
@@ -100,7 +102,7 @@ for ev := range a.agent.Events() {   // internal/agent/agent.go: Events()
 
 `agent.Events()` 返回 agent 终生事件 channel（带环形缓冲，满了丢最旧）；`prog.Send` 是 Bubble Tea 提供的线程安全注入口。这就是"agent 事件到达 TUI"的全部机制——一个消费者、一个信封，没有锁、没有共享可变状态。
 
-`Init()` 做三件事：往 scrollback 写欢迎横幅与启动通知、`textarea.Blink`、并发起 `indexFilesCmd(a.cwd)` 在后台 goroutine 里扫 `@` 菜单的文件索引（完成时投递 `fileIndexMsg`，期间 `@` 菜单显示"(indexing files…)"占位行）。
+`Init()` 做三件事：往 scrollback 写欢迎横幅与启动通知、`textarea.Blink`、并在 `readableDir(a.cwd)` 成立时发起 `indexFilesCmd(a.cwd)` 在后台 goroutine 里扫 `@` 菜单的文件索引（完成时投递 `fileIndexMsg`，期间 `@` 菜单显示"(indexing files…)"占位行）。
 
 ### 2.2 `Update`：消息分发结构（`app.go`）
 

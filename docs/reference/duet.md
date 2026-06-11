@@ -1,5 +1,7 @@
 # Two-Model Duet — Pro Validator
 
+> Implementation deep dive (for contributors): [dev/routing.md](../dev/routing.md)
+
 `deepseekcode`'s second headline feature. Flash drives the main loop;
 Pro adjudicates the dangerous moments. Pro never runs on every turn —
 that would halve the cache-hit rate and double cost for no quality gain.

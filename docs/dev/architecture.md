@@ -111,7 +111,7 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 
 ### ④ 路由决策
 
-每 turn 发请求前 `Agent.routeTurn` 调 `routing.Classify(Signals, Config, prev)`（`internal/routing/classifier.go`）——纯启发式、零额外 LLM 调用，依据用户文本信号与上一轮工具修复错误数在 Flash/Pro 间切换（`StickyTurns: 2` 防抖），同时决定 thinking 开关（`selectTurnThinking`，对琐碎消息经 `llm.IsTrivialMessage` 关闭）与 reasoning effort。模型与 effort 不进前缀，所以路由切换不会引起缓存失效（`routeTurn` 的文档注释明确了这一不变量）。
+每 turn 发请求前 `Agent.routeTurn` 调 `routing.Classify(Signals, Config, prev)`（`internal/routing/classifier.go`）——纯启发式、零额外 LLM 调用，依据用户文本信号与上一轮工具修复错误数在 Flash/Pro 间切换（`StickyTurns: 2` 防抖），同时决定 thinking 开关（`selectTurnThinking`，对琐碎消息经 `llm.IsTrivialMessage` 关闭）与 reasoning effort。模型与 effort 不进前缀，所以路由切换不会引起缓存失效（`routeTurn` 的文档注释明确了这一不变量）。信号全列表、turn 内升级通道与 Duet 验证器深入见 [routing.md](routing.md)。
 
 ### ⑤ LLM 流式
 

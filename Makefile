@@ -103,6 +103,9 @@ web-test:
 desktop: web
 	bash desktop/package-darwin.sh
 
+desktop-dmg: web ## Package a signed, notarized .dmg (needs DSC_SIGN_IDENTITY + DSC_NOTARY_PROFILE)
+	DSC_MAKE_DMG=1 bash desktop/package-darwin.sh
+
 # ---------- CI gate ----------
 ci: web-test test
 	@echo "CI: SPA tests + Go tests passed."

@@ -354,3 +354,16 @@ type EventToolCallDelta struct {
 func (EventPlanUpdate) isAgentEvent()    {}
 func (EventRetry) isAgentEvent()         {}
 func (EventToolCallDelta) isAgentEvent() {}
+
+// EventTurnUsage is published once per LLM request with the request's model
+// and the response's cache-hit/prompt tokens. Observe-only; never perturbs
+// routing or the prefix.
+type EventTurnUsage struct {
+	Model            string
+	CacheHitTokens   int
+	CacheMissTokens  int
+	PromptTokens     int
+	CompletionTokens int
+}
+
+func (EventTurnUsage) isAgentEvent() {}

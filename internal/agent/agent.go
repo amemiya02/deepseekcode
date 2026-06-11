@@ -263,6 +263,7 @@ type Agent struct {
 	inPlan      bool
 	savedTools  *tools.Registry
 	savedPolicy *permissions.Policy
+	stepLedger  []tools.StepEvidence // accumulated during plan mode; cleared on exit
 
 	// stormBreaker suppresses repeated identical read-only tool calls.
 	stormBreaker *repair.StormBreaker
@@ -1378,6 +1379,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	if err != nil {
 		return StepRecord{}, err
 	}
+	// W3.1: emit per-request cache attribution (observe-only; never perturbs routing).
+	a.bus.Publish(EventTurnUsage{
+		Model:            req.Model,
+		CacheHitTokens:   sr.usage.PromptCacheHitTokens,
+		CacheMissTokens:  sr.usage.PromptCacheMissTokens,
+		PromptTokens:     sr.usage.PromptTokens,
+		CompletionTokens: sr.usage.CompletionTokens,
+	})
 
 	// Snapshot storm-breaker history before the repair so an escalated-away
 	// (discarded) flash turn cannot pollute the suppression state the committed
@@ -1438,6 +1447,14 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 				if proErr != nil {
 					return StepRecord{}, proErr
 				}
+				// W3.1: emit per-request cache attribution for the escalated turn.
+				a.bus.Publish(EventTurnUsage{
+					Model:            proReq.Model,
+					CacheHitTokens:   proSR.usage.PromptCacheHitTokens,
+					CacheMissTokens:  proSR.usage.PromptCacheMissTokens,
+					PromptTokens:     proSR.usage.PromptTokens,
+					CompletionTokens: proSR.usage.CompletionTokens,
+				})
 				sr = proSR
 				respModel = a.EscalationModel
 				assembledCall, repairErrors = a.repairToolCalls(ctx, sr.reasoning, sr.text, sr.toolCalls, &sr.blocks)

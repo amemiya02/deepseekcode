@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "codegraph": { "command": "codegraph-mcp", "args": ["serve"], "env": { "PORT": "9000" } },
+    "remote":    { "url": "https://example.test/mcp", "transport": "sse" }
+  }
+}

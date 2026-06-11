@@ -150,3 +150,71 @@ func TestRuleEngineDenyPriority(t *testing.T) {
 		t.Errorf("deny must take priority over allow: got %q", dec)
 	}
 }
+
+func TestEvaluateHonorsCommandPrefixSpecifier(t *testing.T) {
+	engine := &RuleEngine{
+		Allow: []PermissionRule{
+			{ToolPattern: "bash", Specifier: &Specifier{Field: "command", Prefix: "go test"}, Decision: "allow"},
+			{ToolPattern: "bash_pty", Specifier: &Specifier{Field: "command", Prefix: "go test"}, Decision: "allow"},
+		},
+	}
+
+	t.Run("matching prefix", func(t *testing.T) {
+		dec, reason := engine.Evaluate("bash", json.RawMessage(`{"command":"go test ./..."}`))
+		if dec != "allow" {
+			t.Errorf("decision = %q, want allow", dec)
+		}
+		if reason != "matched allow rule: bash (cmd prefix: go test)" {
+			t.Errorf("reason = %q", reason)
+		}
+	})
+
+	t.Run("non-matching prefix", func(t *testing.T) {
+		dec, _ := engine.Evaluate("bash", json.RawMessage(`{"command":"go build"}`))
+		if dec != "" {
+			t.Errorf("decision = %q, want empty (no match)", dec)
+		}
+	})
+
+	t.Run("bash_pty also matches", func(t *testing.T) {
+		dec, _ := engine.Evaluate("bash_pty", json.RawMessage(`{"command":"go test -v"}`))
+		if dec != "allow" {
+			t.Errorf("decision = %q, want allow", dec)
+		}
+	})
+}
+
+func TestEvaluateHonorsPathGlobSpecifier(t *testing.T) {
+	engine := &RuleEngine{
+		Allow: []PermissionRule{
+			{ToolPattern: "read_file", Specifier: &Specifier{Field: "path", Glob: "src/**"}, Decision: "allow"},
+		},
+		Deny: []PermissionRule{
+			{ToolPattern: "write_file", Specifier: &Specifier{Field: "path", Glob: "internal/**"}, Decision: "deny"},
+		},
+	}
+
+	t.Run("allow read in src/**", func(t *testing.T) {
+		dec, reason := engine.Evaluate("read_file", json.RawMessage(`{"path":"src/main.go"}`))
+		if dec != "allow" {
+			t.Errorf("decision = %q, want allow", dec)
+		}
+		if reason != "matched allow rule: read_file (path glob: src/**)" {
+			t.Errorf("reason = %q", reason)
+		}
+	})
+
+	t.Run("no allow outside src/**", func(t *testing.T) {
+		dec, _ := engine.Evaluate("read_file", json.RawMessage(`{"path":"other/main.go"}`))
+		if dec != "" {
+			t.Errorf("decision = %q, want empty (no match)", dec)
+		}
+	})
+
+	t.Run("deny write in internal/**", func(t *testing.T) {
+		dec, _ := engine.Evaluate("write_file", json.RawMessage(`{"path":"internal/pkg/foo.go"}`))
+		if dec != "deny" {
+			t.Errorf("decision = %q, want deny", dec)
+		}
+	})
+}

@@ -163,11 +163,13 @@ type App struct {
 // sessionIntegration bundles the optional persistence hooks. All four
 // nil ⇒ TUI runs ephemeral (no /undo, /sessions, model persistence).
 type sessionIntegration struct {
-	id       string
-	undo     func(n int) (int, error)
-	list     func() ([]session.Session, error)
-	setModel func(model string) error
-	setTheme func(theme string) error
+	id            string
+	undo          func(n int) (int, error)
+	list          func() ([]session.Session, error)
+	setModel      func(model string) error
+	setTheme      func(theme string) error
+	newBranch     func(parentID string, branchPoint int) (session.Session, error)
+	countMessages func(sessionID string) (int, error)
 }
 
 // Config bundles construction params for New.
@@ -191,6 +193,8 @@ type Config struct {
 	ListSessions func() ([]session.Session, error)
 	SetModelFn   func(model string) error
 	SetThemeFn   func(theme string) error
+	NewBranchFn  func(parentID string, branchPoint int) (session.Session, error)
+	CountMsgsFn  func(sessionID string) (int, error)
 
 	// StartupNotices are shown as info chat items at TUI start. Used for
 	// resume confirmations, warnings about degraded persistence, etc. —
@@ -299,11 +303,13 @@ func New(cfg Config) *App {
 		permStatus:     cfg.PermStatus,
 		notifier:       cfg.Notifier,
 		session: sessionIntegration{
-			id:       cfg.SessionID,
-			undo:     cfg.UndoFn,
-			list:     cfg.ListSessions,
-			setModel: cfg.SetModelFn,
-			setTheme: cfg.SetThemeFn,
+			id:            cfg.SessionID,
+			undo:          cfg.UndoFn,
+			list:          cfg.ListSessions,
+			setModel:      cfg.SetModelFn,
+			setTheme:      cfg.SetThemeFn,
+			newBranch:     cfg.NewBranchFn,
+			countMessages: cfg.CountMsgsFn,
 		},
 		status: statusState{
 			model:           cfg.Model,
@@ -1800,6 +1806,101 @@ func (a *App) handleSlash(line string) tea.Cmd {
 		// transaction can't freeze the input loop.
 		go a.agent.ForceCompact(context.Background())
 		return a.toast(BadgeInfo, "compaction requested")
+	case "/tree":
+		if a.session.list == nil {
+			a.scrollback.AppendInfo("/tree unavailable (no persistence wired)")
+			a.refreshView()
+			return nil
+		}
+		sessList, err := a.session.list()
+		if err != nil {
+			a.scrollback.AppendError("loading sessions: " + err.Error())
+			a.refreshView()
+			return nil
+		}
+		a.scrollback.AppendInfo(renderBranchTree(sessList, a.session.id))
+		a.refreshView()
+	case "/branch":
+		if a.session.newBranch == nil || a.session.countMessages == nil {
+			a.scrollback.AppendInfo("/branch unavailable (no persistence wired)")
+			a.refreshView()
+			return nil
+		}
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running {
+			a.scrollback.AppendInfo("/branch unavailable while the agent is running — retry when idle")
+			a.refreshView()
+			return nil
+		}
+		bp := 0
+		if len(fields) >= 2 {
+			if parsed := parsePositiveInt(fields[1]); parsed > 0 {
+				bp = parsed
+			}
+		} else {
+			count, err := a.session.countMessages(a.session.id)
+			if err != nil {
+				a.scrollback.AppendError("counting messages: " + err.Error())
+				a.refreshView()
+				return nil
+			}
+			bp = count
+		}
+		child, err := a.session.newBranch(a.session.id, bp)
+		if err != nil {
+			a.scrollback.AppendError("branch: " + err.Error())
+			a.refreshView()
+			return nil
+		}
+		a.scrollback.AppendInfo(fmt.Sprintf("branched: %s (fork @ msg %d)", child.ID[:8], bp))
+		a.refreshView()
+	case "/switch":
+		if a.session.list == nil {
+			a.scrollback.AppendInfo("/switch unavailable (no persistence wired)")
+			a.refreshView()
+			return nil
+		}
+		if len(fields) < 2 {
+			a.scrollback.AppendInfo("usage: /switch <session-id-prefix>")
+			a.refreshView()
+			return nil
+		}
+		a.runMu.Lock()
+		running := a.running
+		a.runMu.Unlock()
+		if running {
+			a.scrollback.AppendInfo("/switch unavailable while the agent is running — retry when idle")
+			a.refreshView()
+			return nil
+		}
+		sessList, err := a.session.list()
+		if err != nil {
+			a.scrollback.AppendError("loading sessions: " + err.Error())
+			a.refreshView()
+			return nil
+		}
+		prefix := fields[1]
+		var match *session.Session
+		for i, s := range sessList {
+			if strings.HasPrefix(s.ID, prefix) {
+				match = &sessList[i]
+				break
+			}
+		}
+		if match == nil {
+			a.scrollback.AppendError(fmt.Sprintf("no session matching %q", prefix))
+			a.refreshView()
+			return nil
+		}
+		a.session.id = match.ID
+		title := match.Summary
+		if title == "" {
+			title = match.ID[:8]
+		}
+		a.scrollback.AppendInfo(fmt.Sprintf("switched to %s", title))
+		a.refreshView()
 	default:
 		if cmd := a.lookupCustomCommand(line); cmd != nil {
 			return cmd

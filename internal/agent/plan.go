@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/tools"
@@ -10,6 +12,9 @@ import (
 
 // Compile-time check: Agent implements tools.PlanController.
 var _ tools.PlanController = (*Agent)(nil)
+
+// Compile-time check: Agent implements tools.StepRecorder.
+var _ tools.StepRecorder = (*Agent)(nil)
 
 // EnterPlan transitions the agent into plan mode. While in plan mode
 // only read-only tools, question, and plan_exit are available.
@@ -49,6 +54,17 @@ func (a *Agent) ExitPlan(_ context.Context, plan string) error {
 		return errors.New("not in plan mode")
 	}
 
+	// W3.2: emit evidenced steps before clearing state.
+	if len(a.stepLedger) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n\nEvidenced steps:\n")
+		for i, ev := range a.stepLedger {
+			fmt.Fprintf(&sb, "  %d. %s\n     evidence: %s\n", i+1, ev.Step, ev.Evidence)
+		}
+		a.bus.Publish(EventInfo{Text: sb.String()})
+	}
+	a.stepLedger = nil
+
 	a.Tools = a.savedTools
 	a.Permissions = a.savedPolicy
 	a.inPlan = false
@@ -57,6 +73,12 @@ func (a *Agent) ExitPlan(_ context.Context, plan string) error {
 
 	a.bus.Publish(EventInfo{Text: "exited plan mode — full tool access restored"})
 	return nil
+}
+
+// RecordStep implements tools.StepRecorder. It appends an evidenced step
+// to the plan-mode ledger.
+func (a *Agent) RecordStep(ev tools.StepEvidence) {
+	a.stepLedger = append(a.stepLedger, ev)
 }
 
 // readOnlyToolNames returns the names of all read-only tools in reg,
@@ -71,6 +93,7 @@ func readOnlyToolNames(reg *tools.Registry) []string {
 	}
 	names = appendIfMissing(names, "question")
 	names = appendIfMissing(names, "plan_exit")
+	names = appendIfMissing(names, "complete_step")
 	return names
 }
 

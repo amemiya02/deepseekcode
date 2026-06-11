@@ -165,6 +165,9 @@ type PermissionsConfig struct {
 	AllowBash          []string    `toml:"allow_bash"`
 	SecretPathPatterns []string    `toml:"secret_path_patterns"`
 	Rules              RulesConfig `toml:"rules"`
+	AllowSpecifiers    []string    `toml:"allow_specifiers"`
+	DenySpecifiers     []string    `toml:"deny_specifiers"`
+	AskSpecifiers      []string    `toml:"ask_specifiers"`
 	// Default is the autonomy/permission level selected during onboarding.
 	// Accepted values: "ask", "auto", "full". Empty means "ask" (safest).
 	Default string `toml:"default"`
@@ -222,8 +225,8 @@ type MCPServerConfig struct {
 	Args           []string          `toml:"args"`
 	Env            map[string]string `toml:"env"`
 	TimeoutSeconds int               `toml:"timeout_seconds"`
-	EnabledTools   []string          `toml:"enabled_tools"`  // allowlist: only these tools exposed
-	DisabledTools  []string          `toml:"disabled_tools"` // blocklist: these tools hidden
+	EnabledTools   []string          `toml:"enabled_tools"`      // allowlist: only these tools exposed
+	DisabledTools  []string          `toml:"disabled_tools"`     // blocklist: these tools hidden
 	Disabled       bool              `toml:"disabled,omitempty"` // configured but not connected
 }
 
@@ -258,6 +261,16 @@ func Load() (Config, error) {
 	}
 
 	expandEnvFields(&cfg)
+
+	// Merge .mcp.json (Claude/Cursor format) at project root — TOML wins on
+	// name conflicts, so only names absent from the TOML map are added.
+	if dotMCP, err := LoadDotMCPJSON(".mcp.json"); err == nil && len(dotMCP) > 0 {
+		for name, srv := range dotMCP {
+			if _, exists := cfg.MCPServers[name]; !exists {
+				cfg.MCPServers[name] = srv
+			}
+		}
+	}
 
 	if cfg.API.Key == "" {
 		cfg.API.Key = os.Getenv("DEEPSEEK_API_KEY")
@@ -418,6 +431,15 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 	}
 	if ov.Permissions.Default != "" {
 		base.Permissions.Default = ov.Permissions.Default
+	}
+	if len(ov.Permissions.AllowSpecifiers) > 0 {
+		base.Permissions.AllowSpecifiers = ov.Permissions.AllowSpecifiers
+	}
+	if len(ov.Permissions.DenySpecifiers) > 0 {
+		base.Permissions.DenySpecifiers = ov.Permissions.DenySpecifiers
+	}
+	if len(ov.Permissions.AskSpecifiers) > 0 {
+		base.Permissions.AskSpecifiers = ov.Permissions.AskSpecifiers
 	}
 
 	// Network / proxy: copy non-empty values so users can clear fields by

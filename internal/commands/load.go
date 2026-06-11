@@ -76,3 +76,45 @@ func loadDir(baseDir, dir string, entries []os.DirEntry, seen map[string]bool, o
 		seen[name] = true
 	}
 }
+
+// LoadClaudeCommands scans dir/.claude/commands/*.md for Claude Code-style
+// slash commands. Returns commands whose names do not already appear in
+// existing (native commands win on conflict). Missing directory is not an error.
+func LoadClaudeCommands(dir string, existing map[string]Command) ([]Command, error) {
+	cmdDir := filepath.Join(dir, ".claude", "commands")
+	entries, err := os.ReadDir(cmdDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var cmds []Command
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.Size() > maxCommandFileSize {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(cmdDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		cmd, err := ParseCommand(string(b))
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name(), ".md")
+		if existing != nil {
+			if _, conflict := existing[name]; conflict {
+				continue // native command wins
+			}
+		}
+		cmd.Name = name
+		cmd.Path, _ = filepath.Abs(filepath.Join(cmdDir, e.Name()))
+		cmds = append(cmds, cmd)
+	}
+	return cmds, nil
+}

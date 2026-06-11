@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/amemiya02/deepseekcode/internal/textenc"
 )
 
 // WriteFile creates or overwrites a file. Snapshotting is the caller's
@@ -110,12 +112,22 @@ func (w WriteFile) Execute(ctx context.Context, args json.RawMessage) (Result, e
 
 	// Write atomically via tempfile + rename so a crashing process can't
 	// leave a half-written file behind.
+	//
+	// If the file already exists with a non-UTF8 encoding, re-encode the
+	// new UTF-8 content to that charset so the file stays consistent.
+	// New files (absent on disk) are written as UTF-8 unchanged.
+	writeData := []byte(p.Content)
+	if existing, err := os.ReadFile(p.Path); err == nil {
+		if enc := textenc.Detect(existing); enc != textenc.UTF8 {
+			writeData = textenc.Encode(p.Content, enc)
+		}
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(p.Path), ".dsc-write-*")
 	if err != nil {
 		return Result{}, fmt.Errorf("creating tempfile: %w", err)
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.WriteString(p.Content); err != nil {
+	if _, err := tmp.Write(writeData); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return Result{}, fmt.Errorf("writing tempfile: %w", err)

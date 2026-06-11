@@ -6,6 +6,7 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/hooks"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/permissions"
 )
 
 // ValidationError describes a single config validation problem.
@@ -150,6 +151,32 @@ func ValidateStrict(c *Config) []ValidationError {
 	errs = append(errs, validateRules(c.Permissions.Rules.Allow, "allow")...)
 	errs = append(errs, validateRules(c.Permissions.Rules.Deny, "deny")...)
 	errs = append(errs, validateRules(c.Permissions.Rules.Ask, "ask")...)
+
+	// Permission specifiers: parse each string to catch syntax errors.
+	for i, raw := range c.Permissions.AllowSpecifiers {
+		if _, err := permissions.ParseSpecifierRule(raw, "allow"); err != nil {
+			errs = append(errs, ValidationError{
+				Path:    "permissions.allow_specifiers[" + itoa(i) + "]",
+				Message: err.Error(),
+			})
+		}
+	}
+	for i, raw := range c.Permissions.DenySpecifiers {
+		if _, err := permissions.ParseSpecifierRule(raw, "deny"); err != nil {
+			errs = append(errs, ValidationError{
+				Path:    "permissions.deny_specifiers[" + itoa(i) + "]",
+				Message: err.Error(),
+			})
+		}
+	}
+	for i, raw := range c.Permissions.AskSpecifiers {
+		if _, err := permissions.ParseSpecifierRule(raw, "ask"); err != nil {
+			errs = append(errs, ValidationError{
+				Path:    "permissions.ask_specifiers[" + itoa(i) + "]",
+				Message: err.Error(),
+			})
+		}
+	}
 
 	// Web config: search_provider must be known, searxng requires base_url
 	if c.Web.SearchProvider != "" && c.Web.SearchProvider != "duckduckgo" && c.Web.SearchProvider != "searxng" {

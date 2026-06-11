@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/textenc"
 )
 
 // EditFile is a string-replace editor. It refuses ambiguous matches so
@@ -112,7 +114,17 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 		}
 		return Result{}, fmt.Errorf("reading %s: %w", p.Path, err)
 	}
-	content := string(b)
+
+	// Detect CJK / UTF-16 encoding; decode to UTF-8 for editing, re-encode
+	// after producing the replacement so the file's original charset is
+	// preserved. UTF-8 files take the existing byte-identical path.
+	enc := textenc.Detect(b)
+	var content string
+	if enc != textenc.UTF8 {
+		content = string(textenc.Decode(b, enc))
+	} else {
+		content = string(b)
+	}
 
 	// Mirror opencode: normalize CRLF -> LF for matching, then convert the
 	// replacement back to the file's detected line ending. This lets the fuzzy
@@ -138,8 +150,14 @@ func (e EditFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 
 	out := convertToLineEnding(updated, ending)
-	if err := atomicWriteFile(p.Path, []byte(out)); err != nil {
-		return Result{}, err
+	if enc != textenc.UTF8 {
+		if err := atomicWriteFile(p.Path, textenc.Encode(out, enc)); err != nil {
+			return Result{}, err
+		}
+	} else {
+		if err := atomicWriteFile(p.Path, []byte(out)); err != nil {
+			return Result{}, err
+		}
 	}
 	// Re-stamp so a follow-up edit in the same session isn't tripped by the
 	// agent's own write (T3.2).

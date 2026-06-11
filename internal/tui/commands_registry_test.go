@@ -27,7 +27,7 @@ func TestBuiltinCommandsMirrorHandleSlash(t *testing.T) {
 	wantNames := []string{
 		"help", "clear", "quit", "models", "effort", "cost", "theme", "tape",
 		"sessions", "export", "undo", "compact", "reload-skills", "mcp", "lsp",
-		"permissions",
+		"permissions", "tree", "branch", "switch",
 	}
 	for _, name := range wantNames {
 		if _, ok := byName[name]; !ok {

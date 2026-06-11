@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/amemiya02/deepseekcode/internal/permissions"
@@ -210,4 +211,106 @@ func toolNames(reg *tools.Registry) []string {
 		names = append(names, t.Name())
 	}
 	return names
+}
+
+// TestRecordStepCompileCheck documents the compile-time check.
+func TestRecordStepCompileCheck(t *testing.T) {
+	var _ tools.StepRecorder = (*Agent)(nil)
+}
+
+// TestEvidenceLedgerEmittedOnExit verifies that steps recorded via RecordStep
+// are emitted as an EventInfo block on ExitPlan, and that the ledger is
+// cleared afterward.
+func TestEvidenceLedgerEmittedOnExit(t *testing.T) {
+	a, cleanup := planTestAgent(t)
+	defer cleanup()
+
+	// Capture EventInfo events.
+	sub := a.Bus().Subscribe(64)
+	var infos []string
+	done := make(chan struct{})
+	go func() {
+		for env := range sub.C {
+			if e, ok := env.Event.(EventInfo); ok {
+				infos = append(infos, e.Text)
+			}
+		}
+		close(done)
+	}()
+
+	if err := a.EnterPlan(context.Background()); err != nil {
+		t.Fatalf("EnterPlan: %v", err)
+	}
+
+	// Record two steps.
+	a.RecordStep(tools.StepEvidence{Step: "run tests", Evidence: "42 passed"})
+	a.RecordStep(tools.StepEvidence{Step: "check lint", Evidence: "0 warnings"})
+
+	if len(a.stepLedger) != 2 {
+		t.Fatalf("stepLedger len = %d, want 2", len(a.stepLedger))
+	}
+
+	if err := a.ExitPlan(context.Background(), "my plan"); err != nil {
+		t.Fatalf("ExitPlan: %v", err)
+	}
+
+	// Ledger must be cleared after exit.
+	if len(a.stepLedger) != 0 {
+		t.Errorf("stepLedger not cleared after ExitPlan; len = %d", len(a.stepLedger))
+	}
+
+	// Close bus and wait for drain.
+	a.bus.Close()
+	<-done
+
+	// Find the evidenced-steps block.
+	var sawSteps bool
+	for _, text := range infos {
+		if containsAll(text, []string{"run tests", "42 passed", "check lint", "0 warnings"}) {
+			sawSteps = true
+		}
+	}
+	if !sawSteps {
+		t.Errorf("exit event did not contain evidenced steps; got infos: %v", infos)
+	}
+}
+
+// TestEvidenceLedgerEmptyOnExit verifies that ExitPlan with an empty ledger
+// does not emit an evidenced-steps block.
+func TestEvidenceLedgerEmptyOnExit(t *testing.T) {
+	a, cleanup := planTestAgent(t)
+	defer cleanup()
+
+	sub := a.Bus().Subscribe(64)
+	var infos []string
+	done := make(chan struct{})
+	go func() {
+		for env := range sub.C {
+			if e, ok := env.Event.(EventInfo); ok {
+				infos = append(infos, e.Text)
+			}
+		}
+		close(done)
+	}()
+
+	a.EnterPlan(context.Background())
+	a.ExitPlan(context.Background(), "empty plan")
+
+	a.bus.Close()
+	<-done
+
+	for _, text := range infos {
+		if containsAll(text, []string{"Evidenced steps"}) {
+			t.Error("evidenced-steps block should not appear when ledger is empty")
+		}
+	}
+}
+
+func containsAll(s string, subs []string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return true
 }

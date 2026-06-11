@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/textenc"
 )
 
 // defaultWholeReadLineCap bounds how many lines a *whole-file* read (no
@@ -114,22 +116,17 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	defer f.Close()
 
-	// Binary detection: read up to 8 KB and look for NUL bytes.
-	// Extension-based detection is deliberately avoided — NUL byte is
-	// the only reliable cross-platform signal for binary content.
+	// Binary detection and CJK encoding: read up to 8 KB head, detect
+	// encoding FIRST, then branch.  For UTF-8 files the NUL-byte check
+	// runs on raw bytes (existing behaviour).  For non-UTF8 (UTF-16,
+	// GBK, GB18030) the raw bytes are full of NULs by construction, so
+	// the NUL check must happen AFTER decoding to UTF-8 — otherwise
+	// UTF-16 files are falsely classified as binary.
 	head := make([]byte, 8192)
 	n, _ := io.ReadFull(f, head)
 	if n == 0 {
 		// read nothing at all — edge case for empty files or read errors.
 		// Fall through to the normal scan path.
-	} else if bytes.IndexByte(head[:n], 0) >= 0 {
-		return Errf("binary file (NUL byte detected at or before offset %d). "+
-			"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
-			"or read it with an offset/range.", n, p.Path, p.Path), nil
-	}
-	// Seek back to start so the line scanner sees the full file.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return Result{}, fmt.Errorf("seeking %s: %w", p.Path, err)
 	}
 
 	maxBytes := r.MaxBytes
@@ -138,13 +135,50 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	}
 	stat, err := f.Stat()
 	if err == nil && stat.Size() > maxBytes {
-		// Stamp even though the content is too large to display: the freshness
-		// signal is (mtime,size), not coverage, so a subsequent write_file/
-		// edit_file isn't dead-ended by a false "never read" rejection on a file
-		// the model legitimately engaged with (T3.2 / adversarial HIGH-2).
 		r.Tracker.RecordRead(p.Path)
 		return Errf("file too large (%d bytes; cap is %d). Use grep or a narrower start_line/end_line.",
 			stat.Size(), maxBytes), nil
+	}
+
+	// Detect encoding from the head bytes BEFORE any NUL check so that
+	// UTF-16 (which is NUL-heavy) is not misclassified as binary.
+	headKind := textenc.Detect(head[:n])
+	var scanReader io.Reader
+	if headKind != textenc.UTF8 {
+		// Re-read entire file for decoding.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return Result{}, fmt.Errorf("seeking %s: %w", p.Path, err)
+		}
+		all, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+		if err != nil {
+			return Result{}, fmt.Errorf("reading %s: %w", p.Path, err)
+		}
+		if int64(len(all)) > maxBytes {
+			r.Tracker.RecordRead(p.Path)
+			return Errf("file too large (%d bytes; cap is %d). Use grep or a narrower start_line/end_line.",
+				len(all), maxBytes), nil
+		}
+		decoded := textenc.Decode(all, headKind)
+		// NUL-byte check on DECODED content — a non-UTF8 file whose decoded
+		// form still contains NUL is genuinely binary.
+		if bytes.IndexByte(decoded, 0) >= 0 {
+			return Errf("binary file (NUL byte detected after decoding from %v). "+
+				"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
+				"or read it with an offset/range.", headKind, p.Path, p.Path), nil
+		}
+		scanReader = bytes.NewReader(decoded)
+	} else {
+		// UTF-8: NUL-byte check on raw bytes catches genuine binaries.
+		if n > 0 && bytes.IndexByte(head[:n], 0) >= 0 {
+			return Errf("binary file (NUL byte detected at or before offset %d). "+
+				"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
+				"or read it with an offset/range.", n, p.Path, p.Path), nil
+		}
+		// Seek back so the line scanner sees the full file.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return Result{}, fmt.Errorf("seeking %s: %w", p.Path, err)
+		}
+		scanReader = f
 	}
 
 	start := p.StartLine
@@ -166,7 +200,7 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 	wholeRead := p.EndLine == 0 && p.StartLine <= 1
 
 	var out strings.Builder
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(scanReader)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNum := 0
 	capped := false

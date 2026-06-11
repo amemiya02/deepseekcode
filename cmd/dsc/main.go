@@ -29,17 +29,17 @@ import (
 
 	"github.com/amemiya02/deepseekcode/internal/agent"
 	"github.com/amemiya02/deepseekcode/internal/agents"
-	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/codegraph"
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/config"
 	"github.com/amemiya02/deepseekcode/internal/doctor"
 	"github.com/amemiya02/deepseekcode/internal/hooks"
+	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/llm"
-	"github.com/amemiya02/deepseekcode/internal/memory"
 	"github.com/amemiya02/deepseekcode/internal/logging"
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
+	"github.com/amemiya02/deepseekcode/internal/memory"
 	"github.com/amemiya02/deepseekcode/internal/onboarding"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
@@ -436,7 +436,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		return merr
 	}
 	pol := permissions.New(mode, cwd,
-		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
+		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions))
 	// Load skills once into the canonical store. The same store feeds the
 	// prompt's stable skill directory, the epoch skill-dir hash, and the
 	// skill_read dispatcher — one loader, so model-visible skills and the
@@ -449,6 +449,9 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
+	reg.Register(tools.NewPlanEnterTool(a))
+	reg.Register(tools.NewPlanExitTool(a))
+	reg.Register(tools.CompleteStep{Controller: a})
 
 	// Web tools (fetch + search)
 	if cfg.Web.Enabled {
@@ -518,6 +521,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		listFn       func() ([]session.Session, error)
 		setModelFn   func(string) error
 		setThemeFn   func(string) error
+		newBranchFn  func(string, int) (session.Session, error)
+		countMsgsFn  func(string) (int, error)
 		notices      []string
 		sess         session.Session
 		usageSummary session.UsageSummary
@@ -615,6 +620,12 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 			setThemeFn = func(name string) error {
 				return config.SaveThemePreference(name)
 			}
+			newBranchFn = func(parentID string, branchPoint int) (session.Session, error) {
+				return store.NewBranch(context.Background(), parentID, branchPoint)
+			}
+			countMsgsFn = func(sessionID string) (int, error) {
+				return store.CountMessages(context.Background(), sessionID)
+			}
 		}
 	}
 
@@ -643,6 +654,14 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	notices = append(mcpNotices, notices...)
 	home, _ := os.UserHomeDir()
 	customCmds, _ := commands.Load(cwd, home)
+
+	// Merge Claude Code-style commands from .claude/commands/*.md.
+	// Native (.deepseek) commands win on name conflict.
+	if ccCmds, err := commands.LoadClaudeCommands(cwd, customCmds); err == nil {
+		for _, cmd := range ccCmds {
+			customCmds[cmd.Name] = cmd
+		}
+	}
 
 	// Promote skills as slash commands (user commands take priority). The
 	// canonical store keeps bodies on disk, so load each template on demand.
@@ -702,6 +721,8 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		ListSessions:          listFn,
 		SetModelFn:            setModelFn,
 		SetThemeFn:            setThemeFn,
+		NewBranchFn:           newBranchFn,
+		CountMsgsFn:           countMsgsFn,
 		Commands:              customCmds,
 		StartupNotices:        notices,
 		CompactionCount:       sess.CompactionCount,
@@ -960,7 +981,7 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 		return merr
 	}
 	pol := permissions.New(mode, cwd,
-		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions.Rules))
+		cfg.Permissions.SecretPathPatterns, cfg.Permissions.AllowBash, buildRuleEngine(cfg.Permissions))
 	// Load skills once into the canonical store. The same store feeds the
 	// prompt's stable skill directory, the epoch skill-dir hash, and the
 	// skill_read dispatcher — one loader, so model-visible skills and the
@@ -973,6 +994,9 @@ func runOneShot(cfg config.Config, prompt string, mf modeFlags) error {
 	reg.Register(tools.NewQuestionTool(a))
 	reg.Register(tools.NewBackgroundBashToolWithSandbox(a, sb, sbProfile, cwd))
 	reg.Register(tools.NewTaskStatusTool(a))
+	reg.Register(tools.NewPlanEnterTool(a))
+	reg.Register(tools.NewPlanExitTool(a))
+	reg.Register(tools.CompleteStep{Controller: a})
 
 	// Web tools (fetch + search)
 	if cfg.Web.Enabled {
@@ -1348,8 +1372,11 @@ func indent(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
-func buildRuleEngine(rc config.RulesConfig) *permissions.RuleEngine {
-	if len(rc.Allow) == 0 && len(rc.Deny) == 0 && len(rc.Ask) == 0 {
+func buildRuleEngine(pc config.PermissionsConfig) *permissions.RuleEngine {
+	rc := pc.Rules
+	hasStruct := len(rc.Allow) > 0 || len(rc.Deny) > 0 || len(rc.Ask) > 0
+	hasSpec := len(pc.AllowSpecifiers) > 0 || len(pc.DenySpecifiers) > 0 || len(pc.AskSpecifiers) > 0
+	if !hasStruct && !hasSpec {
 		return nil
 	}
 	conv := func(items []config.RuleItemConfig) []permissions.PermissionRule {
@@ -1375,6 +1402,22 @@ func buildRuleEngine(rc config.RulesConfig) *permissions.RuleEngine {
 	}
 	for i := range engine.Ask {
 		engine.Ask[i].Decision = "ask"
+	}
+	// Append specifier-form rules after struct-form rules.
+	for _, raw := range pc.AllowSpecifiers {
+		if rules, err := permissions.ParseSpecifierRule(raw, "allow"); err == nil {
+			engine.Allow = append(engine.Allow, rules...)
+		}
+	}
+	for _, raw := range pc.DenySpecifiers {
+		if rules, err := permissions.ParseSpecifierRule(raw, "deny"); err == nil {
+			engine.Deny = append(engine.Deny, rules...)
+		}
+	}
+	for _, raw := range pc.AskSpecifiers {
+		if rules, err := permissions.ParseSpecifierRule(raw, "ask"); err == nil {
+			engine.Ask = append(engine.Ask, rules...)
+		}
 	}
 	return engine
 }

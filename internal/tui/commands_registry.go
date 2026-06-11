@@ -49,6 +49,9 @@ func builtinCommands() []slashCmd {
 		{Name: "mcp", Summary: "show MCP server status", Kind: builtinCmd},
 		{Name: "lsp", Summary: "show LSP server status", Kind: builtinCmd},
 		{Name: "permissions", Summary: "show effective permission policy", Kind: builtinCmd},
+		{Name: "tree", Summary: "show session branch tree", Kind: builtinCmd},
+		{Name: "branch", Summary: "fork a new branch from current session", Kind: builtinCmd},
+		{Name: "switch", Summary: "switch to a different session branch", Kind: builtinCmd},
 	}
 }
 

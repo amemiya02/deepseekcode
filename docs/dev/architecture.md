@@ -107,7 +107,7 @@ TUI 在 `internal/tui` 捕获输入后调用进程内 agent。Web/Desktop 由 SP
 - **冻结前缀**：基础系统提示 + 工具 schema + skills 元数据索引（`internal/skills`，body 懒加载、不进前缀），跨 turn 字节级稳定，是 DeepSeek 前缀缓存命中的前提；
 - **动态尾部**：git 状态（`internal/gitctx` 的 `Reader`，agent 在 `refreshGitContext` 中按 cwd 懒构造）、长期记忆召回（`prompt.InjectRecalled`）等，永远落在边界之后。
 
-前缀稳定性是全项目的最高约束：`Agent.StaticPrefixFingerprint` 给前缀算指纹，`internal/llm/prefix_drift.go` 在运行期监测漂移，`internal/cacheunit.AlignPadding` 把前缀 padding 到 DeepSeek cache-unit 边界。背景与 wire 约束见 [model-compatibility.md](model-compatibility.md) 与 [../reference/prefix-cache.md](../reference/prefix-cache.md)。
+前缀稳定性是全项目的最高约束：`Agent.StaticPrefixFingerprint` 给前缀算指纹，`internal/llm/prefix_drift.go` 在运行期监测漂移，`internal/cacheunit.AlignPadding` 把前缀 padding 到 DeepSeek cache-unit 边界。机制深入见 [prefix-cache.md](prefix-cache.md)；背景与 wire 约束见 [model-compatibility.md](model-compatibility.md) 与 [../reference/prefix-cache.md](../reference/prefix-cache.md)。
 
 ### ④ 路由决策
 

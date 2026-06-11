@@ -134,7 +134,7 @@ hub 的根治手段是**让广播与订阅在同一把锁下对账**（`hub.go`�
 **嵌入链路**（Makefile，已核实）：
 
 ```
-make web        # cd web && npm install && npm run build；cp web/dist → webapp/dist
+make web        # cd web && npm install --legacy-peer-deps && npm run build；cp web/dist → webapp/dist
 make build-web  # 依赖 web；go build -tags withwebapp ./cmd/dsc
 ```
 

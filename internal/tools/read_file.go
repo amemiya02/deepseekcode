@@ -166,6 +166,15 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 				"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
 				"or read it with an offset/range.", headKind, p.Path, p.Path), nil
 		}
+		// Control-character sanity: C0 controls U+0001-U+0008 (encoded
+		// as single bytes 0x01-0x08 in UTF-8) are extremely unlikely in
+		// legitimate text but common when binary content is misdecoded.
+		// (Multi-byte UTF-8 continuations are 0x80-0xBF, so no overlap.)
+		if hasBinaryControls(decoded) {
+			return Errf("binary file (control characters detected after decoding from %v). "+
+				"consider using bash 'file %s' or 'xxd %s | head' to check the type, "+
+				"or read it with an offset/range.", headKind, p.Path, p.Path), nil
+		}
 		scanReader = bytes.NewReader(decoded)
 	} else {
 		// UTF-8: NUL-byte check on raw bytes catches genuine binaries.
@@ -250,4 +259,17 @@ func (r ReadFile) Execute(ctx context.Context, args json.RawMessage) (Result, er
 			lineCap, lineNum)
 	}
 	return Result{Content: content}, nil
+}
+
+// hasBinaryControls reports whether b contains C0 control characters
+// U+0001–U+0008. These are encoded as single bytes 0x01–0x08 in UTF-8
+// and are extremely unlikely in legitimate text, but common when raw
+// binary content is misdecoded as UTF-16 or CJK.
+func hasBinaryControls(b []byte) bool {
+	for _, c := range b {
+		if c >= 0x01 && c <= 0x08 {
+			return true
+		}
+	}
+	return false
 }

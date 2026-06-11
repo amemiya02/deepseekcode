@@ -12,6 +12,7 @@
 - 3. [配置：从默认值到项目级定制](guide/configuration.md)
 - 4. [定制：让 dsc 长成你的形状](guide/customization.md)
 - 5. [进阶三件套：Skills、Subagents、Hooks](guide/skills-agents-hooks.md)
+- 6. [外部集成：MCP、LSP、CodeGraph](guide/integrations.md)
 
 ## 我想查 —— 参考手册（reference/）
 

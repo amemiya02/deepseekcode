@@ -40,6 +40,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/lsp"
 	"github.com/amemiya02/deepseekcode/internal/mcp"
 	"github.com/amemiya02/deepseekcode/internal/memory"
+	"github.com/amemiya02/deepseekcode/internal/modelreg"
 	"github.com/amemiya02/deepseekcode/internal/onboarding"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	promptpkg "github.com/amemiya02/deepseekcode/internal/prompt"
@@ -381,6 +382,11 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	}
 	client := rt.Client
 
+	modelReg := modelreg.New(cfg, modelreg.Options{})
+	if n := modelReg.Notice(); n != "" {
+		rt.Notices = append(rt.Notices, n)
+	}
+
 	reg := tools.New()
 	sb, sbProfile := sandboxFromConfig(cfg)
 	tools.RegisterBuiltinsWithSandbox(reg, cfg.Tools.MaxReadBytes, cfg.Tools.MaxWriteBytes, cwd, sb, sbProfile)
@@ -712,6 +718,7 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 		Agent:    a,
 		Model:    rt.Model,
 		Thinking: cfg.Defaults.Thinking,
+		Registry: modelReg,
 		Theme:    cfg.Defaults.Theme,
 		Cwd:      cwd,
 

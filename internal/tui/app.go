@@ -20,6 +20,7 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/commands"
 	"github.com/amemiya02/deepseekcode/internal/i18n"
 	"github.com/amemiya02/deepseekcode/internal/llm"
+	"github.com/amemiya02/deepseekcode/internal/modelreg"
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 	"github.com/amemiya02/deepseekcode/internal/session"
 	"github.com/amemiya02/deepseekcode/internal/skills"
@@ -36,6 +37,7 @@ import (
 type App struct {
 	// Wiring
 	agent    *agent.Agent
+	reg      *modelreg.Registry // nil when no registry (legacy single-provider mode)
 	model    string
 	thinking bool
 	cwd      string
@@ -180,6 +182,10 @@ type Config struct {
 	Theme    string
 	Cwd      string
 
+	// Registry provides cross-provider model listing and switching. nil when
+	// the legacy single-provider path is in use.
+	Registry *modelreg.Registry
+
 	// TransparentBackground (ui.transparent_background) disables ALL background
 	// fills — the bg-tier panels (tool results, diffs, reasoning) degrade to
 	// left-bars / separators with no opaque fills. The full-screen canvas is no
@@ -284,6 +290,7 @@ func New(cfg Config) *App {
 
 	app := &App{
 		agent:          cfg.Agent,
+		reg:            cfg.Registry,
 		model:          cfg.Model,
 		thinking:       cfg.Thinking,
 		cwd:            cfg.Cwd,
@@ -2438,6 +2445,27 @@ func (a *App) applyModelSwitch(id string, provider string) tea.Cmd {
 	if id == "" {
 		return nil
 	}
+	// Registry path: validate and build a live client for the target provider.
+	if a.reg != nil {
+		res, err := a.reg.Switch(context.Background(), provider, id)
+		if err != nil {
+			a.scrollback.AppendError(err.Error())
+			a.refreshView()
+			return nil
+		}
+		a.agent.SwitchProvider(res.Client, res.Model, res.Caps)
+		a.model = res.Model
+		a.status.model = res.Model
+		if res.Caps.MaxContextTokens > 0 {
+			a.status.contextLimit = res.Caps.MaxContextTokens
+		}
+		a.scrollback.SetModel(res.Model)
+		if res.Warning != "" {
+			a.scrollback.AppendInfo("model switched (" + res.Warning + ")")
+		}
+		return a.toast(BadgeBrand, "model → "+res.Model)
+	}
+	// Legacy fallback: validate against hardcoded list.
 	known := false
 	for _, m := range availableModels() {
 		if m.ID == id {

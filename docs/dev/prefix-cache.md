@@ -161,7 +161,7 @@ UPDATE_GOLDEN=1 go test -run TestParityGolden ./internal/llm/        # 9 场景 
 
 2026-06-03 的同模型 head-to-head 对照实验（与 reasonix，编辑任务 6/6 平手）暴露过一个反直觉事实：dsc 的计费一度高出约 5×，根因**不是**前缀不稳，而是 **compaction 重写了前缀**——前缀指纹守住了"组装出的前缀字节稳定"，但 compaction 把整个消息历史（含前缀之后的 body）重写，DeepSeek 侧等于换了一把缓存键，每次压缩都付一次全量 re-prefill。更反直觉的是：为省钱给 body"瘦身"反而净负面（省下的 token 不抵多付的 miss）。
 
-这就是 §3.5 中 `cache.Epoch` "bumped ONLY at compaction" 与 `CauseCompactReset` 的来历——既然压缩的代价无法绕过，至少把它显式记账，让 `dsc cache explain` 能指着某一 turn 说"这次贵是因为压缩"。实验报告是 gitignored 的内部材料（不随仓库分发），路径备查：`docs/internal/competitive/2026-06-03-controlled-experiments-compendium.md` 与 `docs/internal/competitive/2026-06-03-cache-cost-head-to-head.md`。
+这就是 §3.5 中 `cache.Epoch` "bumped ONLY at compaction" 与 `CauseCompactReset` 的来历——既然压缩的代价无法绕过，至少把它显式记账，让 `dsc cache explain` 能指着某一 turn 说"这次贵是因为压缩"。实验报告已在 v0.4.0 发版时从仓库裁剪（曾位于 `docs/competitive/2026-06-03-controlled-experiments-compendium.md` 与 `docs/competitive/2026-06-03-cache-cost-head-to-head.md`，可在 git 历史中找到）。
 
 ## 8. 常见修改场景实操
 

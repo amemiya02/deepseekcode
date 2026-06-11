@@ -13,6 +13,7 @@
 - 4. [定制：让 dsc 长成你的形状](guide/customization.md)
 - 5. [进阶三件套：Skills、Subagents、Hooks](guide/skills-agents-hooks.md)
 - 6. [外部集成：MCP、LSP、CodeGraph](guide/integrations.md)
+- 7. [省钱之道：前缀缓存与智能路由](guide/cost-and-cache.md)
 
 ## 我想查 —— 参考手册（reference/）
 

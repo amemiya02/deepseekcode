@@ -2824,6 +2824,22 @@ func (a *Agent) CancelJob(id string) error {
 	return nil
 }
 
+// SwitchProvider repoints the agent at a freshly-built client for a different
+// provider/model and refreshes capability-derived state. MUST be called only
+// between turns (no active Stream); callers guarantee this.
+func (a *Agent) SwitchProvider(client *llm.Client, model string, caps llm.Capabilities) {
+	if client != nil {
+		a.Client = client
+	}
+	a.Model = model
+	if caps.MaxContextTokens > 0 {
+		a.MaxContextTokens = caps.MaxContextTokens
+	}
+	if !caps.Thinking {
+		a.Thinking = false
+	}
+}
+
 // Close releases agent resources. It cancels all running background jobs
 // and should be called when the session ends (not per prompt turn).
 func (a *Agent) Close() {

@@ -588,6 +588,9 @@ func applyLegacyAPICompat(c *Config) {
 	if !ok {
 		p = ProviderConfigTOML{Type: "deepseek"}
 	}
+	if p.Type == "" {
+		p.Type = "deepseek"
+	}
 	if p.BaseURL == "" {
 		p.BaseURL = c.API.BaseURL
 	}

@@ -54,15 +54,27 @@ func TestModelSelectAndEffort(t *testing.T) {
 	lr, _ := http.Get(ts.URL + "/v1/models")
 	var list struct {
 		Models []struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			Provider  string `json:"provider"`
+			Available *bool  `json:"available"`
 		} `json:"models"`
 	}
 	json.NewDecoder(lr.Body).Decode(&list)
 	lr.Body.Close()
-	want := list.Models[len(list.Models)-1].ID
+	var want, provider string
+	for _, m := range list.Models {
+		if m.Available == nil || *m.Available {
+			want = m.ID
+			provider = m.Provider
+			break
+		}
+	}
+	if want == "" {
+		t.Fatal("no available model in advertised list")
+	}
 
 	pr, _ := http.Post(ts.URL+"/v1/model", "application/json",
-		strings.NewReader(`{"model":"`+want+`"}`))
+		strings.NewReader(`{"model":"`+want+`","provider":"`+provider+`"}`))
 	if pr.StatusCode != http.StatusOK {
 		t.Fatalf("POST /v1/model: got %d", pr.StatusCode)
 	}

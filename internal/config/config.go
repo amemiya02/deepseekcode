@@ -102,13 +102,13 @@ type ActiveConfig struct {
 }
 
 type ProviderConfigTOML struct {
-	Type                string `toml:"type"`
-	BaseURL             string `toml:"base_url"`
-	APIKey              string `toml:"api_key"`
-	EnvVar              string `toml:"env_var"`
-	SecretsFileKey      string `toml:"secrets_file_key"`
-	FirstTokenTimeoutMs int    `toml:"first_token_timeout_ms"`
-	ChunkStallTimeoutMs int    `toml:"chunk_stall_timeout_ms"`
+	Type                string   `toml:"type"`
+	BaseURL             string   `toml:"base_url"`
+	APIKey              string   `toml:"api_key"`
+	EnvVar              string   `toml:"env_var"`
+	SecretsFileKey      string   `toml:"secrets_file_key"`
+	FirstTokenTimeoutMs int      `toml:"first_token_timeout_ms"`
+	ChunkStallTimeoutMs int      `toml:"chunk_stall_timeout_ms"`
 	DefaultModel        string   `toml:"default_model"`
 	Models              []string `toml:"models"`
 	// MaxContextTokens optionally declares this provider's context-window size.
@@ -531,9 +531,48 @@ func applyOverlay(base *Config, ov Config, meta toml.MetaData) {
 		base.Active.Provider = ov.Active.Provider
 	}
 	if len(ov.Providers) > 0 {
-		base.Providers = ov.Providers
+		if base.Providers == nil {
+			base.Providers = map[string]ProviderConfigTOML{}
+		}
+		for name, provider := range ov.Providers {
+			base.Providers[name] = mergeProvider(base.Providers[name], provider)
+		}
 		base.providersExplicit = true
 	}
+}
+
+func mergeProvider(base, ov ProviderConfigTOML) ProviderConfigTOML {
+	if ov.Type != "" {
+		base.Type = ov.Type
+	}
+	if ov.BaseURL != "" {
+		base.BaseURL = ov.BaseURL
+	}
+	if ov.APIKey != "" {
+		base.APIKey = ov.APIKey
+	}
+	if ov.EnvVar != "" {
+		base.EnvVar = ov.EnvVar
+	}
+	if ov.SecretsFileKey != "" {
+		base.SecretsFileKey = ov.SecretsFileKey
+	}
+	if ov.FirstTokenTimeoutMs != 0 {
+		base.FirstTokenTimeoutMs = ov.FirstTokenTimeoutMs
+	}
+	if ov.ChunkStallTimeoutMs != 0 {
+		base.ChunkStallTimeoutMs = ov.ChunkStallTimeoutMs
+	}
+	if ov.DefaultModel != "" {
+		base.DefaultModel = ov.DefaultModel
+	}
+	if len(ov.Models) > 0 {
+		base.Models = ov.Models
+	}
+	if ov.MaxContextTokens != 0 {
+		base.MaxContextTokens = ov.MaxContextTokens
+	}
+	return base
 }
 
 var envVarRe = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)\}`)

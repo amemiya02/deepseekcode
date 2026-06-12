@@ -333,6 +333,66 @@ default_model = "gpt-4o"
 	if cfg.Providers["openai"].Type != "openai-compat" {
 		t.Fatalf("provider = %#v", cfg.Providers["openai"])
 	}
+	if p := cfg.Providers["deepseek"]; p.Type != "deepseek" || p.BaseURL != "https://api.deepseek.com" || p.EnvVar != "DEEPSEEK_API_KEY" {
+		t.Fatalf("default deepseek provider should be preserved, got %#v", p)
+	}
+}
+
+func TestConfigLoadProvidersMergesDefaultDeepSeek(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[api]
+base_url = "http://127.0.0.1:65173"
+
+[active]
+provider = "mimo"
+
+[providers.mimo]
+type = "openai-compat"
+base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+env_var = "MIMO_API_KEY"
+default_model = "mimo-v2.5-pro"
+models = ["mimo-v2.5-pro", "mimo-v2.5"]
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	applyLegacyAPICompat(&cfg)
+
+	if cfg.Active.Provider != "mimo" {
+		t.Fatalf("active.provider = %q, want mimo", cfg.Active.Provider)
+	}
+	if p := cfg.Providers["deepseek"]; p.Type != "deepseek" || p.BaseURL != "https://api.deepseek.com" || p.EnvVar != "DEEPSEEK_API_KEY" {
+		t.Fatalf("deepseek provider should not inherit deprecated [api].base_url, got %#v", p)
+	}
+}
+
+func TestConfigLoadProvidersMergesPartialDeepSeek(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	body := `
+[providers.deepseek]
+default_model = "deepseek-v4-pro"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	if err := mergeFile(&cfg, path); err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Providers["deepseek"]
+	if p.Type != "deepseek" || p.BaseURL != "https://api.deepseek.com" || p.EnvVar != "DEEPSEEK_API_KEY" {
+		t.Fatalf("deepseek provider defaults were lost: %#v", p)
+	}
+	if p.DefaultModel != "deepseek-v4-pro" {
+		t.Fatalf("deepseek.default_model = %q, want deepseek-v4-pro", p.DefaultModel)
+	}
 }
 
 func TestValidateWebConfig(t *testing.T) {

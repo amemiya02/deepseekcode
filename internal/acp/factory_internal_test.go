@@ -80,7 +80,7 @@ func TestRealAgentFactoryFrom_MissingSecret(t *testing.T) {
 	cfg.Providers = map[string]config.ProviderConfigTOML{
 		"emptyprov": {
 			Type:    "deepseek",
-			BaseURL: "http://localhost",
+			BaseURL: "https://api.example.com",
 			// APIKey, EnvVar, SecretsFileKey all zero — secret unresolvable.
 		},
 	}

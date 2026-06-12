@@ -24,6 +24,7 @@ export function StatusBar({
   retryMax = 0,
   linesAdded = 0,
   linesRemoved = 0,
+  showEconomics = true,
 }: {
   status?: AgentStatus
   model?: string
@@ -41,6 +42,10 @@ export function StatusBar({
   retryMax?: number
   linesAdded?: number
   linesRemoved?: number
+  // Cache + cost economics are DeepSeek-only (the sole provider with a pricing
+  // table and a prompt prefix cache). When false, the cache% / ¥ segments are
+  // hidden so a non-DeepSeek model never shows meaningless economics.
+  showEconomics?: boolean
 }) {
   const ctxClass =
     ctxPct >= 0.8 ? styles.ctxDanger : ctxPct >= 0.55 ? styles.ctxWarn : ''
@@ -62,18 +67,22 @@ export function StatusBar({
         {t('status.ctx', 'ctx')} {formatPct(ctxPct)}
       </span>
 
-      <span className={`${styles.seg} ${styles.cache}`} data-testid="turn-cache" title={t('status.turnCache', 'This-turn cache hit')}>
-        {t('status.cacheTurn', 'cache')} {formatPct(turnCachePct)}
-      </span>
-      <span className={`${styles.seg} ${styles.cache}`} data-testid="avg-cache" title={t('status.avgCache', 'Session average cache hit')}>
-        {t('status.cacheAvg', 'avg')} {formatPct(avgCachePct)}
-      </span>
+      {showEconomics && (
+        <>
+          <span className={`${styles.seg} ${styles.cache}`} data-testid="turn-cache" title={t('status.turnCache', 'This-turn cache hit')}>
+            {t('status.cacheTurn', 'cache')} {formatPct(turnCachePct)}
+          </span>
+          <span className={`${styles.seg} ${styles.cache}`} data-testid="avg-cache" title={t('status.avgCache', 'Session average cache hit')}>
+            {t('status.cacheAvg', 'avg')} {formatPct(avgCachePct)}
+          </span>
 
-      {eviction && (
-        <span className={`${styles.seg} ${styles.warn}`} data-testid="eviction-warning" title={t('status.eviction', 'Full-body cache eviction')}>
-          <AlertTriangle size={13} aria-hidden="true" />
-          {t('status.evicted', 'evicted')}
-        </span>
+          {eviction && (
+            <span className={`${styles.seg} ${styles.warn}`} data-testid="eviction-warning" title={t('status.eviction', 'Full-body cache eviction')}>
+              <AlertTriangle size={13} aria-hidden="true" />
+              {t('status.evicted', 'evicted')}
+            </span>
+          )}
+        </>
       )}
 
       <span className={styles.spacer} />
@@ -85,11 +94,15 @@ export function StatusBar({
         </span>
       )}
 
-      <span className={styles.seg} data-testid="turn-cost" title={t('status.turnCost', 'This-turn cost')}>
-        <Coins size={11} aria-hidden="true" />
-        {formatCNY(turnCny)}
-      </span>
-      <span className={styles.seg} data-testid="session-cost" title={t('status.sessionCost', 'Session cost')}>{formatCNY(sessionCny)}</span>
+      {showEconomics && (
+        <>
+          <span className={styles.seg} data-testid="turn-cost" title={t('status.turnCost', 'This-turn cost')}>
+            <Coins size={11} aria-hidden="true" />
+            {formatCNY(turnCny)}
+          </span>
+          <span className={styles.seg} data-testid="session-cost" title={t('status.sessionCost', 'Session cost')}>{formatCNY(sessionCny)}</span>
+        </>
+      )}
       <span className={styles.seg} data-testid="balance" title={t('status.balance', 'Wallet balance')}>
         <Wallet size={11} aria-hidden="true" />
         {balance == null ? '—' : `${balance} ${currency}`}

@@ -9,6 +9,39 @@ import (
 	"testing"
 )
 
+// A provider pointed at a loopback proxy needs no API key — the proxy injects
+// auth upstream — so ResolveSecret must succeed with an empty key rather than
+// failing with ErrNoAPIKey. (Regression: an explicit second provider made the
+// synthesized deepseek provider — base_url=127.0.0.1 — unbuildable.)
+func TestResolveSecretLoopbackBaseURLIsKeyless(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty secrets dir → no file
+	for _, base := range []string{
+		"http://127.0.0.1:65173",
+		"http://localhost:8080/v1",
+		"http://[::1]:9000",
+	} {
+		key, src, err := ResolveSecretWithSource(ProviderConfigTOML{Type: "deepseek", BaseURL: base})
+		if err != nil {
+			t.Errorf("loopback %q: unexpected error %v", base, err)
+		}
+		if key != "" {
+			t.Errorf("loopback %q: expected empty key, got %q", base, key)
+		}
+		if src != SecretSourceNone {
+			t.Errorf("loopback %q: source = %q, want %q", base, src, SecretSourceNone)
+		}
+	}
+}
+
+// A non-loopback provider with no key must still fail loudly.
+func TestResolveSecretNonLoopbackStillRequiresKey(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _, err := ResolveSecretWithSource(ProviderConfigTOML{Type: "deepseek", BaseURL: "https://api.deepseek.com"})
+	if !errors.Is(err, ErrNoAPIKey) {
+		t.Errorf("non-loopback with no key should error ErrNoAPIKey, got %v", err)
+	}
+}
+
 func TestSecretsPathXDG(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

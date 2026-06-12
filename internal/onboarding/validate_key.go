@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+
+	"github.com/amemiya02/deepseekcode/internal/llm"
 )
 
 // ValidateKey sends a minimal single-token chat-completions request to baseURL
@@ -17,7 +18,7 @@ func ValidateKey(ctx context.Context, baseURL, apiKey string, hc *http.Client) e
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	endpoint := strings.TrimRight(baseURL, "/") + "/v1/chat/completions"
+	endpoint := llm.ChatCompletionsEndpoint(baseURL)
 	body, err := json.Marshal(map[string]any{
 		"model":      "deepseek-v4-flash",
 		"max_tokens": 1,

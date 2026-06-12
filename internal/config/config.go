@@ -111,6 +111,11 @@ type ProviderConfigTOML struct {
 	ChunkStallTimeoutMs int    `toml:"chunk_stall_timeout_ms"`
 	DefaultModel        string   `toml:"default_model"`
 	Models              []string `toml:"models"`
+	// MaxContextTokens optionally declares this provider's context-window size.
+	// It is the deterministic fallback for non-DeepSeek providers whose /models
+	// endpoint does not report a context length; 0 means "unknown — use the
+	// provider's built-in capability default".
+	MaxContextTokens int `toml:"max_context_tokens"`
 }
 
 type APIConfig struct {

@@ -10,7 +10,7 @@ import (
 )
 
 type cacheEntry struct {
-	models []string
+	models []FetchedModel
 	expiry time.Time
 }
 
@@ -33,7 +33,7 @@ func newFetchCache(f Fetcher, ttl time.Duration, now func() time.Time) *fetchCac
 	}
 }
 
-func (c *fetchCache) get(ctx context.Context, provider string, p config.ProviderConfigTOML) ([]string, error) {
+func (c *fetchCache) get(ctx context.Context, provider string, p config.ProviderConfigTOML) ([]FetchedModel, error) {
 	c.mu.Lock()
 	if e, ok := c.entries[provider]; ok && c.now().Before(e.expiry) {
 		c.mu.Unlock()
@@ -72,16 +72,52 @@ func (c *fetchCache) clear() {
 
 func hybridCatalog(ctx context.Context, c *fetchCache, name string, p config.ProviderConfigTOML) []ModelInfo {
 	stat := staticCatalog(name, p)
-	if len(stat) > 0 && stat[0].Source != SourceDefault {
+
+	// DeepSeek's built-in capabilities are authoritative (known models, known
+	// 1M context), so never hit the network for it. Every other provider gets a
+	// best-effort /models query so its context window is discovered dynamically
+	// rather than assumed from the openai-compat capability default.
+	if providerType(name, p) == "deepseek" {
 		return stat
 	}
-	ids, err := c.get(ctx, name, p)
-	if err == nil && len(ids) > 0 {
+
+	fetched, err := c.get(ctx, name, p)
+	ctxByID := map[string]int{}
+	if err == nil {
+		for _, fm := range fetched {
+			if fm.ContextTokens > 0 {
+				ctxByID[fm.ID] = fm.ContextTokens
+			}
+		}
+	}
+
+	// Declared / built-in rows are the authoritative set; overlay the fetched
+	// context window onto each matching row (fetch wins over the config/cap
+	// fallback already baked into stat by staticCatalog).
+	if len(stat) > 0 && stat[0].Source != SourceDefault {
+		for i := range stat {
+			if cw := ctxByID[stat[i].ID]; cw > 0 {
+				stat[i].Caps.MaxContextTokens = cw
+			}
+		}
+		return stat
+	}
+
+	// No declared/built-in list: the fetched models are the catalog. Context per
+	// model is fetch → configured max_context_tokens → capability default.
+	if err == nil && len(fetched) > 0 {
 		caps, _ := llm.ProviderCapabilities(providerType(name, p))
-		out := make([]ModelInfo, 0, len(ids))
-		for _, id := range ids {
+		out := make([]ModelInfo, 0, len(fetched))
+		for _, fm := range fetched {
+			rowCaps := caps
+			switch {
+			case fm.ContextTokens > 0:
+				rowCaps.MaxContextTokens = fm.ContextTokens
+			case p.MaxContextTokens > 0:
+				rowCaps.MaxContextTokens = p.MaxContextTokens
+			}
 			out = append(out, ModelInfo{
-				Provider: name, ID: id, Label: id, Caps: caps,
+				Provider: name, ID: fm.ID, Label: fm.ID, Caps: rowCaps,
 				Source: SourceFetched, Available: true,
 			})
 		}

@@ -192,6 +192,7 @@ export const en: Record<string, string> = {
   'onboarding.finish': 'Finish',
   'review.pick': 'Select a changed file to review its diff.',
   'telemetry.cache': 'cache',
+  'telemetry.label': 'telemetry',
   'duet.ok': 'Validated by Pro',
   'duet.blocked': 'Pro raised a concern',
   'approval.aria': 'edit approval',

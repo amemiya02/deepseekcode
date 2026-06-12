@@ -19,12 +19,16 @@ func TestHTTPFetcherParsesOpenAIList(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := &httpFetcher{}
-	ids, err := f.Fetch(context.Background(), config.ProviderConfigTOML{BaseURL: srv.URL + "/v1"})
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if len(ids) != 2 || ids[0] != "mimo-pro" || ids[1] != "mimo-flash" {
-		t.Fatalf("ids = %v", ids)
+	for _, baseURL := range []string{srv.URL, srv.URL + "/v1"} {
+		t.Run(baseURL, func(t *testing.T) {
+			f := &httpFetcher{}
+			got, err := f.Fetch(context.Background(), config.ProviderConfigTOML{BaseURL: baseURL})
+			if err != nil {
+				t.Fatalf("Fetch: %v", err)
+			}
+			if len(got) != 2 || got[0].ID != "mimo-pro" || got[1].ID != "mimo-flash" {
+				t.Fatalf("got = %v", got)
+			}
+		})
 	}
 }

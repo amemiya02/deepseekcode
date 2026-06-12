@@ -139,7 +139,7 @@ func (c *Client) Stream(ctx context.Context, req Request) (<-chan Event, error) 
 
 // doStream performs a single HTTP+SSE request attempt using c.BaseURL.
 func (c *Client) doStream(ctx context.Context, body []byte) (<-chan Event, error) {
-	return c.doStreamURL(ctx, body, c.BaseURL+"/v1/chat/completions")
+	return c.doStreamURL(ctx, body, ChatCompletionsEndpoint(c.BaseURL))
 }
 
 // doStreamURL performs a single HTTP+SSE request attempt against the given
@@ -458,7 +458,7 @@ func validateWithModel(ctx context.Context, c *Client, model string, prompt stri
 		return false, "", fmt.Errorf("marshal validate request: %w", err)
 	}
 
-	url := c.BaseURL + "/v1/chat/completions"
+	url := ChatCompletionsEndpoint(c.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return false, "", err

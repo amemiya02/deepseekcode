@@ -32,6 +32,17 @@ describe('StatusBar', () => {
     expect(screen.getByTestId('balance')).toHaveTextContent('12.5')
   })
 
+  it('hides cache + cost segments when showEconomics is false (non-DeepSeek)', () => {
+    render(<StatusBar {...base} model="mimo-v2.5-pro" showEconomics={false} />)
+    expect(screen.queryByTestId('turn-cache')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('avg-cache')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('turn-cost')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-cost')).not.toBeInTheDocument()
+    // The model name and ctx segment still render.
+    expect(screen.getByText('mimo-v2.5-pro')).toBeInTheDocument()
+    expect(screen.getByTestId('ctx-pct')).toBeInTheDocument()
+  })
+
   it('reflects status with the matching dot data-status', () => {
     render(<StatusBar {...base} status="streaming" />)
     expect(screen.getByTestId('status-dot')).toHaveAttribute('data-status', 'streaming')

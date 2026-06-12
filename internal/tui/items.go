@@ -258,14 +258,19 @@ func (i chatItem) render(t Theme, width int) string {
 		// Notice line: NOTE chip + the message, under the shared gutter.
 		return gutterLine(t, t.Badge(BadgeInfo).Render("NOTE")+" "+t.Info.Render(i.text)) + "\n"
 	case itemStepFinish:
-		cost := llm.Cost(i.model, i.usage)
-		hit := llm.CacheHitRate(i.usage)
-		costStr := "¥?"
+		// Cache% and ¥ are DeepSeek-only economics (the sole provider with a
+		// prefix cache + pricing table). For a non-priced model omit both so the
+		// line doesn't read a meaningless "cache=0% ¥?".
+		var label string
 		if llm.CostKnown(i.model) {
-			costStr = fmt.Sprintf("¥%.4f", cost)
+			cost := llm.Cost(i.model, i.usage)
+			hit := llm.CacheHitRate(i.usage)
+			label = fmt.Sprintf("[step done: %s · in=%d out=%d cache=%.0f%% ¥%.4f]",
+				i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens, hit*100, cost)
+		} else {
+			label = fmt.Sprintf("[step done: %s · in=%d out=%d]",
+				i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens)
 		}
-		label := fmt.Sprintf("[step done: %s · in=%d out=%d cache=%.0f%% %s]",
-			i.stopReason, i.usage.PromptTokens, i.usage.CompletionTokens, hit*100, costStr)
 		return gutterLine(t, t.Status.Render(label)) + "\n"
 	case itemError:
 		// Error line: ERROR chip + the message, under the shared gutter.

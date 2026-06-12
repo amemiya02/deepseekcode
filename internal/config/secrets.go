@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +26,32 @@ const (
 	SecretSourceExplicit SecretSource = "explicit"
 	SecretSourceEnv      SecretSource = "env"
 	SecretSourceFile     SecretSource = "file"
+	// SecretSourceNone marks a provider that resolved no key because none is
+	// needed — its base_url is a loopback proxy that injects auth upstream.
+	SecretSourceNone SecretSource = "none"
 )
+
+// loopbackBaseURL reports whether raw points at a loopback host (127.0.0.0/8,
+// ::1, or "localhost"). A provider aimed at the local machine is a key-injecting
+// proxy/relay the user controls, so dsc may build it without an API key — the
+// proxy authenticates upstream. Non-loopback providers still require a key.
+func loopbackBaseURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
 
 func ResolveSecret(p ProviderConfigTOML) (apiKey string, err error) {
 	key, _, err := ResolveSecretWithSource(p)
@@ -48,6 +75,9 @@ func ResolveSecretWithSource(p ProviderConfigTOML) (apiKey string, source Secret
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if loopbackBaseURL(p.BaseURL) {
+				return "", SecretSourceNone, nil
+			}
 			return "", "", missingSecretError(p, path)
 		}
 		return "", "", err
@@ -64,6 +94,9 @@ func ResolveSecretWithSource(p ProviderConfigTOML) (apiKey string, source Secret
 		if v := values[key]; v != "" {
 			return v, SecretSourceFile, nil
 		}
+	}
+	if loopbackBaseURL(p.BaseURL) {
+		return "", SecretSourceNone, nil
 	}
 	return "", "", missingSecretError(p, path)
 }

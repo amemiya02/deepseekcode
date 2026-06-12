@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
@@ -14,7 +13,7 @@ import (
 
 type httpFetcher struct{ client *http.Client }
 
-func (f *httpFetcher) Fetch(ctx context.Context, p config.ProviderConfigTOML) ([]string, error) {
+func (f *httpFetcher) Fetch(ctx context.Context, p config.ProviderConfigTOML) ([]FetchedModel, error) {
 	if p.BaseURL == "" {
 		return nil, fmt.Errorf("no base_url")
 	}
@@ -22,7 +21,7 @@ func (f *httpFetcher) Fetch(ctx context.Context, p config.ProviderConfigTOML) ([
 	if cl == nil {
 		cl = &http.Client{Timeout: 5 * time.Second}
 	}
-	url := strings.TrimRight(p.BaseURL, "/") + "/models"
+	url := llm.ModelsEndpoint(p.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -38,21 +37,35 @@ func (f *httpFetcher) Fetch(ctx context.Context, p config.ProviderConfigTOML) ([
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("models endpoint: %s", resp.Status)
 	}
+	// Context-window keys vary across OpenAI-compatible servers: context_length
+	// (OpenRouter), max_model_len (vLLM), context_window (others). Parse all and
+	// take the first non-zero so the picker can show a real window dynamically.
 	var body struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID            string `json:"id"`
+			ContextLength int    `json:"context_length"`
+			MaxModelLen   int    `json:"max_model_len"`
+			ContextWindow int    `json:"context_window"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(body.Data))
+	out := make([]FetchedModel, 0, len(body.Data))
 	for _, d := range body.Data {
-		if d.ID != "" {
-			ids = append(ids, d.ID)
+		if d.ID == "" {
+			continue
 		}
+		cw := d.ContextLength
+		if cw == 0 {
+			cw = d.MaxModelLen
+		}
+		if cw == 0 {
+			cw = d.ContextWindow
+		}
+		out = append(out, FetchedModel{ID: d.ID, ContextTokens: cw})
 	}
-	return ids, nil
+	return out, nil
 }
 
 func DefaultBuilder(cfg config.Config, providerName string) (BuildResult, error) {
@@ -93,8 +106,10 @@ func DefaultBuilder(cfg config.Config, providerName string) (BuildResult, error)
 
 type DefaultWriter struct{}
 
-func (DefaultWriter) SetActiveProvider(name string) error    { return config.SetActiveProvider(name) }
-func (DefaultWriter) SetProviderModel(p, model string) error { return config.SetProviderModel(p, model) }
+func (DefaultWriter) SetActiveProvider(name string) error { return config.SetActiveProvider(name) }
+func (DefaultWriter) SetProviderModel(p, model string) error {
+	return config.SetProviderModel(p, model)
+}
 
 var _ Fetcher = (*httpFetcher)(nil)
 var _ ConfigWriter = DefaultWriter{}

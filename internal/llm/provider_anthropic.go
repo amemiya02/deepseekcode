@@ -34,14 +34,14 @@ func (p *AnthropicProvider) BaseClient() *Client { return p.client }
 
 func (p *AnthropicProvider) Capabilities() Capabilities {
 	return Capabilities{
-		Thinking:             true,
-		PrefixCache:          true,
-		JSONMode:             false,
-		MaxContextTokens:     200_000,
-		MaxOutputTokens:      8_192,
-		ReasoningEfforts:     nil,
-		ChatPrefixCompletion: false,
-		FIM:                  false,
+		Thinking:               true,
+		PrefixCache:            true,
+		JSONMode:               false,
+		MaxContextTokens:       200_000,
+		MaxOutputTokens:        8_192,
+		ReasoningEfforts:       nil,
+		ChatPrefixCompletion:   false,
+		FIM:                    false,
 		FIMRequiresThinkingOff: false,
 		SupportsModels: []string{
 			"claude-opus-4-5",
@@ -70,7 +70,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 		return nil, fmt.Errorf("anthropic stream marshal: %w", err)
 	}
 
-	url := strings.TrimRight(p.client.BaseURL, "/") + "/v1/messages"
+	url := MessagesEndpoint(p.client.BaseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -226,7 +226,7 @@ type anthropicCacheControl struct {
 // "system" array and per-message "content" arrays. Both positions share the
 // same three fields, so a single type serves both roles.
 type anthropicBlock struct {
-	Type         string                 `json:"type"`                    // "text"
+	Type         string                 `json:"type"` // "text"
 	Text         string                 `json:"text"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }

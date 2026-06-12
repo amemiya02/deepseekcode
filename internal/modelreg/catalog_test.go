@@ -38,6 +38,7 @@ func TestStaticCatalogPrecedence(t *testing.T) {
 
 func TestResolveInitialSelectionPerProviderAuthoritative(t *testing.T) {
 	c := cfgWith()
+	c.DefaultsModelExplicit = true
 	sel, notice := resolveInitial(c)
 	if sel.Provider != "mimo" || sel.Model != "mimo-pro" {
 		t.Fatalf("sel = %+v, want mimo/mimo-pro", sel)
@@ -47,10 +48,22 @@ func TestResolveInitialSelectionPerProviderAuthoritative(t *testing.T) {
 	}
 }
 
+func TestResolveInitialSelectionIgnoresImplicitGlobalDefault(t *testing.T) {
+	c := cfgWith()
+	sel, notice := resolveInitial(c)
+	if sel.Provider != "mimo" || sel.Model != "mimo-pro" {
+		t.Fatalf("sel = %+v, want mimo/mimo-pro", sel)
+	}
+	if notice != "" {
+		t.Fatalf("unexpected notice: %q", notice)
+	}
+}
+
 func TestResolveHonorsDefaultsModelWhenValidForProvider(t *testing.T) {
 	c := cfgWith()
 	c.Active.Provider = "deepseek"
 	c.Defaults.Model = "deepseek-v4-pro"
+	c.DefaultsModelExplicit = true
 	sel, notice := resolveInitial(c)
 	if sel.Model != "deepseek-v4-pro" {
 		t.Fatalf("sel.Model = %q, want deepseek-v4-pro", sel.Model)

@@ -26,7 +26,9 @@ describe('StatusBarLive', () => {
   })
 
   it('reflects a live cache_update in the turn cache cell', async () => {
-    render(<StatusBarLive sessionId="s1" model="m" effort="e" status="streaming" />)
+    // A DeepSeek model so the cache/cost economics segments render (they are
+    // gated to DeepSeek, the only provider with a prefix cache + pricing).
+    render(<StatusBarLive sessionId="s1" model="deepseek-chat" effort="e" status="streaming" />)
     await waitFor(() => expect(captured.onCacheUpdate).toBeTruthy())
     act(() => {
       captured.onCacheUpdate!({ turn_pct: 0.95, avg_pct: 0.9, prefixes: 1, eviction: true })

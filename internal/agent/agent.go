@@ -1357,9 +1357,11 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 	// Session budget gate: check before model streaming starts. The projection
 	// discounts input by the rolling session cache-hit rate (T4.2); at cold
 	// start that rate is 0, so the first turn is priced all-miss like before.
-	// A model with no pricing table can't be cost-gated — surface that once
-	// rather than letting it slip the gate silently.
-	if !llm.CostKnown(a.Model) && !a.BudgetState.UnknownModelWarned {
+	// A model with no pricing table can't be cost-gated — surface that once,
+	// but only when a budget gate is actually configured. With no budget set
+	// there is nothing to gate, so the warning would be pure noise (it fired on
+	// every non-DeepSeek model regardless of whether a budget existed).
+	if a.BudgetPolicy.Active() && !llm.CostKnown(a.Model) && !a.BudgetState.UnknownModelWarned {
 		a.BudgetState.UnknownModelWarned = true
 		a.bus.Publish(EventBudget{Kind: BudgetKindUnpriced, Model: a.Model, SpentCNY: a.BudgetState.SpentCNY})
 	}
@@ -1563,9 +1565,13 @@ func (a *Agent) runStep(ctx context.Context) (StepRecord, error) {
 		ResidualEst: receipt.ResidualEst,
 		Dominant:    string(receipt.Dominant),
 	})
-	// NOTE: this fires every turn. If noise becomes a problem, gate behind
-	// a verbose/debug flag when one is added to Agent.
-	a.EmitInfo(cache.ReceiptLine(receipt))
+	// NOTE: this fires every turn. The receipt is DeepSeek prefix-cache +
+	// pricing telemetry (cost/saved ¥, hit/miss), so it is only meaningful for
+	// a priced model. A non-DeepSeek provider (no prefix cache, no pricing
+	// table) would emit a noisy all-zero "cost=¥0 saved=¥0" line — suppress it.
+	if llm.CostKnown(a.Model) {
+		a.EmitInfo(cache.ReceiptLine(receipt))
+	}
 	a.prevStaticPrefix = &curStaticPrefix
 	a.prevCacheEpoch = curCacheEpoch
 

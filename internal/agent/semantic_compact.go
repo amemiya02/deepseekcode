@@ -262,7 +262,7 @@ func callSummaryModel(
 	callCtx, cancel := context.WithTimeout(ctx, cfg.SummaryTimeout)
 	defer cancel()
 
-	url := client.BaseURL + "/v1/chat/completions"
+	url := llm.ChatCompletionsEndpoint(client.BaseURL)
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", llm.Usage{}, fmt.Errorf("create summary request: %w", err)

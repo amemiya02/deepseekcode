@@ -32,6 +32,11 @@ export function StatusBarLive({
     return () => disconnect()
   }, [sessionId, connect, disconnect, refreshBalance])
 
+  // Cache + cost economics are DeepSeek-only. Hide them for an explicitly
+  // non-DeepSeek model; when the model is still unknown (empty, pre-load) keep
+  // them visible so the bar doesn't flicker on boot.
+  const showEconomics = !model || model.startsWith('deepseek')
+
   // ±lines are best-effort: wired to 0 until a per-turn diff-count source is available.
   // When the ReviewPanel diff source exposes per-turn add/del counts, wire them here.
   return (
@@ -40,6 +45,7 @@ export function StatusBarLive({
       model={model}
       effort={effort}
       ctxPct={ctxPct}
+      showEconomics={showEconomics}
       turnCachePct={liveCache.turn_pct}
       avgCachePct={liveCache.avg_pct}
       eviction={liveCache.eviction}

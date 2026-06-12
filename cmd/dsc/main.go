@@ -640,6 +640,13 @@ func runTUI(cfg config.Config, cwd string, mf modeFlags, newSession bool, contin
 	// likely still warm, append a notice when it is, then save the current
 	// fingerprint so the next session can check against it.
 	func() {
+		// The warmth hint is specific to the DeepSeek prefix cache; an
+		// openai-compat provider has no such cache, so showing "your first turn
+		// should hit the DeepSeek cache" while a different provider is active is
+		// misleading. Only emit it when DeepSeek is the active provider.
+		if p := cfg.Active.Provider; p != "" && p != "deepseek" {
+			return
+		}
 		prior := loadWarmth(cwd)
 		curFP := a.StaticPrefixFingerprint()
 		if curFP != "" {

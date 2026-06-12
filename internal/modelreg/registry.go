@@ -122,6 +122,17 @@ func (r *Registry) Switch(ctx context.Context, provider, model string) (SwitchRe
 		return SwitchResult{}, fmt.Errorf("build provider %q: %w", provider, err)
 	}
 
+	// The picker shows each model's resolved context window (fetch → config →
+	// capability default); make the live client agree by overriding the built
+	// provider's context with the catalog value for the selected model, so the
+	// status bar after a switch matches what the picker advertised.
+	for _, m := range cat {
+		if m.ID == model && m.Caps.MaxContextTokens > 0 {
+			built.Caps.MaxContextTokens = m.Caps.MaxContextTokens
+			break
+		}
+	}
+
 	warning := ""
 	if err := r.writer.SetProviderModel(provider, model); err != nil {
 		warning = "couldn't save as default: " + err.Error()

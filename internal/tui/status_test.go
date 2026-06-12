@@ -21,13 +21,35 @@ func TestStatusCostKnownModelShowsZero(t *testing.T) {
 	}
 }
 
-// An unknown model (no pricing entry) keeps the ¥? sentinel.
-func TestStatusUnknownModelShowsQuestion(t *testing.T) {
+// A non-DeepSeek (unpriced) model hides the cache + cost segments entirely.
+// Those economics are DeepSeek-only — it is the sole provider with a published
+// pricing table and a prompt prefix cache — so a non-DeepSeek model must not
+// render a meaningless "cache 0% · ¥?". The model name still shows.
+func TestStatusNonDeepSeekHidesEconomics(t *testing.T) {
 	th := DarkTheme()
-	s := statusState{model: "mystery-model", costKnown: false}
+	s := statusState{model: "mimo-v2.5-pro", steps: 1, costKnown: false}
 	plain := stripANSI(s.render(th))
-	if !strings.Contains(plain, "¥?") {
-		t.Errorf("unknown model should show ¥?; got %q", plain)
+	if strings.Contains(plain, "¥") {
+		t.Errorf("non-DeepSeek model should not show a ¥ cost segment; got %q", plain)
+	}
+	if strings.Contains(plain, "cache ") {
+		t.Errorf("non-DeepSeek model should not show a cache chip; got %q", plain)
+	}
+	if !strings.Contains(plain, "mimo-v2.5-pro") {
+		t.Errorf("model name should still render; got %q", plain)
+	}
+}
+
+// A DeepSeek model still shows both economics segments (the gate's true branch).
+func TestStatusDeepSeekShowsEconomics(t *testing.T) {
+	th := DarkTheme()
+	s := statusState{model: "deepseek-v4-flash", steps: 1, costKnown: true}
+	plain := stripANSI(s.render(th))
+	if !strings.Contains(plain, "¥") {
+		t.Errorf("DeepSeek model should show a ¥ cost segment; got %q", plain)
+	}
+	if !strings.Contains(plain, "cache ") {
+		t.Errorf("DeepSeek model should show a cache chip; got %q", plain)
 	}
 }
 

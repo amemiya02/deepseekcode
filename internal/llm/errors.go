@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// APIError is returned when DeepSeek's API replies with a non-2xx
+// APIError is returned when an LLM API replies with a non-2xx
 // status. The Body field carries the raw response so callers can
 // surface it to the user (often the most actionable signal).
 type APIError struct {
@@ -17,7 +17,7 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("deepseek api error: status=%d body=%s", e.Status, e.Body)
+	return fmt.Sprintf("llm api error: status=%d body=%s", e.Status, e.Body)
 }
 
 // IsRateLimit reports whether the error indicates a rate-limit response.

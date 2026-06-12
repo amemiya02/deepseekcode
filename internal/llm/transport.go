@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -135,7 +134,7 @@ func (c *Client) StreamWithMirrors(ctx context.Context, req Request, mirrors []s
 
 	var lastErr error
 	for _, mirror := range mirrors {
-		endpoint := strings.TrimRight(mirror, "/") + "/v1/chat/completions"
+		endpoint := ChatCompletionsEndpoint(mirror)
 		ch, err := c.doStreamURL(ctx, body, endpoint)
 		if err == nil {
 			return ch, nil

@@ -471,16 +471,17 @@ type modelOption struct {
 	Available bool   // false when the model cannot be reached right now
 }
 
-// availableModels returns the picker rows for /models. Pricing is
-// hard-coded here (mirrors internal/llm/cache_metrics.go) so the
-// picker is informative even offline. Official V4 models appear first;
-// legacy aliases are listed below with the retirement date.
+// availableModels returns the offline-fallback picker rows for /models, used
+// only when no cross-provider Registry is wired (the registry path in app.go is
+// authoritative and spans every configured provider). Pricing is hard-coded
+// here (mirrors internal/llm/cache_metrics.go) so the picker stays informative
+// offline. Only the official V4 models are offered; the retiring legacy aliases
+// (deepseek-chat / deepseek-reasoner) are deliberately omitted from the picker
+// — they are still accepted on an explicit switch via the registry.
 func availableModels() []modelOption {
 	return []modelOption{
 		{ID: "deepseek-v4-flash", Short: "flash", Note: "1M ctx · ¥1/¥0.02 in · ¥2 out · default", Provider: "deepseek", Available: true},
 		{ID: "deepseek-v4-pro", Short: "pro", Note: "1M ctx · ¥3/¥0.025 in · ¥6 out · stronger", Provider: "deepseek", Available: true},
-		{ID: "deepseek-chat", Short: "chat", Note: "legacy until 2026-07-24 · alias → flash", Provider: "deepseek", Available: true},
-		{ID: "deepseek-reasoner", Short: "reasoner", Note: "legacy until 2026-07-24 · alias → flash", Provider: "deepseek", Available: true},
 	}
 }
 

@@ -48,8 +48,17 @@ type SwitchResult struct {
 	Warning      string
 }
 
+// FetchedModel is one model discovered from a provider's /models endpoint,
+// optionally carrying the context-window size the endpoint reported (0 when it
+// did not). The context lets the picker show a real window instead of the
+// provider's hardcoded capability default.
+type FetchedModel struct {
+	ID            string
+	ContextTokens int
+}
+
 type Fetcher interface {
-	Fetch(ctx context.Context, p config.ProviderConfigTOML) ([]string, error)
+	Fetch(ctx context.Context, p config.ProviderConfigTOML) ([]FetchedModel, error)
 }
 
 type ConfigWriter interface {

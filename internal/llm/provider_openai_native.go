@@ -117,7 +117,7 @@ func (p *OpenAINativeProvider) Stream(ctx context.Context, req Request) (<-chan 
 		return nil, fmt.Errorf("openai native stream marshal: %w", err)
 	}
 
-	url := strings.TrimRight(p.client.BaseURL, "/") + "/v1/chat/completions"
+	url := ChatCompletionsEndpoint(p.client.BaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("openai native new request: %w", err)

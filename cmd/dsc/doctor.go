@@ -231,7 +231,7 @@ func checkAPIReachable(cfg config.Config) checkResult {
 	// 15s — reasoner cold starts and slow networks need headroom.
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequestWithContext(context.Background(),
-		http.MethodGet, pcfg.BaseURL+"/v1/models", nil)
+		http.MethodGet, llm.ModelsEndpoint(pcfg.BaseURL), nil)
 	if err != nil {
 		return checkResult{"api_reachable", "fail", err.Error()}
 	}

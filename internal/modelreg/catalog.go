@@ -23,6 +23,13 @@ func providerType(name string, p config.ProviderConfigTOML) string {
 
 func staticCatalog(name string, p config.ProviderConfigTOML) []ModelInfo {
 	caps, _ := llm.ProviderCapabilities(providerType(name, p))
+	// A provider may declare its real context window in config; honor it over
+	// the built-in capability default (e.g. an openai-compat provider that is
+	// actually 1M, not the 128k assumed default). Live /models discovery, when
+	// it reports a window, overrides this in hybridCatalog.
+	if p.MaxContextTokens > 0 {
+		caps.MaxContextTokens = p.MaxContextTokens
+	}
 	mk := func(id string, src Source) ModelInfo {
 		return ModelInfo{Provider: name, ID: id, Label: id, Caps: caps, Source: src, Available: true}
 	}
@@ -55,7 +62,7 @@ func resolveInitial(cfg config.Config) (Selection, string) {
 	cat := staticCatalog(name, p)
 	model := p.DefaultModel
 	notice := ""
-	if cfg.Defaults.Model != "" {
+	if cfg.DefaultsModelExplicit && cfg.Defaults.Model != "" {
 		if inCatalog(cat, cfg.Defaults.Model) {
 			model = cfg.Defaults.Model
 		} else {

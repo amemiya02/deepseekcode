@@ -114,12 +114,21 @@ func (s statusState) render(t Theme) string {
 		ctxSeg = renderContextBar(t, ctxTokens, s.contextLimit)
 	}
 
+	// Cache + cost economics are DeepSeek-only: it is the sole provider with a
+	// published pricing table (llm.CostKnown) and a prompt prefix cache, so a
+	// non-DeepSeek model (e.g. an openai-compat provider) would otherwise show a
+	// meaningless "cache 0% · ¥?". Gate both segments on the active model being
+	// priceable; everything else on the line stays provider-agnostic.
+	showEconomics := llm.CostKnown(s.model)
+
 	// Build the full status line preserving existing model/step/cost semantics.
 	line1 := modeBadge +
 		t.StatusModel.Render(shortModel(s.model)) +
-		dot + label.Render(fmt.Sprintf("%d steps", s.steps)) +
-		dot + cacheChip +
-		dot + costStyle.Render(costStr)
+		dot + label.Render(fmt.Sprintf("%d steps", s.steps))
+	if showEconomics {
+		line1 += dot + cacheChip +
+			dot + costStyle.Render(costStr)
+	}
 	if s.balanceNote != "" {
 		line1 += dot + label.Render("bal "+s.balanceNote)
 	}

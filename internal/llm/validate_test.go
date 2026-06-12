@@ -96,7 +96,7 @@ func TestValidatePro(t *testing.T) {
 			c := NewClient("k", srv.URL)
 			// Override the default /v1/chat/completions path by
 			// rewriting base URL — the test server handles any path.
-			// Actually ValidatePro uses c.BaseURL + "/v1/chat/completions",
+			// ValidatePro builds the versioned chat-completions endpoint from BaseURL,
 			// so we need the test server to handle that path. Since
 			// httptest.Server ignores the path (all routes go to the
 			// same handler), the trailing path is harmless.

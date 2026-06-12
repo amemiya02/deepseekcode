@@ -990,13 +990,13 @@ func (a *App) renderOverlay() string {
 		footerText = "j/k move · esc back · q quit"
 	case modeModels:
 		body = renderModelsPicker(a.theme, a.overlay.Models(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.model, a.width, h)
-		footerText = "j/k move · ⏎ switch · esc back · q quit"
+		footerText = "↑/↓ move · ⏎ switch · esc close"
 	case modeSessions:
 		body = renderSessionsPicker(a.theme, a.overlay.SessionsRows(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.session.id, a.width, h)
-		footerText = "j/k move · ⏎ switch · esc back · q quit"
+		footerText = "↑/↓ move · ⏎ switch · esc close"
 	case modePalette:
 		body = renderPalette(a.theme, a.overlay.Palette(), a.overlay.VisibleRows(), a.overlay.FilterCursor(), a.overlay.FilterString(), a.width, h)
-		footerText = "j/k move · ⏎ run · esc back · q quit"
+		footerText = "↑/↓ move · ⏎ run · esc close"
 	case modeHelp:
 		body = renderHelp(a.theme, a.helpCommandRows(), a.overlay.HelpTab(), a.overlay.Cursor(), a.width, h)
 		footerText = "tab/←→/hl switch · j/k scroll · esc close"
@@ -1710,7 +1710,7 @@ func (a *App) handleSlash(line string) tea.Cmd {
 			}
 			return a.applyModelSwitch(fields[1], prov)
 		}
-		a.overlay.OpenModels(a.model)
+		a.openModelsPicker()
 	case "/effort":
 		if len(fields) < 2 {
 			// Open the effort picker overlay.
@@ -2444,6 +2444,64 @@ func (a *App) yankLastAssistant() tea.Cmd {
 	}
 	toastCmd := a.toast(BadgeOk, fmt.Sprintf("yanked %d bytes to clipboard (OSC 52)", len(text)))
 	return tea.Batch(yankToClipboardCmd(text), toastCmd)
+}
+
+// openModelsPicker opens the /models overlay from the cross-provider Registry
+// when one is wired: rows span every configured provider, legacy DeepSeek
+// aliases are already filtered out by the registry catalog, and providers with
+// no resolvable key render greyed. Falls back to the offline DeepSeek-only seed
+// (availableModels) when no registry is present or discovery yields nothing.
+func (a *App) openModelsPicker() {
+	if a.reg != nil {
+		// Bound the discovery call: List may live-fetch a cold provider's
+		// /models endpoint, and we must not freeze the TUI while the picker
+		// opens. A provider that can't answer in time falls back to its
+		// default_model row inside List; the cache makes later opens instant.
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+		if infos, err := a.reg.List(ctx); err == nil && len(infos) > 0 {
+			rows := make([]modelOption, 0, len(infos))
+			for _, m := range infos {
+				rows = append(rows, modelOption{
+					ID:        m.ID,
+					Short:     shortModel(m.ID),
+					Note:      modelPickerNote(m),
+					Provider:  m.Provider,
+					Available: m.Available,
+				})
+			}
+			a.overlay.OpenModelsRows(a.model, rows)
+			return
+		}
+	}
+	a.overlay.OpenModels(a.model)
+}
+
+// modelPickerNote builds the dim trailing hint for one /models row. Cache- and
+// price-bearing notes are reserved for DeepSeek models (the only provider with
+// a published pricing table and prefix cache); every other provider shows only
+// its context window, so the picker never advertises ¥/cache figures it cannot
+// honor. Unavailable providers surface the registry's "no API key" hint.
+func modelPickerNote(m modelreg.ModelInfo) string {
+	if !m.Available {
+		if m.Note != "" {
+			return m.Note
+		}
+		return "no API key"
+	}
+	switch m.ID {
+	case "deepseek-v4-flash":
+		return "1M ctx · ¥1/¥0.02 in · ¥2 out · default"
+	case "deepseek-v4-pro":
+		return "1M ctx · ¥3/¥0.025 in · ¥6 out · stronger"
+	}
+	if m.Note != "" {
+		return m.Note
+	}
+	if m.Caps.MaxContextTokens > 0 {
+		return humanTokens(m.Caps.MaxContextTokens) + " ctx"
+	}
+	return ""
 }
 
 // applyModelSwitch updates the live model used for the next turn and

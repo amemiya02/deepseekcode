@@ -496,7 +496,7 @@ function AppInner() {
   const workspaceZone = (
     <div data-testid="zone-workspace" className={styles.workspaceZone}>
       <ReviewPanel refreshKey={workspaceRefreshKey} />
-      <TelemetryStrip sessionId={sessionId ?? undefined} />
+      <TelemetryStrip sessionId={sessionId ?? undefined} model={model} />
     </div>
   )
 
@@ -514,7 +514,7 @@ function AppInner() {
               <AppShell sessions={sessionsZone} conversation={conversation} workspace={workspaceZone} workspaceHasContent={hasChanges} />
             </div>
             <div data-testid="hero-statusbar">
-              <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} />
+              <StatusBarLive sessionId={sessionId ?? undefined} status={streaming ? 'streaming' : 'idle'} model={model} />
             </div>
           </div>
         )}

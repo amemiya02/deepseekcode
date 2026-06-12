@@ -11,19 +11,23 @@ import (
 	"github.com/amemiya02/deepseekcode/internal/permissions"
 )
 
-// TestAvailableModelsIncludesChatAndReasoner pins the specific fix: the
-// /models picker (which is ALSO the applyModelSwitch allowlist) must offer
-// deepseek-chat and deepseek-reasoner, not just the v4 flash/pro pair.
-// Before the fix, `/models deepseek-chat` was rejected as "unknown model".
-func TestAvailableModelsIncludesChatAndReasoner(t *testing.T) {
-	want := []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"}
+// TestAvailableModelsExcludesLegacyAliases pins the picker policy: the retiring
+// legacy aliases (deepseek-chat / deepseek-reasoner) must NOT appear as picker
+// rows — only the official V4 flash/pro pair is offered. The aliases stay
+// accepted on an explicit switch via the registry, just not listed.
+func TestAvailableModelsExcludesLegacyAliases(t *testing.T) {
 	have := map[string]bool{}
 	for _, m := range availableModels() {
 		have[m.ID] = true
 	}
-	for _, id := range want {
+	for _, id := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
 		if !have[id] {
 			t.Errorf("availableModels() is missing %q — it must be selectable in /models", id)
+		}
+	}
+	for _, id := range []string{"deepseek-chat", "deepseek-reasoner"} {
+		if have[id] {
+			t.Errorf("availableModels() must not list legacy alias %q in the picker", id)
 		}
 	}
 }

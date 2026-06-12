@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amemiya02/deepseekcode/internal/config"
+	"github.com/amemiya02/deepseekcode/internal/llm"
 	"github.com/amemiya02/deepseekcode/internal/onboarding"
 	"github.com/amemiya02/deepseekcode/internal/sandbox"
 )
@@ -127,7 +128,7 @@ func CheckCacheFieldsInProbe(ctx context.Context, cfg config.Config, hc *http.Cl
 		baseURL = cfg.API.BaseURL
 	}
 
-	endpoint := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	endpoint := llm.ChatCompletionsEndpoint(baseURL)
 	body, _ := json.Marshal(map[string]any{
 		"model":      "deepseek-v4-flash",
 		"max_tokens": 1,

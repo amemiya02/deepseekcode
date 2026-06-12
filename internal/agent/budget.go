@@ -7,6 +7,14 @@ type BudgetPolicy struct {
 	HardCNY float64 // block turn when projected spend >= HardCNY
 }
 
+// Active reports whether any cost gate is configured. When neither threshold is
+// set there is nothing to cost-gate, so warnings about an unpriceable model
+// (e.g. an openai-compat provider with no pricing table) are pure noise and
+// must be suppressed.
+func (p BudgetPolicy) Active() bool {
+	return p.WarnCNY > 0 || p.HardCNY > 0
+}
+
 // BudgetState tracks cumulative spend and whether a warning has already
 // been emitted for this session.
 type BudgetState struct {
